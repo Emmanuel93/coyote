@@ -252,13 +252,13 @@ func (h *Hard) Error() string { return h.Reason }
 
 func hard(format string, a ...any) *Hard { return &Hard{fmt.Sprintf(format, a...)} }
 
-// coyoteAdmin reconoce a coyote aprobando, revocando, instalando el gate o
-// tocando credenciales cuando está en posición de comando (al inicio o después
+// coyoteAdmin reconoce a coyote aprobando, revocando, instalando el gate,
+// tocando credenciales o lanzando otro agente cuando está en posición de comando (al inicio o después
 // de ;, &&, ||, |, paréntesis o un envoltorio como sudo, env o go run), lo
 // corra quien lo corra. Un mensaje de commit que solo lo menciona no cuenta.
 var coyoteAdmin = regexp.MustCompile(`(?i)(^|[;&|(\n` + "`" + `]|\$\()\s*([A-Za-z_][A-Za-z0-9_]*=\S*\s+)*` +
 	`((sudo|exec|env|nohup|time|command|xargs|nice|go\s+run)(\s+-\S+)*\s+)*` +
-	`(\S*/)?coyote(\s+-C\s+\S+)*\s+(approve|reject|revoke|auth|hooks|install)\b`)
+	`(\S*/)?coyote(\s+-C\s+\S+)*\s+(approve|reject|revoke|auth|hooks|install|run)\b`)
 
 // shellProtected son textos que en un comando delatan que toca el gate o
 // credenciales, aunque el comando no se pueda analizar.
@@ -290,7 +290,7 @@ func (ps Paths) hardShell(a Action) *Hard {
 	// Si el comando se analiza como de solo lectura, coyote solo aparece en
 	// subcomandos de lectura (install --check, por ejemplo).
 	if _, err := analyzeShell(cmd); err != nil && coyoteAdmin.MatchString(cmd) {
-		return hard("un agente no aprueba, rechaza ni revoca, ni instala el gate o credenciales; eso lo hace la persona en su terminal")
+		return hard("un agente no aprueba, rechaza ni revoca, no instala el gate ni credenciales y no lanza otros agentes (coyote run); eso lo hace la persona en su terminal")
 	}
 	for _, p := range shellProtected {
 		if p.re.MatchString(cmd) {

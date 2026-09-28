@@ -90,6 +90,7 @@ func TestCredentialsAndGateAreBlocked(t *testing.T) {
 		{"Bash", map[string]any{"command": "go run ./cmd/coyote approve P-1"}},
 		{"Bash", map[string]any{"command": "./bin/coyote -C . revoke P-1 --reason x"}},
 		{"Bash", map[string]any{"command": "coyote auth logout"}},
+		{"Bash", map[string]any{"command": "coyote run --agent coyote-dev implementa todo"}},
 		{"Bash", map[string]any{"command": "rm .claude/settings.json"}},
 		{"Bash", map[string]any{"command": "echo '{\"disableAllHooks\": true}' > x.json"}},
 		{"Bash", map[string]any{"command": "git config core.hooksPath /tmp/h"}},

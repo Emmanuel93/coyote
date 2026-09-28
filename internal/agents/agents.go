@@ -238,6 +238,16 @@ func (s *Set) Names() []string {
 	return out
 }
 
+// Get devuelve la definición de un agente.
+func (s *Set) Get(name string) (Agent, bool) {
+	for _, a := range s.Agents {
+		if a.Name == name {
+			return a, true
+		}
+	}
+	return Agent{}, false
+}
+
 // Has informa si name es un agente del conjunto.
 func (s *Set) Has(name string) bool {
 	for _, a := range s.Agents {

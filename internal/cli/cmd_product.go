@@ -619,13 +619,36 @@ func cmdImpact(a *app, args []string) error {
 	if err != nil {
 		return err
 	}
-	sources, noPath, err := productSources(root, cfg, nil)
+	im, m, err := a.productImpact(root, cfg, q, *fresh)
 	if err != nil {
 		return err
 	}
+	switch *format {
+	case "json":
+		if err := writeJSON(a, impactJSON(im, m)); err != nil {
+			return err
+		}
+	case "md":
+		fmt.Fprint(a.stdout, impactMarkdown(im, m, len(m.SHAs)))
+	default:
+		fmt.Fprint(a.stdout, impactText(im, m, len(m.SHAs)))
+	}
+	if *record {
+		return a.recordImpact(root, cfg, im, *ws, *agent)
+	}
+	return nil
+}
+
+// productImpact cruza un cambio contra el mapa del producto: el guardado en
+// coyote/map/ o, sin él o con fresh, el que sale de leer los repos.
+func (a *app) productImpact(root string, cfg *project.Config, q product.Query, fresh bool) (*product.Impact, *product.Map, error) {
+	sources, noPath, err := productSources(root, cfg, nil)
+	if err != nil {
+		return nil, nil, err
+	}
 	stored, err := loadStoredMap(root)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 	src := product.Sources{}
 	for _, s := range sources {
@@ -633,13 +656,13 @@ func cmdImpact(a *app, args []string) error {
 	}
 	var m *product.Map
 	var notes []string
-	if *fresh || len(stored.entries) == 0 {
+	if fresh || len(stored.entries) == 0 {
 		if len(sources) == 0 {
-			return fail(1, "no hay mapa guardado ni repos con copia local: corre coyote map")
+			return nil, nil, fail(1, "no hay mapa guardado ni repos con copia local: corre coyote map")
 		}
 		scans, err := a.scanAll(sources)
 		if err != nil {
-			return err
+			return nil, nil, err
 		}
 		m, notes = productMap(scans, stored, noPath)
 		if len(stored.entries) == 0 {
@@ -648,8 +671,13 @@ func cmdImpact(a *app, args []string) error {
 	} else {
 		var entries []product.Entry
 		shas := map[string]string{}
-		for r, e := range stored.entries {
-			entries = append(entries, e...)
+		repos := make([]string, 0, len(stored.entries))
+		for r := range stored.entries {
+			repos = append(repos, r)
+		}
+		sort.Strings(repos)
+		for _, r := range repos {
+			entries = append(entries, stored.entries[r]...)
 			shas[r] = stored.shas[r]
 		}
 		m = product.Load(shas, entries)
@@ -665,23 +693,10 @@ func cmdImpact(a *app, args []string) error {
 	}
 	im, err := m.Impact(q, src)
 	if err != nil {
-		return fail(1, "%v", err)
+		return nil, nil, fail(1, "%v", err)
 	}
 	im.Notes = append(notes, im.Notes...)
-	switch *format {
-	case "json":
-		if err := writeJSON(a, impactJSON(im, m)); err != nil {
-			return err
-		}
-	case "md":
-		fmt.Fprint(a.stdout, impactMarkdown(im, m, len(m.SHAs)))
-	default:
-		fmt.Fprint(a.stdout, impactText(im, m, len(m.SHAs)))
-	}
-	if *record {
-		return a.recordImpact(root, cfg, im, *ws, *agent)
-	}
-	return nil
+	return im, m, nil
 }
 
 // impactQuery interpreta la consulta: un endpoint (con o sin verbo), un

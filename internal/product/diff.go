@@ -360,7 +360,7 @@ func (m *Map) touchByFiles(rd *reader, repo, dir, rev string, changes map[string
 		}
 		if len(idx) == 0 && haveText && codeExt[strings.ToLower(filepath.Ext(f))] && !isTestPath(f) {
 			for _, mt := range typeDeclRe.FindAllStringSubmatch(strings.Join(ls, "\n"), -1) {
-				// Un tipo es un nombre con minúsculas: SPEI o M son constantes o genéricos.
+				// Un tipo es un nombre con minúsculas: URL o T son constantes o genéricos.
 				if len(mt[1]) >= 3 && strings.ToUpper(mt[1]) != mt[1] {
 					changedTypes = append(changedTypes, mt[1])
 				}
