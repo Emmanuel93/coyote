@@ -52,7 +52,9 @@ var hunkRe = regexp.MustCompile(`^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@`)
 var whole = lineRange{1, 1 << 30}
 
 // changedLines devuelve los rangos cambiados por archivo. Sin rango de git,
-// cada archivo cuenta completo.
+// cada archivo cuenta completo. Usa los comandos de plomería de git
+// (diff-tree y diff-index), que nunca escriben el índice: git diff lo
+// refresca y lo reescribe aunque solo se le pida leer.
 func changedLines(dir, diff string, files []string) (*fileChanges, error) {
 	ch := &fileChanges{old: map[string][]lineRange{}, new: map[string][]lineRange{}}
 	if diff == "" {
@@ -66,7 +68,19 @@ func changedLines(dir, diff string, files []string) (*fileChanges, error) {
 	if strings.HasPrefix(diff, "-") {
 		return nil, fmt.Errorf("rango de git inválido %q", diff)
 	}
-	cmd := gitRead(dir, "-c", "core.quotePath=false", "diff", "--no-color", "--no-ext-diff", "--no-textconv", "--no-renames", "--unified=0", diff, "--")
+	left, right, worktree := diffSides(dir, diff)
+	if left == "" || (!worktree && right == "") {
+		return nil, fmt.Errorf("git: no reconozco el rango %q", diff)
+	}
+	opts := []string{"-c", "core.quotePath=false"}
+	flags := []string{"-p", "--no-color", "--no-ext-diff", "--no-textconv", "--no-renames", "--unified=0"}
+	var args []string
+	if worktree {
+		args = append(append(append(opts, "diff-index"), flags...), left, "--")
+	} else {
+		args = append(append(append(opts, "diff-tree", "-r"), flags...), left, right, "--")
+	}
+	cmd := gitRead(dir, args...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Run(); err != nil {
@@ -104,7 +118,22 @@ func changedLines(dir, diff string, files []string) (*fileChanges, error) {
 			}
 		}
 	}
-	return ch, sc.Err()
+	if err := sc.Err(); err != nil {
+		return nil, err
+	}
+	if worktree {
+		// Contra el árbol de trabajo, lo nuevo que git aún no sigue también es
+		// parte del cambio: entra completo.
+		out, err := gitRead(dir, "ls-files", "-z", "--others", "--exclude-standard").Output()
+		if err == nil {
+			for _, f := range strings.Split(string(out), "\x00") {
+				if f != "" {
+					ch.new[f] = []lineRange{whole}
+				}
+			}
+		}
+	}
+	return ch, nil
 }
 
 // hunkRange convierte "inicio,cuenta" en un rango; una cuenta de cero es un

@@ -1,6 +1,7 @@
 package product
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
@@ -8,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Emmanuel93/coyote/internal/ccfdoc"
 )
@@ -485,8 +487,8 @@ func TestProposals(t *testing.T) {
 func TestPropositoEnProsa(t *testing.T) {
 	cases := map[string]string{
 		"# App\n\n1. Visión General 2. Arquitectura - 2.0 Microfrontends\n\nApp móvil del producto. Tiene más detalle después.\n": "App móvil del producto.",
-		"# Lib\n\n- uno\n- dos\n\n> nota\n\nThis library was generated with Nx.\n\nCliente HTTP del backoffice.\n":             "Cliente HTTP del backoffice.",
-		"# X\n\n" + strings.Repeat("palabra ", 40) + "\n": strings.TrimSpace(strings.Repeat("palabra ", 29)) + " …",
+		"# Lib\n\n- uno\n- dos\n\n> nota\n\nThis library was generated with Nx.\n\nCliente HTTP del backoffice.\n":                "Cliente HTTP del backoffice.",
+		"# X\n\n" + strings.Repeat("palabra ", 40) + "\n":                                                                         strings.TrimSpace(strings.Repeat("palabra ", 29)) + " …",
 	}
 	for readme, want := range cases {
 		if got := purpose(readme); got != want {
@@ -1036,5 +1038,48 @@ func TestLectorEnLote(t *testing.T) {
 	}
 	if n := len(rd.moduleFiles(dir, "sub")); n != 1 {
 		t.Errorf("archivos del módulo sub: %d", n)
+	}
+}
+
+// Leer un repo del producto nunca lo modifica: ni el índice de git ni la
+// carpeta .git, aunque git quiera refrescar el índice.
+func TestLeerNoEscribeElRepo(t *testing.T) {
+	scans, m, src := buildScans(t)
+	_ = scans
+	svc := src["servicios"]
+	// Un archivo con la fecha cambiada y el mismo contenido: git status
+	// querría refrescar el índice.
+	ctrl := filepath.Join(svc, "services/pedidos-service/src/main/java/demo/pedidos/PedidosController.java")
+	later := time.Now().Add(2 * time.Second)
+	if err := os.Chtimes(ctrl, later, later); err != nil {
+		t.Fatal(err)
+	}
+	put(t, svc, "services/pedidos-service/src/main/java/demo/pedidos/Nuevo.java", "class Nuevo {}\n")
+	stamp := func() (time.Time, time.Time, []byte) {
+		gi, err := os.Stat(filepath.Join(svc, ".git"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		ii, err := os.Stat(filepath.Join(svc, ".git", "index"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		data, _ := os.ReadFile(filepath.Join(svc, ".git", "index"))
+		return gi.ModTime(), ii.ModTime(), data
+	}
+	g0, i0, d0 := stamp()
+	time.Sleep(20 * time.Millisecond)
+	if _, err := Extract(Source{Name: "servicios", Dir: svc}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Impact(Query{Repo: "servicios", Diff: "HEAD"}, src); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Impact(Query{Repo: "servicios", Diff: "HEAD~0..HEAD"}, src); err != nil {
+		t.Fatal(err)
+	}
+	g1, i1, d1 := stamp()
+	if !g0.Equal(g1) || !i0.Equal(i1) || !bytes.Equal(d0, d1) {
+		t.Errorf("leer el repo lo modificó: .git %v→%v, índice %v→%v", g0, g1, i0, i1)
 	}
 }

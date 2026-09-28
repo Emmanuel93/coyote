@@ -73,3 +73,4 @@
 2026-09-28T18:26Z|@eramirezhdez/coyote-dev|W-0004|coyote|perf|product|lecturas de git en lote y tipos cambiados solo del código|-|-|-|ok
 2026-09-28T18:28Z|@eramirezhdez/coyote-dev|W-0004|coyote|fix|product|propósito en prosa, descripciones por oración y dependencias de cada módulo|-|-|-|ok
 2026-09-28T18:29Z|@eramirezhdez/coyote-dev|W-0004|coyote|fix|product|concordancia en las invariantes de dependencia|-|-|-|ok
+2026-09-28T19:17Z|@eramirezhdez/coyote-dev|W-0004|coyote|fix|product|diff con diff-tree y diff-index para no reescribir el índice de los…|-|-|-|ok
