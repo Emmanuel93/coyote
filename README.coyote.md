@@ -11,15 +11,14 @@ purpose|CLI en Go para contexto versionado, gates humanos, estándar por capas y
 run|make build && ./bin/coyote help
 test|make check
 build|make build
-entry|cmd/coyote/main.go|arranque de la CLI; delega en internal/cli
-mod|cli|comandos, flags y salida para personas|internal/cli|Main
-mod|ccf|formato del ledger: parseo, validación y serialización|internal/ccf|Line
-mod|ccfdoc|README.coyote.md y CONTEXT.coyote.md: gramática y topes|internal/ccfdoc|Doc
-mod|ledger|archivos append-only por día y persona|internal/ledger|Ledger
-mod|standards|estándar por capas, overrides y checks del lint|internal/standards|Load, Lint
-mod|attribution|detecta y quita atribución a IA|internal/attribution|Config
-mod|project|project.yaml, coyote init, repos del proyecto y hook commit-msg|internal/project|Init, AddRepo
-mod|index|índice local, búsqueda BM25 y paquetes de contexto|internal/index|Build, Search, Pack
-docs|docs/specs|especificaciones CCF, CCF-doc, estándar y atribución
-docs|docs/plan/EXECUTION_PLAN.md|plan de ejecución razonado por release y gates
-dep|go-yaml|YAML del estándar y frontmatter; copia en third_party
+entry|cmd/coyote/main.go|arranque; delega en internal/cli
+mod|cli|comandos y salida|internal/cli|Main
+mod|formatos|ledger CCF y documentos CCF-doc|internal/ccf, internal/ccfdoc, internal/ledger|Line, Doc
+mod|standards|estándar por capas y lint|internal/standards|Load, Lint
+mod|attribution|atribución a IA e identidades de bots|internal/attribution|Config
+mod|project|init, repos y hook commit-msg|internal/project|Init, AddRepo
+mod|index|índice, BM25 y paquetes de contexto|internal/index|Build, Search, Pack
+mod|remoto|ritmo humano, token y API de GitHub|internal/pace, internal/auth, internal/github|Limiter, Token
+docs|docs/specs|especificaciones
+docs|docs/plan/EXECUTION_PLAN.md|plan razonado por release
+dep|go-yaml|YAML; copia en third_party

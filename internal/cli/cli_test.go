@@ -2,11 +2,17 @@ package cli
 
 import (
 	"bytes"
+	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/Emmanuel93/coyote/internal/auth"
 )
 
 // Las marcas de atribución se arman por partes para que este archivo no las contenga literales.
@@ -582,4 +588,127 @@ func TestContextoDeOtroRepo(t *testing.T) {
 		t.Errorf("repo list sin estado:\n%s", r.stdout)
 	}
 	must(t, run(t, root, "", "ask", "cobro idempotente", "--repo", "pagos"), 0, "ask a otro repo")
+}
+
+func noPace(t *testing.T) {
+	t.Helper()
+	old := paceSleep
+	paceSleep = func(time.Duration) {}
+	t.Cleanup(func() { paceSleep = old })
+	t.Setenv("COYOTE_STATE_DIR", t.TempDir())
+}
+
+func TestPushPull(t *testing.T) {
+	base := setup(t)
+	noPace(t)
+	bare := filepath.Join(base, "equipo.git")
+	git(t, base, "init", "-q", "--bare", "-b", "main", bare)
+	ana := filepath.Join(base, "equipo")
+	must(t, run(t, base, "", "init", "equipo", "--type", "backend", "--purpose", "servicio del equipo"), 0, "init")
+	git(t, ana, "add", "-A")
+	must(t, run(t, ana, "", "commit", "-m", "chore: adopta coyote"), 0, "primer commit")
+	git(t, ana, "remote", "add", "origin", "file://"+bare)
+	r := run(t, ana, "", "push", "--dry-run")
+	must(t, r, 0, "push --dry-run")
+	if _, err := exec.Command("git", "-C", bare, "rev-parse", "--verify", "-q", "refs/heads/main").Output(); err == nil {
+		t.Fatal("--dry-run publicó")
+	}
+	must(t, run(t, ana, "", "push"), 0, "push")
+	if out := git(t, bare, "log", "--format=%an", "-1", "main"); strings.TrimSpace(out) != "Ana Pérez" {
+		t.Fatalf("el remoto no tiene el commit de Ana: %q", out)
+	}
+	if !strings.Contains(ledgerText(t, ana), "|sync|-|push de 1 commits a origin/main|sha:") {
+		t.Errorf("push no quedó en el ledger:\n%s", ledgerText(t, ana))
+	}
+	must(t, run(t, ana, "", "push"), 0, "push sin nada nuevo")
+
+	// Un agente no publica en main.
+	must(t, run(t, ana, "", "note", "los cobros son idempotentes", "--type", "inv", "--scope", "cobros"), 0, "note")
+	git(t, ana, "add", "-A")
+	must(t, run(t, ana, "", "commit", "-m", "docs(cobros): invariante de idempotencia"), 0, "commit")
+	must(t, run(t, ana, "", "push", "--agent", "coyote-dev"), 1, "agente en main")
+
+	// Luis clona y trae lo nuevo de Ana.
+	luis := filepath.Join(base, "luis")
+	git(t, base, "clone", "-q", "file://"+bare, luis)
+	git(t, luis, "config", "user.name", "Luis Gómez")
+	git(t, luis, "config", "user.email", "luis@example.com")
+	must(t, run(t, ana, "", "push"), 0, "push de Ana")
+	t.Setenv("COYOTE_USER", "luis")
+	r = run(t, luis, "", "pull")
+	must(t, r, 0, "pull")
+	if !strings.Contains(r.stdout, "commits nuevos de Ana Pérez") || !strings.Contains(r.stdout, "eventos nuevos en el ledger") ||
+		!strings.Contains(r.stdout, "CONTEXT.coyote.md") {
+		t.Errorf("resumen de pull inesperado:\n%s", r.stdout)
+	}
+	if !strings.Contains(ledgerText(t, luis), "|@luis|-|equipo|sync|-|pull de") {
+		t.Errorf("pull no quedó en el ledger de Luis")
+	}
+	must(t, run(t, luis, "", "pull"), 0, "pull sin cambios")
+
+	// Commits hechos a mano que saltan los hooks no salen: atribución y formato.
+	t.Setenv("COYOTE_USER", "ana")
+	if err := os.WriteFile(filepath.Join(ana, "x.txt"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, ana, "add", "x.txt")
+	git(t, ana, "commit", "-q", "--no-verify", "-m", "feat: x", "-m", aiTrailer)
+	must(t, run(t, ana, "", "push"), 1, "push con atribución")
+	git(t, ana, "reset", "-q", "--soft", "HEAD~1")
+	git(t, ana, "commit", "-q", "--no-verify", "-m", "cambios varios")
+	must(t, run(t, ana, "", "push"), 1, "push fuera de formato")
+}
+
+func TestAuthStatusYLogin(t *testing.T) {
+	setup(t)
+	noPace(t)
+	dir := t.TempDir()
+	tok := "gho_0123456789abcdefghijklmnop"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer "+tok {
+			w.WriteHeader(http.StatusUnauthorized)
+			w.Write([]byte(`{"message":"Bad credentials"}`))
+			return
+		}
+		w.Header().Set("X-OAuth-Scopes", "repo")
+		w.Write([]byte(`{"login":"ana"}`))
+	}))
+	defer srv.Close()
+	t.Setenv("COYOTE_GITHUB_API", srv.URL)
+	for _, e := range []string{"COYOTE_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"} {
+		t.Setenv(e, "")
+	}
+	oldRun, oldLook := auth.Runner, auth.LookPath
+	defer func() { auth.Runner, auth.LookPath = oldRun, oldLook }()
+	var calls []string
+	stored := ""
+	auth.LookPath = func(name string) (string, error) {
+		if name == "gh" {
+			return "", errors.New("no")
+		}
+		return "/usr/bin/" + name, nil
+	}
+	auth.Runner = func(name string, args []string, stdin string) (string, error) {
+		calls = append(calls, name+" "+strings.Join(args, " "))
+		if len(args) > 0 && (args[0] == "store" || args[0] == "-i") {
+			stored = stdin
+			return "", nil
+		}
+		if stored != "" && (args[0] == "lookup" || args[0] == "find-generic-password") {
+			return tok, nil
+		}
+		return "", errors.New("not found")
+	}
+	must(t, run(t, dir, "", "auth", "status"), 1, "sin token")
+	must(t, run(t, dir, "no es token\n", "auth", "login", "--with-token"), 1, "token inválido")
+	must(t, run(t, dir, tok+"\n", "auth", "login", "--with-token"), 0, "login")
+	if !strings.Contains(stored, tok) || strings.Contains(strings.Join(calls, " "), tok) {
+		t.Fatalf("el token debe ir por la entrada estándar del llavero, no en argumentos: %v", calls)
+	}
+	r := run(t, dir, "", "auth", "status", "--check")
+	must(t, r, 0, "status --check")
+	if !strings.Contains(r.stdout, "gho_…mnop") || !strings.Contains(r.stdout, "@ana") || strings.Contains(r.stdout, tok) {
+		t.Fatalf("status inesperado o con el token completo:\n%s", r.stdout)
+	}
+	must(t, run(t, dir, "", "auth", "login", "--device"), 1, "device flow sin client ID")
 }

@@ -8,18 +8,17 @@ CLI en Go para contexto versionado, gates humanos, estándar por capas y costo t
 - Correr: `make build && ./bin/coyote help`
 - Probar: `make check`
 - Construir: `make build`
-- Entrada `cmd/coyote/main.go`: arranque de la CLI; delega en internal/cli
-- Módulo cli (`internal/cli`): comandos, flags y salida para personas; interfaz Main
-- Módulo ccf (`internal/ccf`): formato del ledger: parseo, validación y serialización; interfaz Line
-- Módulo ccfdoc (`internal/ccfdoc`): README.coyote.md y CONTEXT.coyote.md: gramática y topes; interfaz Doc
-- Módulo ledger (`internal/ledger`): archivos append-only por día y persona; interfaz Ledger
-- Módulo standards (`internal/standards`): estándar por capas, overrides y checks del lint; interfaz Load, Lint
-- Módulo attribution (`internal/attribution`): detecta y quita atribución a IA; interfaz Config
-- Módulo project (`internal/project`): project.yaml, coyote init, repos del proyecto y hook commit-msg; interfaz Init, AddRepo
-- Módulo index (`internal/index`): índice local, búsqueda BM25 y paquetes de contexto; interfaz Build, Search, Pack
-- Docs `docs/specs`: especificaciones CCF, CCF-doc, estándar y atribución
-- Docs `docs/plan/EXECUTION_PLAN.md`: plan de ejecución razonado por release y gates
-- Depende de go-yaml: YAML del estándar y frontmatter; copia en third_party
+- Entrada `cmd/coyote/main.go`: arranque; delega en internal/cli
+- Módulo cli (`internal/cli`): comandos y salida; interfaz Main
+- Módulo formatos (`internal/ccf, internal/ccfdoc, internal/ledger`): ledger CCF y documentos CCF-doc; interfaz Line, Doc
+- Módulo standards (`internal/standards`): estándar por capas y lint; interfaz Load, Lint
+- Módulo attribution (`internal/attribution`): atribución a IA e identidades de bots; interfaz Config
+- Módulo project (`internal/project`): init, repos y hook commit-msg; interfaz Init, AddRepo
+- Módulo index (`internal/index`): índice, BM25 y paquetes de contexto; interfaz Build, Search, Pack
+- Módulo remoto (`internal/pace, internal/auth, internal/github`): ritmo humano, token y API de GitHub; interfaz Limiter, Token
+- Docs `docs/specs`: especificaciones
+- Docs `docs/plan/EXECUTION_PLAN.md`: plan razonado por release
+- Depende de go-yaml: YAML; copia en third_party
 
 ## Contexto vivo
 
@@ -37,6 +36,7 @@ CLI en Go para contexto versionado, gates humanos, estándar por capas y costo t
 - [risk] tokens: el estimador local de tokens puede desviarse del conteo real; v0.2 lo contrasta con count_tokens (ADR-0006)
 - [todo] remote: push, pull y get context con OAuth device flow y cuotas a ritmo humano llegan en v0.2 (docs/plan/EXECUTION_PLAN.md)
 - [inv] index: el índice se reconstruye desde git; .coyote/ es caché y nunca se versiona (ADR-0007)
+- [inv] sync: push y pull usan el git del sistema; coyote nunca guarda credenciales de git (ADR-0008)
 
 ## Reglas obligatorias (MUST)
 

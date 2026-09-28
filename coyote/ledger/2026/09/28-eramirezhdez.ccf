@@ -34,3 +34,5 @@
 2026-09-28T05:23Z|@eramirezhdez/coyote-sr-solution-architect|W-0002|coyote|doc|plan|razonamiento de v0.2 y ADR-0007, ADR-0008|-|-|-|ok
 2026-09-28T05:29Z|@eramirezhdez/coyote-architect|W-0002|coyote|note|index|inv: el índice se reconstruye desde git; .coyote/ es caché y nunca…|doc:CONTEXT.coyote.md|-|-|ok
 2026-09-28T05:29Z|@eramirezhdez/coyote-dev|W-0002|coyote|feat|context|índice local, get context, ask y repos del proyecto|-|-|-|ok
+2026-09-28T05:35Z|@eramirezhdez/coyote-devsecops|W-0002|coyote|note|sync|inv: push y pull usan el git del sistema; coyote nunca guarda…|doc:CONTEXT.coyote.md|-|-|ok
+2026-09-28T05:35Z|@eramirezhdez/coyote-devsecops|W-0002|coyote|feat|sync|push y pull con gates, ritmo humano y credenciales en el llavero|-|-|-|ok
