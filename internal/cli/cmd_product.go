@@ -876,14 +876,14 @@ func impactMarkdown(im *product.Impact, m *product.Map, total int) string {
 			if h.Entry.Module == "." || h.Entry.Module == "" {
 				mod = "—"
 			}
-			fmt.Fprintf(&b, "| %s | %s | %s %s | %s | `%s:%d` |\n", mdCell(h.Entry.Repo), mdCell(mod),
-				h.Entry.Role, mdCell(h.Entry.Describe()), why, mdCell(h.Entry.File), h.Entry.Line)
+			fmt.Fprintf(&b, "| %s | %s | %s `%s` | %s | `%s:%d` |\n", mdCell(h.Entry.Repo), mdCell(mod),
+				h.Entry.Role, mdCode(h.Entry.Describe()), why, mdCode(h.Entry.File), h.Entry.Line)
 		}
 	}
 	if len(im.Unresolved) > 0 {
 		fmt.Fprintf(&b, "\n#### Sin resolver en los módulos afectados (%d)\n\n", len(im.Unresolved))
 		for _, e := range im.Unresolved {
-			fmt.Fprintf(&b, "- %s · %s: %s %s (`%s:%d`)\n", mdCell(e.Repo), mdCell(product.ModuleName(e.Module)), e.Role, mdCell(e.Raw), mdCell(e.File), e.Line)
+			fmt.Fprintf(&b, "- %s · %s: %s `%s` (`%s:%d`)\n", mdCell(e.Repo), mdCell(product.ModuleName(e.Module)), e.Role, mdCode(e.Raw), mdCode(e.File), e.Line)
 		}
 	}
 	if len(im.Notes) > 0 {
@@ -895,8 +895,16 @@ func impactMarkdown(im *product.Impact, m *product.Map, total int) string {
 	return b.String()
 }
 
-// mdCell deja un texto apto para una celda de tabla Markdown.
+// mdCell deja un texto apto para una celda de tabla Markdown. Lo que sale
+// del código de un PR (rutas, tópicos) no puede armar enlaces ni HTML en el
+// comentario: los corchetes y los ángulos se escapan.
 func mdCell(s string) string {
+	return strings.NewReplacer("|", "\\|", "\n", " ", "\r", " ", "`", "'", "[", "\\[", "]", "\\]", "<", "&lt;", ">", "&gt;").Replace(s)
+}
+
+// mdCode deja un texto apto para un bloque de código dentro de una celda:
+// ahí no se arman enlaces, pero un acento grave lo cerraría.
+func mdCode(s string) string {
 	return strings.NewReplacer("|", "\\|", "\n", " ", "\r", " ", "`", "'").Replace(s)
 }
 

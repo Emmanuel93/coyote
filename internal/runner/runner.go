@@ -254,10 +254,10 @@ func Run(ctx context.Context, r Request) (*Result, error) {
 	if err != nil {
 		return nil, ErrNotFound
 	}
-	// Ctrl-C, SIGTERM o SIGHUP detienen la corrida, no solo a coyote: Claude
+	// Ctrl-C, Ctrl-\, SIGTERM o SIGHUP detienen la corrida, no solo a coyote: Claude
 	// Code corre en su propio grupo de procesos y seguiría gastando. La
 	// corrida vuelve como interrumpida para que quede en el ledger.
-	sigCtx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
+	sigCtx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGQUIT)
 	defer stop()
 	ctx = sigCtx
 	if r.Timeout > 0 {

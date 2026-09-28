@@ -92,3 +92,6 @@ Para cerrar el círculo, conviene activar además "Require review from Code Owne
 - El mapa lee patrones, no compila: lo que no pudo leer aparece como tal en el reporte (docs/specs/product-v1.md).
 - GitHub responde igual cuando una persona no es de un equipo y cuando el token no ve el equipo. coyote distingue los dos casos consultando el equipo; si no lo ve, lo dice y esa aprobación no cuenta.
 - Una revisión descartada deja de contar; un comentario después de aprobar no quita la aprobación.
+- Con dueños por correo o equipos que el token no ve, un pedido de cambios de cualquier persona detiene el merge: coyote no puede descartar que sea dueña. Es a propósito, y se resuelve nombrando `@personas` o dando Members: read.
+- Un PR con 250 commits o más no deja saber quién los escribió (GitHub no los lista todos): ninguna aprobación cuenta.
+- Las rutas y los tópicos que salen del código del PR van como código en el comentario: no arman enlaces ni HTML.

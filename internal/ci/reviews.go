@@ -66,6 +66,7 @@ func CommitAuthors(ctx context.Context, c *github.Client, repo string, number in
 		return nil, fmt.Errorf("repo o PR inválido: %q #%d", repo, number)
 	}
 	seen := map[string]bool{}
+	total := 0
 	for page := 1; page <= 3; page++ { // GitHub lista hasta 250 commits de un PR
 		var list []struct {
 			Author *struct {
@@ -89,9 +90,14 @@ func CommitAuthors(ctx context.Context, c *github.Client, repo string, number in
 				}
 			}
 		}
+		total += len(list)
 		if len(list) < 100 {
 			break
 		}
+	}
+	// GitHub no lista más de 250: un PR así puede tener autores que no se ven.
+	if total >= 250 {
+		return nil, fmt.Errorf("el PR tiene 250 commits o más y GitHub no los lista todos: no se puede saber quién los escribió")
 	}
 	out := make([]string, 0, len(seen))
 	for u := range seen {

@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/Emmanuel93/coyote/internal/product"
 )
 
 // fakeGitHub simula los comentarios de un PR.
@@ -357,5 +359,22 @@ func TestGatePR(t *testing.T) {
 		if st := git(t, filepath.Join(base, d), "status", "--porcelain", "--ignored"); st != "" {
 			t.Errorf("%s cambió: %s", d, st)
 		}
+	}
+}
+
+// Lo que sale del código de un PR no arma enlaces ni HTML en el comentario.
+func TestComentarioSinInyeccion(t *testing.T) {
+	im := &product.Impact{Repos: []string{"svc"}, Touched: []product.Hit{{
+		Entry: product.Entry{Repo: "svc", Module: "pagos", Role: "expone", Method: "GET", Path: "/x/[clic](https://malo.example)/<img src=x>", File: "src/a`b|c.java", Line: 3},
+		Why:   "se elimina en [aquí](https://malo.example) <b>ya</b>"}}}
+	m := &product.Map{SHAs: map[string]string{"svc": "abc1234"}}
+	md := impactMarkdown(im, m, 1)
+	for _, bad := range []string{"[clic](", "[aquí](", "<img", "<b>", "a`b"} {
+		if strings.Contains(strings.ReplaceAll(md, "`GET /x/[clic](https://malo.example)/<img src=x>`", ""), bad) {
+			t.Errorf("el reporte deja pasar %q:\n%s", bad, md)
+		}
+	}
+	if !strings.Contains(md, "expone `GET /x/[clic](https://malo.example)/<img src=x>`") || !strings.Contains(md, `\[aquí\]`) || !strings.Contains(md, "&lt;b&gt;") {
+		t.Errorf("la ruta va como código y el texto escapado:\n%s", md)
 	}
 }

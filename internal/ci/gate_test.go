@@ -243,4 +243,21 @@ func TestRevisionesYEquipos(t *testing.T) {
 	if _, err := Reviews(context.Background(), c, "o/r?x", 5); err == nil {
 		t.Error("repo inválido")
 	}
+	// 250 commits o más: no se sabe quién escribió todo; no hay lista.
+	many := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		page := r.URL.Query().Get("page")
+		n := 100
+		if page == "3" {
+			n = 50
+		}
+		list := make([]map[string]any, n)
+		for i := range list {
+			list[i] = map[string]any{"author": map[string]string{"login": "dev" + page}}
+		}
+		_ = json.NewEncoder(w).Encode(list)
+	}))
+	defer many.Close()
+	if _, err := CommitAuthors(context.Background(), &github.Client{Base: many.URL, Token: "t"}, "o/r", 5); err == nil || !strings.Contains(err.Error(), "250 commits") {
+		t.Errorf("PR con 250 commits: %v", err)
+	}
 }
