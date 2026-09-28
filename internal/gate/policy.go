@@ -342,7 +342,7 @@ func (ps Paths) readShell(a Action) (ok bool, why string, cred bool) {
 	}
 	for _, s := range segs {
 		recursive := s.prog == "rg" || s.prog == "find" || s.prog == "tree" || s.prog == "du"
-		if s.prog == "grep" || s.prog == "egrep" || s.prog == "fgrep" || s.prog == "ls" {
+		if s.prog == "grep" || s.prog == "egrep" || s.prog == "fgrep" || s.prog == "ls" || s.prog == "diff" {
 			_, recursive = hasFlag(s.args, "-r", "-R", "--recursive", "--dereference-recursive")
 		}
 		if recursive {

@@ -151,7 +151,7 @@ func cmdApprovals(a *app, args []string) error {
 		w := table(a.stdout)
 		fmt.Fprintln(w, "ID\tPEDIDA\tPOR\tACCIÓN\tESTADO")
 		for _, p := range queue {
-			state := fmt.Sprintf("pendiente (%d intentos)", p.Attempts)
+			state := "pendiente (" + plural(p.Attempts, "intento", "intentos") + ")"
 			if p.Status == "rejected" {
 				state = "rechazada: " + shortText(p.RejectReason, 40)
 			}
@@ -220,7 +220,11 @@ func cmdReview(a *app, args []string) error {
 			fmt.Fprintln(a.stdout)
 		}
 		fmt.Fprintf(a.stdout, "%s · %s\n", p.ID, p.Object)
-		fmt.Fprintf(a.stdout, "  pedida por %s desde %s · %s · %d intentos\n", p.RequestedBy, p.IDE, ago(now, p.First), p.Attempts)
+		from := ""
+		if p.IDE != "" {
+			from = " desde " + p.IDE
+		}
+		fmt.Fprintf(a.stdout, "  pedida por %s%s · %s · %s\n", p.RequestedBy, from, ago(now, p.First), plural(p.Attempts, "intento", "intentos"))
 		if p.Reason != "" {
 			fmt.Fprintf(a.stdout, "  necesita aprobación: %s\n", p.Reason)
 		}
@@ -248,7 +252,7 @@ func (c *approvalCtx) detail(p approval.Proposal) string {
 		content, okContent := firstText(in, "content", "file_contents", "contents", "file_text")
 		switch {
 		case okOld && okNew:
-			return textDiff(oldS, newS, p.Path)
+			return textDiff(oldS+"\n", newS+"\n", p.Path)
 		case okContent:
 			current := ""
 			if p.Path != "" && !filepath.IsAbs(p.Path) {
@@ -533,4 +537,11 @@ func firstText(m map[string]any, keys ...string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return "1 " + one
+	}
+	return fmt.Sprintf("%d %s", n, many)
 }

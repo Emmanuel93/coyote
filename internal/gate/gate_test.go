@@ -63,7 +63,8 @@ func TestReadOnlyShell(t *testing.T) {
 		"coyote standards lint --scripts", "coyote install --ide cursor", "coyote install --check=false --ide cursor",
 		"go test -run X ./...", "go run .", "ls\nrm -rf x", "ls # comentario", "git worktree add x",
 		"coyote push", "xxd -r a b", "tree -o salida.txt", "date -s 2020-01-01", "file -C -m x",
-		"git reflog expire --all", "git remote add x y", "unterminated 'quote",
+		"git reflog expire --all", "git remote add x y", "unterminated 'quote", "rg --hostname-bin=./x foo",
+		"jq -n 'env'", "jq -n '$ENV.GITHUB_TOKEN'",
 	}
 	for _, c := range needs {
 		a := claude(t, "Bash", map[string]any{"command": c}, root)
@@ -106,6 +107,7 @@ func TestCredentialsAndGateAreBlocked(t *testing.T) {
 		{"Bash", map[string]any{"command": "grep -r password ~"}},
 		{"Bash", map[string]any{"command": "cd ~ && rg password"}},
 		{"Bash", map[string]any{"command": "cat ~/.*/*"}},
+		{"Bash", map[string]any{"command": "diff -r ~ /tmp/x"}},
 		{"mcp__shell__run", map[string]any{"command": "coyote approve P-9"}},
 		{"Delete", map[string]any{"target": filepath.Join(root, ".git", "HEAD")}},
 	}

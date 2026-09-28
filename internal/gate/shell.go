@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"path"
+	"regexp"
 	"strings"
 )
 
@@ -233,7 +234,7 @@ var readOnlyPrograms = map[string]argCheck{
 	"basename": nil, "dirname": nil, "realpath": nil, "readlink": nil, "echo": nil,
 	"printf": nil, "true": nil, "false": nil, "nl": nil, "cut": nil, "tr": nil,
 	"column": nil, "comm": nil, "cmp": nil, "diff": nil, "grep": nil, "egrep": nil,
-	"fgrep": nil, "jq": nil, "strings": nil, "od": nil, "sha256sum": nil, "sha1sum": nil,
+	"fgrep": nil, "jq": jqCheck, "strings": nil, "od": nil, "sha256sum": nil, "sha1sum": nil,
 	"md5sum": nil, "shasum": nil, "cksum": nil, "cd": nil, "sleep": nil,
 	"hostname": maxPositional(0),
 	"file":     denyFlags("-C", "--compile"),
@@ -241,13 +242,25 @@ var readOnlyPrograms = map[string]argCheck{
 	"sort":     denyFlags("-o", "--output", "--compress-program", "-T", "--temporary-directory"),
 	"uniq":     maxPositional(1),
 	"date":     denyFlags("-s", "--set"),
-	"rg":       denyFlags("--pre", "--pre-glob", "-z", "--search-zip"),
+	"rg":       denyFlags("--pre", "--pre-glob", "-z", "--search-zip", "--hostname-bin"),
 	"xxd":      both(denyFlags("-r", "-revert"), maxPositional(1)),
 	"find":     denyFlags("-exec", "-execdir", "-ok", "-okdir", "-delete", "-fprint", "-fprint0", "-fprintf", "-fls"),
 	"git":      gitCheck,
 	"go":       goCheck,
 	"coyote":   coyoteCheck,
 }
+
+// jqCheck impide que jq imprima variables de entorno, donde suele haber tokens.
+func jqCheck(args []word) error {
+	for _, a := range args {
+		if jqEnv.MatchString(a.s) {
+			return fmt.Errorf("lee variables de entorno")
+		}
+	}
+	return nil
+}
+
+var jqEnv = regexp.MustCompile(`\$ENV|\benv\b|\$__prog_args|input_filename`)
 
 func both(a, b argCheck) argCheck {
 	return func(args []word) error {
