@@ -1,0 +1,25 @@
+{
+  "id": "P-0004",
+  "gate": "G4",
+  "release": "v0.4.0",
+  "workstream": "W-0004",
+  "decision": "approved",
+  "approver": "@eramirezhdez",
+  "date": "2026-09-28",
+  "reviewed_commit": "b9ee982",
+  "authorizes": [
+    "etiquetar v0.4.0, aceptar ADR-0011 y ADR-0012 y entregar los binarios",
+    "presupuesto para coyote run en el proyecto del producto: 30 USD al mes y 2 USD por corrida",
+    "crear en cada repo del producto una rama coyote/contexto con su README.coyote.md y CONTEXT.coyote.md propuestos, sin tocar el árbol de trabajo, el índice ni la rama actual",
+    "confirmar los supuestos D3, D5 y D23",
+    "arrancar v0.5: supervised y autonomous con su motor, sobre corridas medidas"
+  ],
+  "conditions": [
+    "el push de las ramas y de coyote lo hace la persona con sus propias credenciales, y los PR los abre y revisa ella",
+    "las ramas se crean con comandos de plomería de git: sin checkout, sin tocar cambios sin commit",
+    "las corridas reales de coyote run las lanza la persona desde su terminal, dentro de los topes",
+    "los nombres de la organización y de sus repos no entran al código de la herramienta (C1)"
+  ],
+  "response": "aprobar v0.4.0; presupuesto 30 USD al mes y 2 USD por corrida; propuestas por una rama coyote/contexto en cada repo",
+  "evidence": "docs/releases/v0.4.0.md"
+}

@@ -1,6 +1,6 @@
 # Plan de ejecución — Coyote
 
-Estado: v0.3.0 aprobada en G3 (P-0003) · v0.4.0 lista para G4 · actualizado 2026-09-28
+Estado: v0.4.0 aprobada en G4 (P-0004) · v0.5 en planeación · actualizado 2026-09-28
 
 Este plan ejecuta la propuesta aprobada ("Plan de construcción — Framework Coyote"). Cada release se razona con la plantilla de cinco partes que usarán los agentes de Coyote (problema, restricciones, opciones, decisión, riesgos) y cierra con un gate humano: nada se etiqueta, se publica ni toca otros proyectos sin autorización explícita.
 
@@ -200,7 +200,7 @@ G3 autorizó (P-0003): etiquetar v0.3.0, conservar la historia con las firmas de
 | T28 | `coyote run` | Correr agentes desde coyote, con el gate y el costo a la vista | Claude Code headless con agente, contexto, topes y gate; evento `run` con tokens, costo y modelo; pruebas con un `claude` simulado | Hecho |
 | T29 | Router v1 y `coyote close` | Gasto predecible y cierres con consumo real | `router.yaml`, pisos por riesgo, degradación por presupuesto; `close.md` desde el ledger | Hecho |
 | T30 | Piloto en seco | Evidencia sobre los tres repos reales antes de gastar en modelos | Extracción, mapa e impacto de un cambio real, en solo lectura y en un proyecto aparte; tú revisas cada propuesta | Hecho: `~/Documents/fintech-producto`; revisión en G4 |
-| T31 | Verificación y G4 | Evidencia antes de autorizar presupuesto | Pruebas, revisión adversarial y `docs/releases/v0.4.0.md` | Hecho; espera G4 |
+| T31 | Verificación y G4 | Evidencia antes de autorizar presupuesto | Pruebas, revisión adversarial y `docs/releases/v0.4.0.md` | Hecho; aprobado en G4 (P-0004) |
 
 **Lo que cambió al construir.** El piloto sobre los tres repos reales mostró patrones que el diseño no cubría, y cada uno quedó con su prueba:
 
@@ -235,9 +235,9 @@ Siguen el orden de la propuesta. Cada una recibirá su razonamiento completo al 
 | D15 web | Plantillas Go embebidas, solo lectura y solo en 127.0.0.1 | Un solo binario, sin superficie de red || Confirmado en G2 |
 | D16 tokens | Entorno, `gh auth token` o llavero del sistema; device flow con OAuth App (ADR-0008) | No dejar secretos en disco || Confirmado en G2 |
 | D19 autonomía por defecto | `manual` | Nada con efectos sin aprobación mientras no haya evidencia | Confirmado en G3 |
-| D3 runner de `coyote run` | Claude Code headless en la máquina de la persona (ADR-0012) | Aplica el gate y reporta tokens y costo sin runtime nuevo | G4 |
-| D5 carriles de gasto | Tope mensual por proyecto en `project.yaml` y tope por corrida; la suscripción o la API key son de la persona | Gasto predecible y visible en el ledger | G4 |
-| D23 unidad de trabajo | Producto multi-repo: servicios, app y backoffice juntos, en un proyecto aparte que lee los tres (ADR-0011) | Un cambio en uno afecta a los otros (G3) | G4 |
+| D3 runner de `coyote run` | Claude Code headless en la máquina de la persona (ADR-0012) | Aplica el gate y reporta tokens y costo sin runtime nuevo | Confirmado en G4 |
+| D5 carriles de gasto | Tope mensual por proyecto en `project.yaml` y tope por corrida; la suscripción o la API key son de la persona | Gasto predecible y visible en el ledger | Confirmado en G4 |
+| D23 unidad de trabajo | Producto multi-repo: servicios, app y backoffice juntos, en un proyecto aparte que lee los tres (ADR-0011) | Un cambio en uno afecta a los otros (G3) | Confirmado en G4 |
 | D20 lectura sin aprobación | Lista cerrada de comandos de solo lectura en la herramienta; sin patrones propios del proyecto | Leer no tiene efectos y evita la fatiga | Confirmado en G3 |
 | D21 validez de una aprobación | Solo en la máquina donde se dio (firma con clave local), 24 h como máximo | Un registro copiado o fabricado no sirve | Confirmado en G3 |
 | D22 gate sin coyote | Falla cerrado: el IDE no ejecuta herramientas en un proyecto con gate | Un gate que se apaga solo no es gate | Confirmado en G3 |

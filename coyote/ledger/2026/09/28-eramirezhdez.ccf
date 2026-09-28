@@ -81,3 +81,5 @@
 2026-09-28T19:58Z|@eramirezhdez/claude-code|-|coyote|note|run|gap: el costo de una corrida es la estimación de Claude Code,…|doc:CONTEXT.coyote.md|-|-|ok
 2026-09-28T19:58Z|@eramirezhdez/claude-code|-|coyote|note|product|gap: un tópico elegido por un mapa de configuración o un cliente…|doc:CONTEXT.coyote.md|-|-|ok
 2026-09-28T20:00Z|@eramirezhdez/coyote-scribe|W-0004|coyote|doc|release|especificaciones de producto y corridas, y reporte de v0.4.0 para G4|-|-|-|ok
+2026-09-28T20:15Z|@eramirezhdez|W-0004|coyote|close|-|cierre de W-0004: 0 corridas, $0.00|doc:coyote/workstreams/W-0004-product/close.md|0/0/0|$0+$0|ok
+2026-09-28T20:15Z|@eramirezhdez/claude-code|W-0004|coyote|doc|release|aprobación de G4 para v0.4.0|-|-|-|ok
