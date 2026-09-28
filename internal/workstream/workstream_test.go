@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -169,7 +170,7 @@ func TestEntradas(t *testing.T) {
 			t.Errorf("%q: %v %v, se esperaba %v", in, got, err, want)
 		}
 	}
-	for _, in := range []string{"/etc/passwd", "~/.ssh/id", "../x", "a/../../x", ".git/config", ".coyote/proposals/P-1.json", "diff:-x=y", "diff:a=--output=/tmp/x", "diff:a=b c", "step:", `a\b`, ""} {
+	for _, in := range []string{"/etc/passwd", "~/.ssh/id", "../x", "a/../../x", ".git/config", ".coyote/proposals/P-1.json", ".GIT/config", ".Coyote/x", "vendor/m/.git/config", "diff:-x=y", "diff:a=--output=/tmp/x", "diff:a=b c", "step:", `a\b`, ""} {
 		if _, err := ParseInput(in); err == nil {
 			t.Errorf("%q debería ser inválida", in)
 		}
@@ -211,6 +212,10 @@ func TestEstadoDesdeElLedger(t *testing.T) {
 	st = Fold(p, ev)
 	if st.Spent < 0.49 || st.Spent > 0.51 || st.Steps[0].Runs != 1 {
 		t.Errorf("gasto del plan: %v, corridas de S1: %d", st.Spent, st.Steps[0].Runs)
+	}
+	// Una aceptación de otro artefacto (una corrida anterior) no cuenta.
+	if st := Fold(p, append(ev[:len(ev):len(ev)], line(t0, "apr", "ok", 0, "step:S1", "doc:runs/viejo.md"))); st.Steps[0].Status != Review {
+		t.Errorf("aceptación de otro artefacto: %s", st.Steps[0].Status)
 	}
 	// La persona lo acepta; S2 corre y deja acciones en la cola.
 	ev = append(ev, line(t0, "apr", "ok", 0, "step:S1", "doc:runs/a.md"), line(t0, "run", "pend", 0.3, "step:S2", "doc:runs/b.md"))
@@ -325,12 +330,12 @@ func TestSecciones(t *testing.T) {
 
 func TestBuscarYListar(t *testing.T) {
 	root := t.TempDir()
-	for _, d := range []string{"W-0001-uno", "W-0002", "W-0003-sin-plan", "W-00040-raro", "notas"} {
+	for _, d := range []string{"W-0001-uno", "W-0002", "W-0003-sin-plan", "W-00040-raro", "notas", "W-0006-con espacio"} {
 		if err := os.MkdirAll(filepath.Join(root, Base, d), 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
-	for _, d := range []string{"W-0001-uno", "W-0002", "W-00040-raro"} {
+	for _, d := range []string{"W-0001-uno", "W-0002", "W-00040-raro", "W-0006-con espacio"} {
 		if err := os.WriteFile(filepath.Join(root, Base, d, "plan.yaml"), []byte("id: "+d[:6]+"\nsteps: []\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -352,6 +357,9 @@ func TestBuscarYListar(t *testing.T) {
 	if _, err := Load(root, "../x"); err == nil {
 		t.Error("id inválido")
 	}
+	if _, err := Load(root, "W-0006"); err == nil || !strings.Contains(err.Error(), "no sirve para un workstream") {
+		t.Errorf("carpeta con espacio: %v", err)
+	}
 }
 
 func TestLock(t *testing.T) {
@@ -369,17 +377,43 @@ func TestLock(t *testing.T) {
 	}
 	other()
 	unlock()
-	// Un lock de un proceso que ya no existe se recupera.
-	p := filepath.Join(root, ".coyote", "ws", "W-0001.lock")
-	if err := os.WriteFile(p, []byte("999999999\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	// Suelto, se vuelve a tomar; un archivo que quedó de antes no lo impide.
 	unlock, err = Lock(root, "W-0001")
 	if err != nil {
-		t.Fatalf("lock abandonado: %v", err)
+		t.Fatalf("lock liberado: %v", err)
 	}
 	unlock()
 	if _, err := Lock(root, "../W"); err == nil {
 		t.Error("id inválido")
+	}
+}
+
+// Dos motores que arrancan a la vez: solo uno toma el lock.
+func TestLockEnCarrera(t *testing.T) {
+	root := t.TempDir()
+	for round := 0; round < 50; round++ {
+		var wg sync.WaitGroup
+		var mu sync.Mutex
+		owners := 0
+		unlocks := []func(){}
+		for i := 0; i < 4; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				if u, err := Lock(root, "W-0003"); err == nil {
+					mu.Lock()
+					owners++
+					unlocks = append(unlocks, u)
+					mu.Unlock()
+				}
+			}()
+		}
+		wg.Wait()
+		if owners != 1 {
+			t.Fatalf("ronda %d: %d dueños del lock", round, owners)
+		}
+		for _, u := range unlocks {
+			u()
+		}
 	}
 }

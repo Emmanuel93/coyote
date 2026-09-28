@@ -37,7 +37,7 @@ Contrato de cada paso (A2), que `coyote ws check` revisa:
 | `max_usd`, `max_turns` | topes del paso; `max_usd` es obligatorio en los pasos de agente |
 | `gate: human` | la persona revisa este paso también en `autonomous` |
 
-Un plan con errores no corre. Las entradas de archivo son rutas relativas dentro del proyecto, nunca de `.git` ni de `.coyote`. Cada entrada entra en la tarea entre cercas, como dato, con un tope de unos 3000 tokens; el agente lee el resto si lo necesita.
+Un plan con errores no corre. La carpeta del workstream es `W-0001` o `W-0001-nombre`, sin espacios, porque sus rutas van al ledger. Las entradas de archivo son rutas relativas dentro del proyecto, nunca de `.git` ni de `.coyote` (en cualquier combinación de mayúsculas). Cada entrada entra en la tarea entre cercas, como dato, con un tope de unos 3000 tokens; el agente lee el resto si lo necesita.
 
 ## Comandos
 
@@ -50,7 +50,15 @@ coyote ws continue W-0007 --redo "usa una llave de idempotencia"   # repite el p
 coyote ws continue W-0007 --retry                                  # repite un paso que falló
 ```
 
-`ws run` y `ws continue` los corre la persona. No corren dentro de una sesión de agente, y el gate los bloquea si los intenta un agente. `ws continue` pide además una terminal interactiva. Un lock por workstream evita dos motores a la vez.
+`ws run` y `ws continue` los corre la persona:
+
+- **Nunca desde un agente.** No corren dentro de una sesión de agente, y el gate los bloquea aunque vengan detrás de un envoltorio del shell (`env`, `script`, `bash -c`, `xargs`, `eval`, llaves, `if` o `for`…).
+- **Con terminal.** `ws continue` pide además una terminal interactiva.
+- **Un motor por workstream.** Lo asegura un lock del sistema (`flock`), que se suelta solo si el proceso muere.
+- **Ctrl-C.** Detiene a Claude Code con todo lo que lanzó y la corrida queda en el ledger como interrumpida.
+- **Ledger.** Si una corrida no se puede registrar, el motor se detiene en lugar de repetir el paso.
+
+`coyote run --ws W` respeta el tope y el lock del plan, si lo hay.
 
 ## Modos
 
@@ -70,6 +78,14 @@ El modo del plan no pasa el del proyecto (`coyote/project.yaml`). `--mode` baja 
 
 La primera vez, `ws run` deja en la cola del gate una propuesta con el plan completo. La persona la revisa con `coyote review` y la aprueba con `coyote approve [--uses N] [--for 8h]`. La aprobación queda atada al hash del plan: cambiarlo pide autorizarlo otra vez. Cada arranque del motor gasta un uso.
 
+Antes de cada paso, el motor vuelve a revisar, sin gastar otro uso, que:
+
+- la aprobación no se revocó ni venció;
+- el plan en disco es el autorizado;
+- la rama sigue siendo la del workstream.
+
+Si algo cambió, se detiene.
+
 Siempre se detiene cuando:
 
 - un paso falla;
@@ -84,7 +100,7 @@ El estado sale del ledger, no de otro archivo. Así, después de un `pull`, el e
 | Evento | Efecto en el paso |
 |--------|-------------------|
 | `run` con `step:` | `ok` lo deja por revisar, `pend` en la cola del gate, `fail` fallido; `skip` no lo cambia |
-| `apr` con `step:` | aceptado por la persona; en un paso de la persona, hecho |
+| `apr` con `step:` | aceptado por la persona, si su `doc:` es el último artefacto del paso; en un paso de la persona, hecho |
 | `rej` con `step:` y `doc:` | por rehacer, con la revisión guardada junto a las corridas |
 | `plan` | el motor se detuvo: `mode:`, `stop:` y `at:` |
 | `gate` con `auth:ws` | un arranque de `autonomous` con su aprobación (`apr:`) |

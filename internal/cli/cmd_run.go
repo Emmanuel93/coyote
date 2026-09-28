@@ -62,8 +62,40 @@ func cmdRun(a *app, args []string) error {
 	if err != nil {
 		return err
 	}
-	_, err = a.execRun(root, cfg, runSpec{agent: *agentName, task: task, ws: *ws, risk: *risk, scope: *scope, ctxBudget: *ctxBudget,
-		diffs: diffs, model: *model, maxTurns: *maxTurns, maxUSD: *maxUSD, timeout: *timeout, dry: *dry})
+	sp := runSpec{agent: *agentName, task: task, ws: *ws, risk: *risk, scope: *scope, ctxBudget: *ctxBudget,
+		diffs: diffs, model: *model, maxTurns: *maxTurns, maxUSD: *maxUSD, timeout: *timeout, dry: *dry}
+	if *ws != "" {
+		// Una corrida suelta de un workstream con plan respeta su tope y no
+		// corre a la vez que el motor.
+		plan, err := workstream.Load(root, *ws)
+		switch {
+		case err == nil:
+			entries, _, err := ledger.Open(root).ReadAll()
+			if err != nil {
+				return err
+			}
+			st := workstream.Fold(plan, entries)
+			if st.Closed {
+				return fail(1, "%s está cerrado (coyote close): para seguir, abre otro workstream", *ws)
+			}
+			if r, capped := st.Remaining(); capped {
+				if r < workstream.MinRunUSD {
+					return fail(1, "el plan de %s llegó a su tope (%s): súbelo en %s", *ws, spentText(st), plan.Rel)
+				}
+				sp.capUSD = r
+			}
+			if !*dry {
+				unlock, err := workstream.Lock(root, *ws)
+				if err != nil {
+					return fail(1, "%v", err)
+				}
+				defer unlock()
+			}
+		case !workstream.NoPlan(err):
+			return fail(1, "%v", err)
+		}
+	}
+	_, err = a.execRun(root, cfg, sp)
 	return err
 }
 
@@ -211,6 +243,9 @@ func (a *app) execRun(root string, cfg *project.Config, sp runSpec) (*runOutcome
 	}
 	fmt.Fprintf(a.stderr, "corriendo %s con %s, hasta %d turnos y $%.2f…\n", ag.Name, d.Model, d.MaxTurns, d.MaxUSD)
 	res, runErr := runner.Run(context.Background(), req)
+	if res != nil && res.Interrupted {
+		ev.why = "interrumpida"
+	}
 	if res == nil {
 		ev.status, ev.why = "fail", "no corrió"
 		_ = a.recordRun(root, cfg, ev)

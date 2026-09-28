@@ -1,18 +1,10 @@
 package workstream
 
 import (
-	"errors"
-	"fmt"
-	"io/fs"
-	"os"
-	"path/filepath"
 	"regexp"
-	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
-	"github.com/Emmanuel93/coyote/internal/fsx"
 	"github.com/Emmanuel93/coyote/internal/ledger"
 )
 
@@ -125,6 +117,11 @@ func Fold(p *Plan, entries []ledger.Entry) *State {
 				st.Status, st.Why = Failed, l.What
 			}
 		case "apr":
+			// La aceptación vale para el artefacto que la persona revisó: si
+			// después corrió otra vez, esa corrida sigue por revisar.
+			if doc != "" && st.Doc != "" && doc != st.Doc {
+				continue
+			}
 			st.Status, st.Why, st.Feedback, st.At = Done, "", "", l.TS
 		case "rej":
 			st.Status, st.Why, st.Feedback, st.At = Redo, "", doc, l.TS
@@ -255,47 +252,4 @@ func MissingSections(text string, sections []string) []string {
 		}
 	}
 	return out
-}
-
-// Lock evita dos motores sobre el mismo workstream en esta copia del
-// proyecto. El lock lleva el proceso que lo tiene; uno de un proceso que ya
-// terminó se recupera.
-func Lock(root, id string) (func(), error) {
-	rel := ".coyote/ws/" + id + ".lock"
-	if !IDRe.MatchString(id) {
-		return nil, fmt.Errorf("workstream %q inválido", id)
-	}
-	if err := fsx.NoSymlinks(root, rel); err != nil {
-		return nil, err
-	}
-	p := filepath.Join(root, filepath.FromSlash(rel))
-	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
-		return nil, err
-	}
-	for attempt := 0; attempt < 3; attempt++ {
-		f, err := os.OpenFile(p, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
-		if err == nil {
-			fmt.Fprintf(f, "%d\n", os.Getpid())
-			f.Close()
-			return func() { _ = os.Remove(p) }, nil
-		}
-		if !errors.Is(err, fs.ErrExist) {
-			return nil, err
-		}
-		data, _ := os.ReadFile(p)
-		if pid, _ := strconv.Atoi(strings.TrimSpace(string(data))); pid > 0 && alive(pid) {
-			return nil, fmt.Errorf("el motor ya corre %s en el proceso %d; espera a que termine", id, pid)
-		}
-		_ = os.Remove(p) // quedó de un proceso que ya no existe
-	}
-	return nil, fmt.Errorf("no pude tomar el lock de %s", id)
-}
-
-func alive(pid int) bool {
-	proc, err := os.FindProcess(pid)
-	if err != nil {
-		return false
-	}
-	err = proc.Signal(syscall.Signal(0))
-	return err == nil || errors.Is(err, syscall.EPERM)
 }

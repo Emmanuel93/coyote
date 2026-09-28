@@ -13,10 +13,12 @@ import (
 
 	"os"
 	"os/exec"
+	"os/signal"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -94,11 +96,13 @@ type Result struct {
 	ExitCode   int
 	Stderr     string
 	TimedOut   bool
+	// Interrupted: la persona detuvo la corrida (Ctrl-C) o el sistema la terminó.
+	Interrupted bool
 }
 
 // OK informa si la corrida terminó bien.
 func (r *Result) OK() bool {
-	return r.ExitCode == 0 && !r.IsError && (r.Subtype == "" || r.Subtype == "success")
+	return r.ExitCode == 0 && !r.IsError && !r.Interrupted && (r.Subtype == "" || r.Subtype == "success")
 }
 
 // MainModel es el modelo que más costó en la corrida.
@@ -123,6 +127,8 @@ func (r *Result) MainModel() string {
 // Status resume el desenlace en palabras.
 func (r *Result) Status() string {
 	switch {
+	case r.Interrupted:
+		return "se interrumpió"
 	case r.TimedOut:
 		return "se venció el tiempo"
 	case r.Subtype == "error_max_turns":
@@ -248,6 +254,12 @@ func Run(ctx context.Context, r Request) (*Result, error) {
 	if err != nil {
 		return nil, ErrNotFound
 	}
+	// Ctrl-C, SIGTERM o SIGHUP detienen la corrida, no solo a coyote: Claude
+	// Code corre en su propio grupo de procesos y seguiría gastando. La
+	// corrida vuelve como interrumpida para que quede en el ledger.
+	sigCtx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
+	defer stop()
+	ctx = sigCtx
 	if r.Timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, r.Timeout)
@@ -269,6 +281,7 @@ func Run(ctx context.Context, r Request) (*Result, error) {
 	}
 	res.Stderr = strings.TrimSpace(stderr.buf.String())
 	res.TimedOut = errors.Is(ctx.Err(), context.DeadlineExceeded)
+	res.Interrupted = sigCtx.Err() != nil
 	var exitErr *exec.ExitError
 	switch {
 	case runErr == nil:
@@ -279,6 +292,9 @@ func Run(ctx context.Context, r Request) (*Result, error) {
 		}
 	default:
 		return nil, fmt.Errorf("no pude correr Claude Code: %w", runErr)
+	}
+	if res.Interrupted {
+		return res, errors.New("la corrida se interrumpió: Claude Code se detuvo y la corrida queda en el ledger")
 	}
 	if perr != nil && !res.TimedOut {
 		msg := perr.Error()

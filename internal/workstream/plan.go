@@ -46,6 +46,7 @@ const (
 var (
 	// IDRe es el id de un workstream: W-0001.
 	IDRe      = regexp.MustCompile(`^W-\d{4}$`)
+	dirRe     = regexp.MustCompile(`^W-\d{4}(-[A-Za-z0-9._-]+)?$`)
 	stepIDRe  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$`)
 	repoRe    = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 	riskRe    = regexp.MustCompile(`^R[123]$`)
@@ -128,6 +129,10 @@ func Find(root, id string) (string, error) {
 	entries, _ := os.ReadDir(filepath.Join(root, filepath.FromSlash(Base)))
 	for _, e := range entries {
 		if e.IsDir() && (e.Name() == id || strings.HasPrefix(e.Name(), id+"-")) {
+			if !dirRe.MatchString(e.Name()) {
+				// Las rutas de los artefactos van al ledger, que no admite espacios.
+				return "", fmt.Errorf("la carpeta %q no sirve para un workstream: usa %s-nombre con letras, números, punto, guion y guion bajo", e.Name(), id)
+			}
 			return Base + "/" + e.Name(), nil
 		}
 	}
@@ -183,7 +188,7 @@ func All(root string) ([]string, error) {
 	var out []string
 	for _, e := range entries {
 		name := e.Name()
-		if !e.IsDir() || len(name) < 6 || !IDRe.MatchString(name[:6]) || (len(name) > 6 && name[6] != '-') {
+		if !e.IsDir() || !dirRe.MatchString(name) {
 			continue
 		}
 		if fsx.Regular(root, Base+"/"+name+"/plan.yaml") && (len(out) == 0 || !contains(out, name[:6])) {
@@ -292,9 +297,11 @@ func CleanPath(p string) (string, error) {
 	if c == "." || c == ".." || strings.HasPrefix(c, "../") {
 		return "", errors.New("la ruta sale del proyecto")
 	}
-	switch first, _, _ := strings.Cut(c, "/"); first {
-	case ".git", ".coyote":
-		return "", fmt.Errorf("%s no es una entrada: es de git o la caché de coyote", first)
+	// En macOS el disco no distingue mayúsculas: .GIT es .git.
+	for _, seg := range strings.Split(c, "/") {
+		if strings.EqualFold(seg, ".git") || strings.EqualFold(seg, ".coyote") {
+			return "", fmt.Errorf("%s no es una entrada: es de git o la caché de coyote", seg)
+		}
 	}
 	return c, nil
 }

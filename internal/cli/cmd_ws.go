@@ -61,6 +61,8 @@ type wsCtx struct {
 	mode       string
 	person     identity.Person
 	authorized bool
+	authID     string // aprobación que autorizó el loop autónomo
+	authHash   string // hash del plan autorizado
 }
 
 // loadWS lee el plan y lo revisa.
@@ -497,6 +499,12 @@ func (a *app) wsLoop(c *wsCtx, f *forced, dry bool) error {
 			} else if err := a.wsAuthorize(c); err != nil {
 				return err
 			}
+		} else if c.mode == "autonomous" && !dry {
+			// Antes de cada paso: la autorización sigue vigente, el plan es el
+			// autorizado y la rama es la del workstream. No gasta otro uso.
+			if err := a.wsStillAuthorized(c); err != nil {
+				return err
+			}
 		}
 		sp, err := a.stepSpec(c, st, nx.Index, f)
 		f = nil
@@ -512,6 +520,7 @@ func (a *app) wsLoop(c *wsCtx, f *forced, dry bool) error {
 		if !dry {
 			fmt.Fprintf(a.stderr, "%s · paso %s (%s)\n", c.plan.ID, sp.step, c.mode)
 		}
+		before := st.Steps[nx.Index].Runs
 		out, err := a.execRun(c.root, c.cfg, sp)
 		if dry || out == nil {
 			return err
@@ -521,6 +530,11 @@ func (a *app) wsLoop(c *wsCtx, f *forced, dry bool) error {
 			// No arrancó (presupuesto del mes, gate o agente sin instalar): el
 			// paso sigue igual y el motor se detiene con el motivo.
 			return err
+		}
+		// Si la corrida no quedó en el ledger, el motor no la ve: seguir
+		// repetiría el paso y su gasto sin registro.
+		if after, ferr := a.wsState(c); ferr != nil || after.Steps[nx.Index].Runs <= before {
+			return fail(1, "no pude registrar la corrida de %s en el ledger (%v): el motor se detiene para no repetir el paso sin registro", sp.step, err)
 		}
 		if err != nil {
 			stepErr = err
@@ -629,7 +643,7 @@ func (a *app) wsAuthorize(c *wsCtx) error {
 		if err := a.record(ac, "gate", id, "motor autónomo autorizado: "+id, []string{"apr:" + st.ID, "hash:" + shortHash(hash), "auth:ws"}); err != nil {
 			return err
 		}
-		c.authorized = true
+		c.authorized, c.authID, c.authHash = true, st.ID, hash
 		fmt.Fprintf(a.stderr, "autonomous: %s lo autorizó (%s; quedan %s)\n", st.Approver, st.ID, plural(st.Left-1, "uso", "usos"))
 		return nil
 	}
@@ -647,6 +661,37 @@ func (a *app) wsAuthorize(c *wsCtx) error {
 		}
 	}
 	return fail(1, "%s corre en autónomo solo con tu autorización de este plan exacto (A4).\nRevísalo con coyote review %s, autorízalo con coyote approve %s [--uses N] [--for 8h] y vuelve a correr coyote ws run %s.", id, p.ID, p.ID, id)
+}
+
+// wsStillAuthorized revisa, entre pasos de un loop autónomo, que nada haya
+// cambiado desde que arrancó: la aprobación no se revocó ni venció, el plan
+// en disco es el autorizado y la rama sigue siendo ws/<W>.
+func (a *app) wsStillAuthorized(c *wsCtx) error {
+	id := c.plan.ID
+	if br := gitx.Branch(c.root); !wsBranch(br, id) {
+		return fail(1, "A4: el loop autónomo de %s se detiene: la rama cambió a %s", id, orDash(br))
+	}
+	plan, err := workstream.Load(c.root, id)
+	if err != nil || plan.AuthHash(c.cfg.Name) != c.authHash {
+		return fail(1, "A4: el loop autónomo de %s se detiene: el plan cambió desde que lo autorizaste; revísalo y autorízalo de nuevo", id)
+	}
+	ac, err := a.approvalCtx()
+	if err != nil {
+		return err
+	}
+	sts, _, err := ac.statuses()
+	if err != nil {
+		return err
+	}
+	for _, st := range sts {
+		if st.ID == c.authID {
+			if st.Revoked || st.Expired {
+				return fail(1, "A4: el loop autónomo de %s se detiene: la autorización %s se revocó o venció", id, st.ID)
+			}
+			return nil
+		}
+	}
+	return fail(1, "A4: el loop autónomo de %s se detiene: no encuentro la autorización %s", id, c.authID)
 }
 
 // stepSpec arma la corrida de un paso: su contrato, sus entradas y el tope

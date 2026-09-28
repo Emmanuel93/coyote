@@ -4,7 +4,9 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -106,4 +108,61 @@ func TestArgsResume(t *testing.T) {
 			t.Errorf("%q no debe llegar a --resume", bad)
 		}
 	}
+}
+
+func TestRunInterrumpida(t *testing.T) {
+	bin, dir := fake(t, "sleep 30 & echo $! > \""+"$(dirname \"$0\")"+"/sleep.pid\"\ntouch \"$(dirname \"$0\")/started\"\nwait\n")
+	type out struct {
+		res *Result
+		err error
+	}
+	done := make(chan out, 1)
+	go func() {
+		res, err := Run(context.Background(), Request{Bin: bin, Agent: "a", MaxTurns: 1, MaxUSD: 1, Timeout: time.Minute})
+		done <- out{res, err}
+	}()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "started")); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("el claude simulado no arrancó")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	// Ctrl-C a coyote: la corrida se detiene con todo su grupo y vuelve como interrumpida.
+	if err := syscall.Kill(os.Getpid(), syscall.SIGINT); err != nil {
+		t.Fatal(err)
+	}
+	var o out
+	select {
+	case o = <-done:
+	case <-time.After(15 * time.Second):
+		t.Fatal("Run no volvió después de Ctrl-C")
+	}
+	if o.res == nil || !o.res.Interrupted || o.res.OK() || o.res.Status() != "se interrumpió" || o.err == nil {
+		t.Fatalf("resultado: %+v %v", o.res, o.err)
+	}
+	data, _ := os.ReadFile(filepath.Join(dir, "sleep.pid"))
+	pid, _ := strconv.Atoi(strings.TrimSpace(string(data)))
+	time.Sleep(300 * time.Millisecond)
+	if pid > 0 && running(pid) {
+		_ = syscall.Kill(pid, syscall.SIGKILL)
+		t.Errorf("el proceso hijo de Claude Code (%d) siguió vivo", pid)
+	}
+}
+
+// running dice si un proceso sigue vivo; un zombi ya terminó. Sin /proc
+// (macOS) solo se sabe si existe.
+func running(pid int) bool {
+	if data, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/status"); err == nil {
+		for _, l := range strings.Split(string(data), "\n") {
+			if v, ok := strings.CutPrefix(l, "State:"); ok {
+				return !strings.HasPrefix(strings.TrimSpace(v), "Z")
+			}
+		}
+		return false
+	}
+	return syscall.Kill(pid, 0) == nil
 }

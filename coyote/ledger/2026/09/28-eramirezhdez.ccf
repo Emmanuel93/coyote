@@ -96,3 +96,4 @@
 2026-09-28T21:02Z|@eramirezhdez/coyote-scribe|W-0005|coyote|doc|v0.5|especificaciones del motor y del pipeline, README y contexto al día|-|-|-|ok
 2026-09-28T21:39Z|@eramirezhdez/coyote-security|W-0005|coyote|fix|ci|gate pr ve todos los archivos del PR y corre con pull_request_target|-|-|-|ok
 2026-09-28T21:39Z|@eramirezhdez/coyote-security|W-0005|coyote|fix|gate|bloquea coyote ws run y continue detrás de envoltorios del shell|-|-|-|ok
+2026-09-28T21:39Z|@eramirezhdez/coyote-security|W-0005|coyote|fix|ws|Ctrl-C detiene la corrida, lock con flock y autorización revisada entre pasos|-|-|-|ok

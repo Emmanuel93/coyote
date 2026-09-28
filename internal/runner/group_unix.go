@@ -5,6 +5,7 @@ package runner
 import (
 	"os/exec"
 	"syscall"
+	"time"
 )
 
 // setGroup corre Claude Code en su propio grupo de procesos: al vencer el
@@ -15,6 +16,9 @@ func setGroup(cmd *exec.Cmd) {
 		if cmd.Process == nil {
 			return nil
 		}
-		return syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
+		pgid := cmd.Process.Pid
+		// Si algo del grupo no termina con SIGTERM, a los pocos segundos se mata.
+		time.AfterFunc(3*time.Second, func() { _ = syscall.Kill(-pgid, syscall.SIGKILL) })
+		return syscall.Kill(-pgid, syscall.SIGTERM)
 	}
 }
