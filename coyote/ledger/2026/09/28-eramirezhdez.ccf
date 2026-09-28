@@ -45,3 +45,5 @@
 2026-09-28T06:27Z|@eramirezhdez|W-0002|coyote|apr|release|G2 aprobado: v0.2.0, credenciales con gh y llavero, arranque de v0.3|apr:P-0002 doc:docs/releases/v0.2.0.md|-|-|ok
 2026-09-28T06:27Z|@eramirezhdez|W-0002|coyote|close|release|W-0002 cerrado: v0.2.0 construida, revisada y aprobada|doc:coyote/workstreams/W-0002-remote-context/close.md apr:P-0002|-|-|ok
 2026-09-28T06:27Z|@eramirezhdez/coyote-scribe|W-0002|coyote|doc|release|aprobación de G2 para v0.2.0|-|-|-|ok
+2026-09-28T06:28Z|@eramirezhdez|-|coyote|rel|release|v0.2.0 etiquetada con binarios de macOS y Linux|sha:018c40d doc:docs/releases/v0.2.0.md|-|-|ok
+2026-09-28T06:28Z|@eramirezhdez|-|coyote|chore|release|registra el release v0.2.0 en el ledger|-|-|-|ok
