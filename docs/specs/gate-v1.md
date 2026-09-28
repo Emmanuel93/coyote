@@ -13,7 +13,7 @@ La regla A1 dice que ningún agente ejecuta acciones con efectos sin aprobación
 1. **R15.** Un commit, tag, PR o release con atribución a IA, o con la autoría de una herramienta, se bloquea.
 2. **Bloqueos que ninguna aprobación levanta:**
    - que un agente corra `coyote approve`, `reject`, `revoke`, `auth`, `hooks` o `install`;
-   - que escriba en el gate: `.claude/settings*.json`, `.claude/hooks/`, `.cursor/hooks*`, `.git/`, `.coyote/`, `coyote/approvals/`, `coyote/ledger/`, la configuración global del IDE, de git o del shell;
+   - que escriba en el gate: `.claude/settings*.json`, `.claude/hooks/`, `.cursor/hooks*`, `.git/`, `.coyote/`, `coyote/approvals/`, `coyote/ledger/`, `coyote/project.yaml` (ahí vive la autonomía), la configuración global del IDE, de git o del shell;
    - que lea o escriba credenciales: `~/.ssh`, `~/.aws`, `~/.config/gh`, `~/.netrc`, la clave local de coyote y parecidas; también recorrer una carpeta que las contiene (`grep -r ~`);
    - que un subagente declare en un comando un agente distinto del que reporta el IDE.
 3. **Lectura libre.** Las herramientas que solo leen (Read, Grep, Glob, WebFetch, Task, TodoWrite y las MCP cuyo nombre empieza con get, list, search, read, fetch, view, show o describe) y una lista cerrada de comandos de solo lectura pasan sin registro.
@@ -28,8 +28,8 @@ Un comando pasa sin aprobación solo si cada segmento (separados por `;`, `&&`, 
 | `ls`, `cat`, `head`, `tail`, `wc`, `stat`, `du`, `df`, `grep`, `diff`, `cmp`, `cut`, `tr`, `nl`, `column`, `comm`, `jq`, `strings`, `od`, `sha256sum` y similares, `echo`, `printf`, `pwd`, `which`, `cd`, `sleep` | ninguna |
 | `find` | sin `-exec`, `-execdir`, `-ok`, `-delete`, `-fprint*`, `-fls` |
 | `sort`, `uniq`, `tree`, `xxd`, `file`, `date`, `rg` | sin las banderas que escriben archivos o corren programas (`-o`, `--pre`, `-C`…) |
-| `git` | subcomandos de lectura (`status`, `log`, `diff`, `show`, `blame`, `grep`, `rev-parse`, `ls-files`…); `branch`, `tag`, `remote`, `config`, `stash`, `reflog` solo para listar; sin `-c`, `--git-dir`, `--output`, `--ext-diff` ni `--textconv` |
-| `go` | `version`, `env` sin `-w`, `vet` sin `-vettool` |
+| `git` | subcomandos de lectura (`status`, `log`, `diff`, `show`, `blame`, `grep`, `rev-parse`, `ls-files`…); `branch`, `tag`, `stash` y `reflog` solo para listar; `remote` solo los nombres (las URLs pueden llevar tokens); `config` solo `--get` de claves sin secretos (`user.name`, `user.email`, `init.defaultBranch`…), nunca `--list` ni `--get-regexp`; sin `-c`, `--git-dir`, `--output`, `--ext-diff` ni `--textconv` |
+| `go` | `version` y `env` con variables nombradas sin secretos (`GOPATH`, `GOOS`…); `vet`, `build` y `test` necesitan aprobación porque compilan (cgo corre el compilador de C) |
 | `coyote` | `status`, `log`, `get`, `ask` sin `--record`, `standards`, `attribution check`, `doctor`, `approvals`, `review`, `index`, `propose`, `install --check` |
 
 Se rechaza cualquier construcción que el análisis no pueda garantizar: sustituciones (`$(...)`, comillas invertidas), variables, asignaciones de entorno, redirecciones a archivos (solo se admiten `/dev/null` y `2>&1`), subshells, segundo plano, heredocs, comentarios, rutas explícitas al programa y comodines sin comillas en programas cuyas banderas importan. Correr pruebas o compilar necesita aprobación: ejecuta código que el agente pudo escribir.
@@ -38,7 +38,7 @@ Se rechaza cualquier construcción que el análisis no pueda garantizar: sustitu
 
 | Herramienta | Qué entra en el hash |
 |-------------|----------------------|
-| Bash, Shell (Cursor), shell (Codex) | el comando sin espacios al borde y la carpeta relativa al proyecto; `dangerouslyDisableSandbox` si está activo |
+| Bash, Shell (Cursor), shell (Codex) | el comando sin espacios al borde, la carpeta relativa al proyecto y cualquier otro campo con valor (`run_in_background`, `dangerouslyDisableSandbox`…); la descripción y el tiempo de espera no cuentan, y un campo falso o vacío equivale a no traerlo |
 | Write | la ruta relativa y el SHA-256 del contenido |
 | Edit | la ruta, los SHA-256 del texto viejo y el nuevo, y `replace_all` |
 | cualquier otra | el nombre y la entrada completa en JSON canónico (claves ordenadas, números como llegaron) |
@@ -69,7 +69,7 @@ Cada aprobación es `coyote/approvals/<id>.json`:
 ```
 
 - Vale de 1 a 100 usos y 24 horas como máximo; por defecto, un uso durante una hora.
-- `mac` es un HMAC-SHA256 con una clave local de la persona (0600, en su directorio de configuración, fuera del repo). Un registro modificado, copiado de otra máquina o de otro proyecto no valida.
+- `mac` es un HMAC-SHA256 con una clave local de la persona (0600, en su directorio de configuración, fuera del repo). `root` es una huella de la carpeta del proyecto. Un registro modificado, copiado de otra máquina, de otro proyecto o de otra copia del mismo proyecto no valida.
 - El registro nunca se reescribe. Los usos son los eventos `gate` con estado `ok` y `apr:<id>` en el ledger; una revocación es un evento `rej` con `apr:<id>`. Un lock en `.coyote/gate.lock` impide gastar el mismo uso dos veces.
 - Las aprobaciones de gate de release (`P-0001`, `P-0002`) no son de acción y el gate las ignora.
 
@@ -94,7 +94,9 @@ El actor es `@persona/<agente>`, con el agente que reporta el IDE (`agent_type` 
 | Codex | `PreToolUse` | como Claude Code; el comando puede venir como lista (`bash -lc "…"`) | salida 2 |
 | Copilot | `preToolUse` | `toolName`, `toolArgs` (JSON en texto) | salida 2 |
 
-El gate falla cerrado: una entrada ilegible, un proyecto que no se encuentra, un error o un pánico bloquean las acciones con efectos. El hook que instala `coyote install` también bloquea si no encuentra el binario de coyote.
+El gate falla cerrado: una entrada ilegible, un error o un pánico bloquean las acciones con efectos; un `coyote/project.yaml` que no se puede leer bloquea todas las herramientas, lecturas incluidas, hasta que la persona lo corrija. Fuera de un proyecto coyote solo pasan las lecturas que no tocan credenciales. El hook que instala `coyote install` también bloquea si no encuentra el binario de coyote.
+
+`review` y `approvals` muestran escapados los caracteres de control e invisibles (escapes de terminal, retornos de carro, controles de dirección Unicode): lo que la persona ve es lo que aprueba. El ledger tampoco los guarda.
 
 ## Límites conocidos
 
@@ -102,5 +104,8 @@ El gate falla cerrado: una entrada ilegible, un proyecto que no se encuentra, un
 - El análisis de solo lectura es conservador y puede pedir aprobación para comandos inocuos (`git config user.name` sin `--get`).
 - Los bloqueos por texto (rutas del gate o credenciales en un comando) pueden bloquear un mensaje de commit que solo las menciona.
 - Las herramientas MCP de lectura se reconocen por su nombre; un servidor MCP mal nombrado queda del lado de la lectura.
+- WebFetch y WebSearch se tratan como lectura. La salida de datos del proyecto por red la controlan los permisos de dominio del IDE.
+- En Cursor, Codex y Copilot el IDE no reporta el subagente: un comando puede declarar otro `--agent`, y la persona lo ve al aprobarlo.
+- Un archivo de secretos del proyecto (`.env`) se lee libremente; protégelo con los permisos de lectura del IDE.
 - IDEs sin hook previo (Devin, Zed) no están cubiertos: llegan con el gate de CI en v0.5.
 - `supervised` y `autonomous` se aceptan en `project.yaml`, pero hasta v0.4 el gate aplica `manual`.

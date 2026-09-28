@@ -380,18 +380,14 @@ func gitCheck(args []word) error {
 		return listOnly(rest, map[string]bool{"-n": true, "--contains": true, "--no-contains": true, "--merged": true,
 			"--no-merged": true, "--points-at": true, "--column": true, "--no-column": true, "-i": true, "--ignore-case": true})
 	case "remote":
-		switch {
-		case len(rest) == 0:
-			return nil
-		case len(rest) == 1 && (rest[0].s == "-v" || rest[0].s == "--verbose"):
-			return nil
-		case rest[0].s == "get-url" || rest[0].s == "show":
+		// Solo los nombres: las URLs pueden llevar tokens (https://token@host).
+		if len(rest) == 0 {
 			return nil
 		}
 	case "config":
-		_, get := hasFlag(rest, "--get", "--get-all", "--get-regexp", "--get-urlmatch", "-l", "--list")
-		if _, set := hasFlag(rest, "--add", "--unset", "--unset-all", "--replace-all", "--rename-section",
-			"--remove-section", "-e", "--edit"); get && !set {
+		// Solo --get de claves sin secretos: --list, --get-regexp o --get-urlmatch
+		// vuelcan la configuración, donde puede haber tokens (extraheader, insteadOf).
+		if len(rest) == 2 && (rest[0].s == "--get" || rest[0].s == "--get-all") && safeGitKey.MatchString(rest[1].s) {
 			return nil
 		}
 	case "stash":
@@ -413,6 +409,9 @@ func gitCheck(args []word) error {
 	}
 	return fmt.Errorf("git %s necesita aprobación", sub)
 }
+
+// safeGitKey son claves de configuración de git que no guardan secretos.
+var safeGitKey = regexp.MustCompile(`(?i)^(user\.(name|email)|init\.defaultbranch|core\.(autocrlf|filemode|ignorecase|bare|editor)|pull\.rebase|push\.default|commit\.gpgsign|coyote\.user)$`)
 
 // listOnly acepta git branch o git tag solo para listar: sin nombres nuevos y
 // con las banderas de listado; con -l o --list los argumentos son patrones.
@@ -443,6 +442,9 @@ func listOnly(rest []word, ok map[string]bool) error {
 	return nil
 }
 
+var safeGoEnv = map[string]bool{"GOPATH": true, "GOROOT": true, "GOOS": true, "GOARCH": true, "GOVERSION": true,
+	"GOMOD": true, "GOCACHE": true, "GOMODCACHE": true, "GOWORK": true, "GOBIN": true, "CGO_ENABLED": true, "GOEXE": true}
+
 func goCheck(args []word) error {
 	if len(args) == 0 {
 		return nil
@@ -451,10 +453,19 @@ func goCheck(args []word) error {
 	case "version":
 		return nil
 	case "env":
-		return denyFlags("-w", "-u")(args[1:])
-	case "vet":
-		return denyFlags("-vettool", "--vettool", "-toolexec", "--toolexec", "-exec", "--exec", "-overlay", "--overlay")(args[1:])
+		// Solo variables nombradas y sin secretos: go env a secas incluye GOPROXY
+		// y GOAUTH, que pueden llevar credenciales.
+		if len(args) == 1 {
+			return fmt.Errorf("go env sin variables muestra todo el entorno de Go")
+		}
+		for _, a := range args[1:] {
+			if !safeGoEnv[a.s] {
+				return fmt.Errorf("go env %s necesita aprobación", a.s)
+			}
+		}
+		return nil
 	}
+	// vet, build y test compilan (cgo corre el compilador de C) o ejecutan código.
 	return fmt.Errorf("go %s compila o ejecuta código", args[0].s)
 }
 

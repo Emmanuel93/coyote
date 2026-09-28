@@ -77,6 +77,11 @@ func TestApproveVerifyAndTamper(t *testing.T) {
 	if other.Verify(r) == nil {
 		t.Error("un registro de otro proyecto no debe validar")
 	}
+	other = *s
+	other.Root = t.TempDir()
+	if other.Verify(r) == nil {
+		t.Error("un registro de otra copia con el mismo nombre no debe validar")
+	}
 	// Un registro con vigencia de más de 24 h, aunque esté bien firmado, no vale.
 	long := r
 	long.Expires = "2026-09-30T10:00:00Z"

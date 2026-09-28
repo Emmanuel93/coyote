@@ -37,11 +37,11 @@ func TestReadOnlyShell(t *testing.T) {
 	allow := []string{
 		"ls -la", "git status", "git log --oneline -5", "git diff HEAD~1 -- internal/", "git show HEAD:README.md",
 		"cat README.md | head -20", "grep -rn 'func main' --include='*.go' .", "rg TODO internal", "wc -l *.go",
-		"find . -name '*.go' -type f", "git branch -a", "git branch --list 'feat*'", "git tag -l", "git remote -v",
-		"git config --get user.email", "go version", "go env GOPATH", "go vet ./...", "coyote status",
+		"find . -name '*.go' -type f", "git branch -a", "git branch --list 'feat*'", "git tag -l", "git remote",
+		"git config --get user.email", "git config --get-all user.name", "go version", "go env GOPATH GOOS", "coyote status",
 		"coyote get context --scope pagos", "coyote ask \"cómo se cobra\"", "coyote standards lint", "coyote attribution check",
 		"coyote approvals", "coyote review P-abc123", "coyote install --check", "coyote generate agents --check",
-		"git log --format='%h %s' 2>/dev/null", "go vet ./... 2>&1 | tail -5", "echo listo && git status --short",
+		"git log --format='%h %s' 2>/dev/null", "git status 2>&1 | tail -5", "echo listo && git status --short",
 		"sort go.mod | uniq -c", "jq .version package.json", "diff a.txt b.txt", "cd internal && ls", "tree -L 2",
 		"git -C internal log -1", "sleep 1",
 	}
@@ -62,6 +62,9 @@ func TestReadOnlyShell(t *testing.T) {
 		"xargs rm < lista", "rg --pre ./x foo", "cat <(ls)", "coyote commit -m 'x'", "coyote ask x --record",
 		"coyote standards lint --scripts", "coyote install --ide cursor", "coyote install --check=false --ide cursor",
 		"go test -run X ./...", "go run .", "ls\nrm -rf x", "ls # comentario", "git worktree add x",
+		"git config --list", "git config -l", "git config --get-regexp .", "git config --get-urlmatch http https://x",
+		"git config --get http.https://x.extraheader", "git remote -v", "git remote get-url origin", "go vet ./...", "go env",
+		"go env GOPROXY",
 		"coyote push", "xxd -r a b", "tree -o salida.txt", "date -s 2020-01-01", "file -C -m x",
 		"git reflog expire --all", "git remote add x y", "unterminated 'quote", "rg --hostname-bin=./x foo",
 		"jq -n 'env'", "jq -n '$ENV.GITHUB_TOKEN'",
@@ -99,6 +102,7 @@ func TestCredentialsAndGateAreBlocked(t *testing.T) {
 		{"Edit", map[string]any{"file_path": filepath.Join(root, ".git", "config"), "old_string": "a", "new_string": "b"}},
 		{"Write", map[string]any{"file_path": filepath.Join(root, "coyote", "approvals", "P-x.json"), "content": "{}"}},
 		{"Write", map[string]any{"file_path": filepath.Join(root, "coyote", "ledger", "2026", "09", "28-ana.ccf"), "content": ""}},
+		{"Edit", map[string]any{"file_path": filepath.Join(root, "coyote", "project.yaml"), "old_string": "manual", "new_string": "autonomous"}},
 		{"Write", map[string]any{"file_path": filepath.Join(home, ".claude", "settings.json"), "content": "{}"}},
 		{"Write", map[string]any{"file_path": filepath.Join(home, ".ssh", "authorized_keys"), "content": "k"}},
 		{"Read", map[string]any{"file_path": filepath.Join(home, ".ssh", "id_rsa")}},
@@ -182,6 +186,12 @@ func TestHashIsExact(t *testing.T) {
 	}
 	if h("Bash", map[string]any{"command": "go test ./...", "dangerouslyDisableSandbox": true}, root) == base {
 		t.Error("correr fuera del sandbox es otra acción")
+	}
+	if h("Bash", map[string]any{"command": "go test ./...", "run_in_background": true}, root) == base {
+		t.Error("correr en segundo plano es otra acción")
+	}
+	if h("Bash", map[string]any{"command": "go test ./...", "run_in_background": false, "dangerouslyDisableSandbox": false}, root) != base {
+		t.Error("un campo falso equivale a no traerlo")
 	}
 	// Cursor y Claude Code aprueban lo mismo con el mismo hash.
 	cur, _ := json.Marshal(map[string]any{"hook_event_name": "preToolUse", "tool_name": "Shell",

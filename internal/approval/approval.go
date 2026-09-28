@@ -43,6 +43,7 @@ type Record struct {
 	Object      string `json:"object"`
 	Tool        string `json:"tool"`
 	Project     string `json:"project"`
+	Root        string `json:"root"` // huella de la carpeta del proyecto en esta máquina
 	WS          string `json:"ws,omitempty"`
 	RequestedBy string `json:"requested_by,omitempty"`
 	Approver    string `json:"approver"`
@@ -115,6 +116,20 @@ func (s *Store) NewID() (string, error) {
 	return "P-" + string(b), nil
 }
 
+// rootPrint identifica la carpeta del proyecto sin escribir su ruta: dos
+// proyectos con el mismo nombre en la misma máquina no comparten aprobaciones.
+func (s *Store) rootPrint() string {
+	root := s.Root
+	if r, err := filepath.EvalSymlinks(root); err == nil {
+		root = r
+	}
+	if abs, err := filepath.Abs(root); err == nil {
+		root = abs
+	}
+	h := sha256.Sum256([]byte(root))
+	return hex.EncodeToString(h[:8])
+}
+
 // sign calcula la firma HMAC del registro sin su campo mac.
 func sign(key []byte, r Record) string {
 	r.MAC = ""
@@ -132,8 +147,8 @@ func (s *Store) Verify(r Record) error {
 	if !hmac.Equal([]byte(sign(s.Key, r)), []byte(r.MAC)) {
 		return errors.New("firma inválida: el registro no se aprobó en esta máquina o fue modificado")
 	}
-	if r.Project != s.Project {
-		return fmt.Errorf("es de otro proyecto (%s)", r.Project)
+	if r.Project != s.Project || r.Root != s.rootPrint() {
+		return fmt.Errorf("es de otro proyecto o de otra copia (%s)", r.Project)
 	}
 	ts, err1 := time.Parse(time.RFC3339, r.TS)
 	exp, err2 := time.Parse(time.RFC3339, r.Expires)
@@ -257,7 +272,7 @@ func (s *Store) Approve(p Proposal, approver string, uses int, dur time.Duration
 		return Record{}, fmt.Errorf("--for va de 1 minuto a %s", MaxDuration)
 	}
 	now := s.now().Truncate(time.Second)
-	r := Record{ID: p.ID, Type: "action", Hash: p.Hash, Object: p.Object, Tool: p.Tool, Project: s.Project,
+	r := Record{ID: p.ID, Type: "action", Hash: p.Hash, Object: p.Object, Tool: p.Tool, Project: s.Project, Root: s.rootPrint(),
 		WS: ws, RequestedBy: p.RequestedBy, Approver: approver, Via: "cli", TS: now.Format(time.RFC3339),
 		Expires: now.Add(dur).Format(time.RFC3339), Uses: uses}
 	r.MAC = sign(s.Key, r)

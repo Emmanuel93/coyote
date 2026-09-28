@@ -155,7 +155,7 @@ func cmdApprovals(a *app, args []string) error {
 			if p.Status == "rejected" {
 				state = "rechazada: " + shortText(p.RejectReason, 40)
 			}
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", p.ID, ago(now, p.First), p.RequestedBy, shortText(p.Object, 70), state)
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", p.ID, ago(now, p.First), oneLineVisible(p.RequestedBy), oneLineVisible(shortText(p.Object, 70)), oneLineVisible(state))
 		}
 		w.Flush()
 		fmt.Fprintln(a.stdout, "\nRevisa con coyote review <id>; aprueba con coyote approve <id> [--uses N] [--for 1h] o todas con coyote approve --all.")
@@ -177,7 +177,7 @@ func cmdApprovals(a *app, args []string) error {
 				state = "agotada"
 			}
 			exp, _ := time.Parse(time.RFC3339, st.Expires)
-			fmt.Fprintf(w, "  %s\t%s\t%d/%d usos\tvence %s\t%s\n", st.ID, shortText(st.Object, 60), st.Left, st.Uses, exp.Local().Format("01-02 15:04"), state)
+			fmt.Fprintf(w, "  %s\t%s\t%d/%d usos\tvence %s\t%s\n", st.ID, oneLineVisible(shortText(st.Object, 60)), st.Left, st.Uses, exp.Local().Format("01-02 15:04"), state)
 		}
 		w.Flush()
 		for name, e := range problems {
@@ -219,22 +219,30 @@ func cmdReview(a *app, args []string) error {
 		if i > 0 {
 			fmt.Fprintln(a.stdout)
 		}
-		fmt.Fprintf(a.stdout, "%s · %s\n", p.ID, p.Object)
-		from := ""
-		if p.IDE != "" {
-			from = " desde " + p.IDE
-		}
-		fmt.Fprintf(a.stdout, "  pedida por %s%s · %s · %s\n", p.RequestedBy, from, ago(now, p.First), plural(p.Attempts, "intento", "intentos"))
-		if p.Reason != "" {
-			fmt.Fprintf(a.stdout, "  necesita aprobación: %s\n", p.Reason)
-		}
-		if p.Status == "rejected" {
-			fmt.Fprintf(a.stdout, "  rechazada por %s: %s\n", p.RejectedBy, p.RejectReason)
-		}
-		fmt.Fprintln(a.stdout, strings.TrimRight(c.detail(p), "\n"))
-		fmt.Fprintf(a.stdout, "  hash %s\n", p.Hash)
+		var out strings.Builder
+		review(&out, c, p, now)
+		// Nada de lo que escribió el agente puede redibujar la terminal de la persona.
+		fmt.Fprint(a.stdout, gate.Visible(out.String()))
 	}
 	return nil
+}
+
+// review describe una propuesta para decidir sobre ella.
+func review(w *strings.Builder, c *approvalCtx, p approval.Proposal, now time.Time) {
+	fmt.Fprintf(w, "%s · %s\n", p.ID, p.Object)
+	from := ""
+	if p.IDE != "" {
+		from = " desde " + p.IDE
+	}
+	fmt.Fprintf(w, "  pedida por %s%s · %s · %s\n", p.RequestedBy, from, ago(now, p.First), plural(p.Attempts, "intento", "intentos"))
+	if p.Reason != "" {
+		fmt.Fprintf(w, "  necesita aprobación: %s\n", p.Reason)
+	}
+	if p.Status == "rejected" {
+		fmt.Fprintf(w, "  rechazada por %s: %s\n", p.RejectedBy, p.RejectReason)
+	}
+	fmt.Fprintln(w, strings.TrimRight(c.detail(p), "\n"))
+	fmt.Fprintf(w, "  hash %s\n", p.Hash)
 }
 
 // detail muestra lo que la persona aprueba: el comando, el diff o la entrada.
@@ -387,7 +395,7 @@ func cmdApprove(a *app, args []string) error {
 			return err
 		}
 		exp, _ := time.Parse(time.RFC3339, r.Expires)
-		fmt.Fprintf(a.stdout, "✓ %s aprobada · %d uso(s) · vence %s · %s\n", r.ID, r.Uses, exp.Local().Format("15:04"), r.Object)
+		fmt.Fprintf(a.stdout, "✓ %s aprobada · %d uso(s) · vence %s · %s\n", r.ID, r.Uses, exp.Local().Format("15:04"), oneLineVisible(r.Object))
 	}
 	fmt.Fprintf(a.stdout, "Registro en coyote/approvals/; el agente puede repetir la llamada.\n")
 	return nil
@@ -480,7 +488,7 @@ func cmdRevoke(a *app, args []string) error {
 	if err := a.record(c, "rej", st.WS, "revocado: "+*reason, []string{"apr:" + st.ID, "hash:" + shortHash(st.Hash)}); err != nil {
 		return err
 	}
-	fmt.Fprintf(a.stdout, "✗ %s revocada · %s\n", st.ID, st.Object)
+	fmt.Fprintf(a.stdout, "✗ %s revocada · %s\n", st.ID, oneLineVisible(st.Object))
 	return nil
 }
 
@@ -526,7 +534,7 @@ func cmdPropose(a *app, args []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(a.stdout, "%s en la cola · %s\nLa persona la aprueba con coyote approve %s\n", p.ID, p.Object, p.ID)
+	fmt.Fprintf(a.stdout, "%s en la cola · %s\nLa persona la aprueba con coyote approve %s\n", p.ID, oneLineVisible(p.Object), p.ID)
 	return nil
 }
 
@@ -544,4 +552,9 @@ func plural(n int, one, many string) string {
 		return "1 " + one
 	}
 	return fmt.Sprintf("%d %s", n, many)
+}
+
+// oneLineVisible escapa controles y saltos: una celda de tabla es una línea.
+func oneLineVisible(s string) string {
+	return strings.ReplaceAll(gate.Visible(s), "\n", "\\n")
 }

@@ -96,7 +96,21 @@ func gateCheck(a *app, args []string) (err error) {
 	}
 	g, gerr := a.newGateRun(act)
 	if gerr != nil {
+		if gateRoot(a, act) != "" {
+			// El proyecto existe pero no se puede leer: nada pasa hasta que la persona lo corrija.
+			return deny(act.IDE, "coyote: "+gerr.Error()+"; el gate bloquea todas las herramientas hasta que la persona lo corrija")
+		}
+		// Sin proyecto: se lee, pero nunca credenciales; lo demás se bloquea.
 		if gate.Classify(act) == gate.KindRead {
+			state, _ := userdir.StateDir()
+			cwd := act.Cwd
+			if cwd == "" {
+				cwd, _ = a.workdir()
+			}
+			if d := gate.NewPaths(cwd, gate.Home(), state).Evaluate(act); d.Verdict != gate.Allow {
+				return deny(act.IDE, "coyote: bloqueado siempre: "+d.Reason)
+			}
+			gate.Respond(act.IDE, true, "", a.stdout, a.stderr)
 			return nil
 		}
 		return deny(act.IDE, "coyote: "+gerr.Error()+"; el gate bloquea las acciones con efectos")
@@ -282,7 +296,7 @@ func (g *gateRun) event(status, what string, refs []string, ws string) error {
 // safeLedgerText deja un texto apto para un archivo versionado: sin secretos ni
 // atribución a IA (R15).
 func safeLedgerText(s string) string {
-	s = gate.Redact(s)
+	s = gate.Redact(gate.Visible(s))
 	if attr, err := attribution.Default(); err == nil && len(attr.Check(s, true)) > 0 {
 		if i := strings.Index(s, ":"); i > 0 {
 			return s[:i+1] + " [texto omitido por R15]"

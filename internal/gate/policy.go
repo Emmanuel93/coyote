@@ -104,7 +104,7 @@ func NewPaths(root, home, stateDir string) Paths {
 	if stateDir != "" {
 		p.Sensitive = append(p.Sensitive, filepath.Clean(stateDir))
 	}
-	p.Protected = []string{".git", ".coyote", "coyote/approvals", "coyote/ledger", ".claude/settings.json",
+	p.Protected = []string{".git", ".coyote", "coyote/approvals", "coyote/ledger", "coyote/project.yaml", ".claude/settings.json",
 		".claude/settings.local.json", ".claude/hooks", ".cursor/hooks.json", ".cursor/hooks"}
 	for _, rel := range []string{".claude/settings.json", ".claude/settings.local.json", ".claude/managed-settings.json",
 		".cursor/hooks.json", ".gitconfig", ".config/git/config", ".bashrc", ".bash_profile", ".profile", ".zshrc",
@@ -273,6 +273,7 @@ var shellProtected = []struct {
 	{regexp.MustCompile(`(?i)disableallhooks`), "el apagado de hooks"},
 	{regexp.MustCompile(`(?i)\.cursor/hooks`), "los hooks de Cursor"},
 	{regexp.MustCompile(`(?i)coyote/approvals`), "los registros de aprobación"},
+	{regexp.MustCompile(`(?i)coyote/project\.yaml`), "la configuración del proyecto (autonomía)"},
 	{regexp.MustCompile(`(?i)(^|[\s/'"=])\.coyote($|[\s/'";|&)])`), "el estado local de coyote"},
 	{regexp.MustCompile(`(?i)\.ssh/|\.gnupg|\.aws/|\.config/gh\b|\.git-credentials|\.netrc|\.docker/config\.json|\.kube/config|keychains/|\.password-store|\.vault-token`), "credenciales"},
 	{regexp.MustCompile(`(?i)\bsecurity\s+(find|dump|export)-|\bsecret-tool\s+lookup|\bgh\s+auth\s+token`), "credenciales del llavero o de gh"},

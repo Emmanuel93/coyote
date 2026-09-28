@@ -35,8 +35,21 @@ func (ps Paths) Normalize(a Action) Normalized {
 			cmd = string(b)
 		}
 		canon = "shell\x00" + relCwd + "\x00" + cmd
-		if off, _ := a.Input["dangerouslyDisableSandbox"].(bool); off {
-			canon += "\x00sin-sandbox" // fuera del sandbox es otra acción
+		// Todo campo que no sea el comando, su carpeta o texto para personas entra
+		// en el hash (fuera del sandbox o en segundo plano es otra acción); los
+		// valores vacíos o falsos equivalen a no traerlo.
+		extra := map[string]any{}
+		for k, v := range a.Input {
+			switch k {
+			case "command", "cmd", "description", "timeout", "working_directory", "workdir", "cwd":
+				continue
+			}
+			if !zero(v) {
+				extra[k] = v
+			}
+		}
+		if len(extra) > 0 {
+			canon += "\x00" + canonicalJSON(extra)
 		}
 		n.Object = "Bash: " + oneLine(Redact(strings.TrimSpace(a.Command)), 140)
 		if relCwd != "." {
@@ -78,6 +91,23 @@ func (ps Paths) Normalize(a Action) Normalized {
 // un comando antes de que el agente lo pida.
 func (ps Paths) ShellHash(cmd, cwd string) Normalized {
 	return ps.Normalize(Action{Tool: "Bash", Command: cmd, Cwd: cwd, Input: map[string]any{"command": cmd}})
+}
+
+// zero informa si un valor JSON equivale a no traerlo.
+func zero(v any) bool {
+	switch t := v.(type) {
+	case nil:
+		return true
+	case bool:
+		return !t
+	case string:
+		return t == ""
+	case json.Number:
+		return t.String() == "0"
+	case float64:
+		return t == 0
+	}
+	return false
 }
 
 // onlyKeys informa si la entrada no trae campos fuera de los conocidos: un
@@ -191,4 +221,25 @@ func Redact(s string) string {
 		}
 		return m
 	})
+}
+
+// Visible reemplaza caracteres de control e invisibles (escapes de terminal,
+// retorno de carro, controles de dirección Unicode, espacios de ancho cero)
+// por su forma escapada: lo que la persona ve al aprobar es lo que se aprueba.
+// Los saltos de línea se conservan.
+func Visible(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case r == '\n' || r == '\t':
+			b.WriteRune(r)
+		case r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f):
+			fmt.Fprintf(&b, "\\x%02x", r)
+		case (r >= 0x200b && r <= 0x200f) || (r >= 0x202a && r <= 0x202e) || (r >= 0x2066 && r <= 0x2069) || r == 0xfeff || r == 0x061c:
+			fmt.Fprintf(&b, "\\u%04x", r)
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }

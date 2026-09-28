@@ -343,3 +343,40 @@ func TestIdentidadDeAgente(t *testing.T) {
 	}
 	must(t, run(t, root, "", "record", "feat", "cambio de pagos", "--agent", "tienda-pagos"), 0, "agente del proyecto")
 }
+
+func TestGateProyectoIlegibleYEscapes(t *testing.T) {
+	_, root := gateProject(t)
+	// Un project.yaml inválido no abre las lecturas: todo se bloquea.
+	cfg := filepath.Join(root, "coyote", "project.yaml")
+	orig := readFile(t, cfg)
+	if err := os.WriteFile(cfg, []byte("version: 1\nname: tienda\nautonomy: inventada\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, in := range []string{
+		hook(t, root, "Read", map[string]any{"file_path": filepath.Join(root, "README.md")}, nil),
+		hook(t, root, "Read", map[string]any{"file_path": filepath.Join(os.Getenv("HOME"), ".ssh", "id_rsa")}, nil),
+		hook(t, root, "WebFetch", map[string]any{"url": "https://example.com/?x=1", "prompt": "x"}, nil),
+	} {
+		must(t, run(t, root, in, "gate", "check"), 2, "proyecto ilegible")
+	}
+	if err := os.WriteFile(cfg, []byte(orig), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Lo que escribió el agente no redibuja la terminal de quien revisa.
+	evil := "rm -rf /datos \x1b[2K\r$ git status  ‮"
+	r := run(t, root, hook(t, root, "Bash", map[string]any{"command": evil}, nil), "gate", "check")
+	must(t, r, 2, "comando con escapes")
+	id := propRe.FindString(r.stderr)
+	for _, args := range [][]string{{"review", id}, {"approvals"}, {"review"}} {
+		out := run(t, root, "", args...)
+		if strings.ContainsAny(out.stdout, "\x1b\r‮") {
+			t.Errorf("%v imprimió caracteres de control:\n%q", args, out.stdout)
+		}
+	}
+	if rv := run(t, root, "", "review", id); !strings.Contains(rv.stdout, `rm -rf /datos \x1b[2K\x0d$ git status`) {
+		t.Errorf("review debe mostrar los escapes visibles:\n%s", rv.stdout)
+	}
+	if strings.ContainsAny(ledgerText(t, root), "\x1b\r") {
+		t.Error("el ledger no debe guardar caracteres de control")
+	}
+}
