@@ -1,0 +1,370 @@
+// Package project define el proyecto Coyote (coyote/project.yaml) y crea o
+// adopta proyectos: coyote init.
+package project
+
+import (
+	"bytes"
+	"errors"
+	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
+	"text/template"
+	"time"
+
+	"go.yaml.in/yaml/v3"
+
+	coyote "github.com/Emmanuel93/coyote"
+	"github.com/Emmanuel93/coyote/internal/agentsmd"
+	"github.com/Emmanuel93/coyote/internal/ccf"
+	"github.com/Emmanuel93/coyote/internal/ccfdoc"
+	"github.com/Emmanuel93/coyote/internal/gitx"
+	"github.com/Emmanuel93/coyote/internal/identity"
+	"github.com/Emmanuel93/coyote/internal/ledger"
+	"github.com/Emmanuel93/coyote/internal/standards"
+)
+
+// ConfigPath es la ruta del archivo de proyecto relativa a la raíz.
+const ConfigPath = "coyote/project.yaml"
+
+// HookMarker identifica el hook commit-msg de coyote.
+const HookMarker = "# coyote: commit-msg"
+
+// ErrNotProject indica que no se encontró coyote/project.yaml.
+var ErrNotProject = errors.New("no es un proyecto coyote: falta coyote/project.yaml (corre coyote init)")
+
+// Autonomies son los modos de autonomía válidos.
+var Autonomies = []string{"manual", "supervised", "autonomous"}
+
+// RepoRef es un repo enlazado a un proyecto multi-repo.
+type RepoRef struct {
+	Name   string `yaml:"name"`
+	URL    string `yaml:"url,omitempty"`
+	Path   string `yaml:"path,omitempty"`
+	Branch string `yaml:"branch,omitempty"`
+}
+
+// Config es coyote/project.yaml.
+type Config struct {
+	Version  int    `yaml:"version"`
+	Name     string `yaml:"name"`
+	Type     string `yaml:"type"`
+	Hub      string `yaml:"hub,omitempty"`
+	Language struct {
+		Docs string `yaml:"docs,omitempty"`
+		Code string `yaml:"code,omitempty"`
+	} `yaml:"language,omitempty"`
+	Autonomy string `yaml:"autonomy,omitempty"`
+	Budgets  struct {
+		MonthlyUSD float64 `yaml:"monthly_usd,omitempty"`
+	} `yaml:"budgets,omitempty"`
+	Pace struct {
+		Profile               string  `yaml:"profile,omitempty"`
+		WritesPerMinute       int     `yaml:"writes_per_minute,omitempty"`
+		MinGapSeconds         int     `yaml:"min_gap_seconds,omitempty"`
+		ReserveForInteractive float64 `yaml:"reserve_for_interactive,omitempty"`
+	} `yaml:"pace,omitempty"`
+	Repos []RepoRef `yaml:"repos,omitempty"`
+}
+
+var nameRe = regexp.MustCompile(`^[\p{L}\p{N}][\p{L}\p{N}._-]*$`)
+
+// FindRoot sube desde start hasta encontrar coyote/project.yaml.
+func FindRoot(start string) (string, error) {
+	dir, err := filepath.Abs(start)
+	if err != nil {
+		return "", err
+	}
+	for {
+		if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(ConfigPath))); err == nil {
+			return dir, nil
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", ErrNotProject
+		}
+		dir = parent
+	}
+}
+
+// Load lee y valida coyote/project.yaml.
+func Load(root string) (*Config, error) {
+	data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(ConfigPath)))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, ErrNotProject
+		}
+		return nil, err
+	}
+	var c Config
+	if err := yaml.Unmarshal(data, &c); err != nil {
+		return nil, fmt.Errorf("%s: %w", ConfigPath, err)
+	}
+	if c.Autonomy == "" {
+		c.Autonomy = "manual"
+	}
+	if c.Name == "" {
+		c.Name = filepath.Base(root)
+	}
+	return &c, c.Validate()
+}
+
+// Validate revisa los campos del proyecto.
+func (c *Config) Validate() error {
+	var errs []string
+	if !nameRe.MatchString(c.Name) {
+		errs = append(errs, fmt.Sprintf("name inválido %q", c.Name))
+	}
+	if c.Type != "" && !ccfdoc.ValidProjectType(c.Type) {
+		errs = append(errs, fmt.Sprintf("type %q inválido (%s)", c.Type, strings.Join(ccfdoc.ProjectTypes, ", ")))
+	}
+	valid := false
+	for _, a := range Autonomies {
+		valid = valid || a == c.Autonomy
+	}
+	if !valid {
+		errs = append(errs, fmt.Sprintf("autonomy %q inválido (%s)", c.Autonomy, strings.Join(Autonomies, ", ")))
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("%s: %s", ConfigPath, strings.Join(errs, "; "))
+	}
+	return nil
+}
+
+// InitOptions configura coyote init.
+type InitOptions struct {
+	Dir, Name, Type, Hub, Purpose string
+	User                          identity.Person
+	NoGit, NoHooks, NoClaude      bool
+	Now                           time.Time
+}
+
+// Action es lo que init hizo con un archivo.
+type Action struct{ Path, Status string }
+
+// InitResult resume coyote init.
+type InitResult struct {
+	Root       string
+	Name       string
+	Actions    []Action
+	GitInit    bool
+	Warnings   []string
+	LedgerPath string
+}
+
+// Init crea o adopta un proyecto sin sobrescribir archivos existentes.
+func Init(o InitOptions) (*InitResult, error) {
+	if o.Type == "" {
+		o.Type = "other"
+	}
+	if !ccfdoc.ValidProjectType(o.Type) {
+		return nil, fmt.Errorf("tipo %q inválido; usa %s", o.Type, strings.Join(ccfdoc.ProjectTypes, ", "))
+	}
+	dir, err := filepath.Abs(o.Dir)
+	if err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, err
+	}
+	if o.Name == "" {
+		o.Name = filepath.Base(dir)
+	}
+	if !nameRe.MatchString(o.Name) {
+		return nil, fmt.Errorf("nombre %q inválido: usa letras, números, punto, guion o guion bajo", o.Name)
+	}
+	if o.Purpose == "" {
+		o.Purpose = "TODO: qué hace este repo en una línea"
+	}
+	res := &InitResult{Root: dir, Name: o.Name}
+	if !o.NoGit && !gitx.IsRepo(dir) {
+		if err := gitx.Init(dir); err != nil {
+			return nil, err
+		}
+		res.GitInit = true
+	}
+	data := map[string]string{"Name": o.Name, "Type": o.Type, "Hub": o.Hub, "User": o.User.Slug,
+		"Date": o.Now.Format("2006-01-02"), "Purpose": strings.ReplaceAll(o.Purpose, "|", "/")}
+	files := []struct {
+		tmpl, dst string
+		skip      bool
+	}{
+		{"README.md.tmpl", "README.md", false},
+		{"README.coyote.md.tmpl", ccfdoc.ReadmeFile, false},
+		{"CONTEXT.coyote.md.tmpl", ccfdoc.ContextFile, false},
+		{"CLAUDE.md.tmpl", "CLAUDE.md", false},
+		{"coyoteignore.tmpl", ".coyoteignore", false},
+		{"project.yaml.tmpl", ConfigPath, false},
+		{"rules.yaml.tmpl", "coyote/standards/rules.yaml", false},
+		{"claude-settings.json.tmpl", ".claude/settings.json", o.NoClaude},
+	}
+	for _, f := range files {
+		if f.skip {
+			continue
+		}
+		status, err := writeTemplate(dir, f.tmpl, f.dst, data)
+		if err != nil {
+			return nil, err
+		}
+		res.Actions = append(res.Actions, Action{f.dst, status})
+	}
+	for _, keep := range []string{"coyote/decisions", "coyote/workstreams", "coyote/approvals", "coyote/runbooks"} {
+		p := filepath.Join(dir, filepath.FromSlash(keep))
+		if entries, err := os.ReadDir(p); err == nil && len(entries) > 0 {
+			continue
+		}
+		if err := os.MkdirAll(p, 0o755); err != nil {
+			return nil, err
+		}
+		if err := os.WriteFile(filepath.Join(p, ".gitkeep"), nil, 0o644); err != nil {
+			return nil, err
+		}
+	}
+	status, err := ensureLine(filepath.Join(dir, ".gitignore"), ".coyote/")
+	if err != nil {
+		return nil, err
+	}
+	res.Actions = append(res.Actions, Action{".gitignore", status})
+
+	st, err := standards.Load(dir, o.Now)
+	if err != nil {
+		return nil, err
+	}
+	cfg, err := Load(dir)
+	if err != nil {
+		return nil, err
+	}
+	content, err := agentsmd.Generate(dir, st, cfg.Autonomy)
+	if err != nil {
+		return nil, err
+	}
+	status, err = agentsmd.Write(dir, content, false)
+	if err != nil {
+		res.Warnings = append(res.Warnings, err.Error())
+	}
+	res.Actions = append(res.Actions, Action{"AGENTS.md", status})
+
+	if !o.NoHooks && gitx.IsRepo(dir) {
+		p, status, err := InstallHook(dir, false, true)
+		if err != nil {
+			res.Warnings = append(res.Warnings, err.Error())
+		} else {
+			rel, _ := filepath.Rel(dir, p)
+			res.Actions = append(res.Actions, Action{filepath.ToSlash(rel), status})
+		}
+	}
+	changed := res.GitInit
+	for _, a := range res.Actions {
+		changed = changed || a.Status == "creado" || a.Status == "actualizado"
+	}
+	if !changed {
+		return res, nil // nada nuevo: no hay nada que registrar
+	}
+	line := ccf.Line{TS: o.Now, Actor: o.User.Actor(""), Project: "-", Repo: o.Name, Type: "init",
+		Scope: "coyote", What: "proyecto inicializado con coyote", Status: "ok"}
+	if res.LedgerPath, err = ledger.Open(dir).Append(line, o.User.Slug); err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
+func writeTemplate(dir, tmpl, dst string, data map[string]string) (string, error) {
+	target := filepath.Join(dir, filepath.FromSlash(dst))
+	if _, err := os.Lstat(target); err == nil {
+		return "existe", nil // también un symlink, aunque apunte a nada: no se escribe a través de él
+	}
+	raw, err := fs.ReadFile(coyote.Templates, "templates/project/"+tmpl)
+	if err != nil {
+		return "", err
+	}
+	t, err := template.New(tmpl).Option("missingkey=error").Parse(string(raw))
+	if err != nil {
+		return "", err
+	}
+	var buf bytes.Buffer
+	if err := t.Execute(&buf, data); err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		return "", err
+	}
+	return "creado", os.WriteFile(target, buf.Bytes(), 0o644)
+}
+
+func ensureLine(path, line string) (string, error) {
+	if info, err := os.Lstat(path); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		return "omitido", nil // no se escribe a través de un symlink
+	}
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return "creado", os.WriteFile(path, []byte(line+"\n"), 0o644)
+	}
+	if err != nil {
+		return "", err
+	}
+	for _, l := range strings.Split(string(data), "\n") {
+		t := strings.TrimSpace(l)
+		if t == line || t == "/"+line || t == strings.TrimSuffix(line, "/") {
+			return "existe", nil
+		}
+	}
+	content := string(data)
+	if content != "" && !strings.HasSuffix(content, "\n") {
+		content += "\n"
+	}
+	return "actualizado", os.WriteFile(path, []byte(content+line+"\n"), 0o644)
+}
+
+// hookHeader abre el hook que genera coyote; un hook que no empieza así es ajeno.
+const hookHeader = "#!/bin/sh\n" + HookMarker
+
+// InstallHook instala el hook commit-msg de coyote. Nunca pisa un hook ajeno
+// sin force; con onlyCreate (coyote init) tampoco actualiza uno de coyote. No
+// instala en un core.hooksPath fuera del repo, que afectaría a otros repos.
+func InstallHook(dir string, force, onlyCreate bool) (string, string, error) {
+	hooks, outside, err := gitx.HooksDir(dir)
+	if err != nil {
+		return "", "", err
+	}
+	p := filepath.Join(hooks, "commit-msg")
+	if outside && !force {
+		return p, "omitido", fmt.Errorf("core.hooksPath apunta fuera del repo (%s); coyote no instala hooks compartidos: agrega a tu hook commit-msg la línea coyote attribution scrub --in-place --commit-msg \"$1\"", hooks)
+	}
+	data, err := fs.ReadFile(coyote.Templates, "templates/project/commit-msg")
+	if err != nil {
+		return "", "", err
+	}
+	status := "creado"
+	if existing, err := os.ReadFile(p); err == nil {
+		switch {
+		case bytes.Equal(existing, data):
+			return p, "existe", nil
+		case force:
+		case !strings.HasPrefix(string(existing), hookHeader):
+			return p, "omitido", fmt.Errorf("ya hay un hook commit-msg ajeno en %s; agrégale la línea coyote attribution scrub --in-place --commit-msg \"$1\" o usa coyote hooks install --force", p)
+		case onlyCreate:
+			return p, "existe", nil
+		}
+		status = "actualizado"
+	}
+	if err := os.MkdirAll(hooks, 0o755); err != nil {
+		return "", "", err
+	}
+	if err := os.WriteFile(p, data, 0o755); err != nil {
+		return "", "", err
+	}
+	return p, status, os.Chmod(p, 0o755)
+}
+
+// HookInstalled informa si el hook commit-msg limpia la atribución: el de
+// coyote o uno propio que llama a coyote attribution scrub.
+func HookInstalled(dir string) bool {
+	hooks, _, err := gitx.HooksDir(dir)
+	if err != nil {
+		return false
+	}
+	data, err := os.ReadFile(filepath.Join(hooks, "commit-msg"))
+	return err == nil && (strings.Contains(string(data), HookMarker) || strings.Contains(string(data), "coyote attribution scrub"))
+}

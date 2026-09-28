@@ -1,0 +1,139 @@
+# Estándar default de Coyote v0.1.0 (RFC 2119: MUST, SHOULD, MAY).
+# Cada organización lo extiende en su hub y cada proyecto en coyote/standards/rules.yaml.
+# Las reglas sin check son de proceso: las aplican los gates y los agentes, no el lint.
+version: 1
+name: coyote:default
+language: { docs: es, code: en }
+rules:
+  - id: R1
+    title: Prosa en el idioma de docs de la organización; código e identificadores en inglés
+    level: SHOULD
+    scope: repo
+    why: Un idioma por capa evita traducciones y ambigüedad para personas y agentes.
+
+  - id: R2
+    title: Commits con formato tipo(ámbito) descripción
+    level: MUST
+    scope: commit
+    why: El historial se lee por tipo y ámbito, y el ledger deriva de él.
+    check: { type: commit_format, commits: 50, pattern: '^(feat|fix|docs|refactor|test|chore|ci|build|perf|style|revert)(\([a-z0-9._/-]+\))?!?: \S.*$' }
+    fix: "Ejemplo: feat(pagos): reintento con idempotencia"
+
+  - id: R3
+    title: Todo proyecto con .gitignore y AGENTS.md generado
+    level: MUST
+    scope: repo
+    check: { type: file_exists, files: [.gitignore, AGENTS.md] }
+    fix: coyote init crea ambos; coyote generate agents regenera AGENTS.md
+
+  - id: R3.ci
+    title: CI mínima en el repo
+    level: SHOULD
+    scope: repo
+    check: { type: file_exists, files: [".github/workflows/*.yml | .gitlab-ci.yml"] }
+
+  - id: R4
+    title: Los dominios viven una sola vez, en el hub de la organización
+    level: SHOULD
+    scope: org
+
+  - id: R5
+    title: Sin respaldos, volcados ni salidas de agentes dentro del código
+    level: MUST
+    scope: repo
+    check: { type: path_forbidden, paths: ["**/respaldos/**", "**/_to_delete/**", "**/Claude outputs/**", "*.dump", "*.bak", "*.sql.gz"] }
+    fix: Muévelos fuera del repo o a git-lfs del proyecto
+
+  - id: R6
+    title: El avance sale del ledger, no de trackers manuales
+    level: SHOULD
+    scope: repo
+
+  - id: R7
+    title: AGENTS.md generado desde los documentos coyote y vigente
+    level: SHOULD
+    scope: repo
+    check: { type: agents_md_current }
+    fix: coyote generate agents
+
+  - id: R8
+    title: Toda decisión de riesgo R2 o R3 tiene ADR antes del parche
+    level: MUST
+    scope: workflow
+
+  - id: R9
+    title: CI con pruebas y coyote standards lint
+    level: SHOULD
+    scope: repo
+    check: { type: regex_present, files: [".github/workflows/*.yml | .gitlab-ci.yml"], pattern: 'coyote (standards lint|gate pr)' }
+
+  - id: R10
+    title: README de dos pantallas; el detalle vive en coyote/ y se cita
+    level: SHOULD
+    scope: repo
+    check: { type: file_max_lines, files: [README.md], max: 150 }
+
+  - id: R11
+    title: Contratos OpenAPI y AsyncAPI como fuente de tipos
+    level: SHOULD
+    scope: repo
+    profiles: [backend, web, mobile]
+
+  - id: R12
+    title: Exclusiones de indexado declaradas; sin datos personales en coyote/
+    level: MUST
+    scope: repo
+    check: { type: file_exists, files: [.coyoteignore] }
+
+  - id: R13
+    title: Infraestructura como código con inventario infra.yaml vigente
+    level: MUST
+    scope: repo
+    profiles: [infra]
+    check: { type: file_exists, files: [coyote/infra.yaml] }
+
+  - id: R14
+    title: README.md, README.coyote.md y CONTEXT.coyote.md válidos
+    level: MUST
+    scope: repo
+    checks:
+      - { type: file_exists, files: [README.md, README.coyote.md, CONTEXT.coyote.md] }
+      - { type: ccfdoc_valid, files: [README.coyote.md, CONTEXT.coyote.md] }
+
+  - id: R15
+    title: Ningún entregable lleva atribución a herramientas o modelos de IA
+    level: MUST
+    scope: repo
+    why: La autoría es de la persona que aprueba; la trazabilidad vive en el ledger.
+    check: { type: attribution, paths: ["**/*.md", "**/*.txt"], commits: 50 }
+    fix: coyote attribution scrub; el hook commit-msg lo hace en cada commit
+
+  - id: R16
+    title: Todo feature parte del modelo de dominio y de sus contratos
+    level: SHOULD
+    scope: workflow
+
+  - id: R17
+    title: Un IDE de nivel 2 o 3 no ejecuta tareas de riesgo R2 o R3 fuera de ramas coyote/ con gate pr
+    level: MUST
+    scope: workflow
+
+  - id: A1
+    title: Un agente no ejecuta acciones con efectos sin aprobación humana por step, plan o concesión
+    level: MUST
+    scope: agent
+
+  - id: A2
+    title: Todo step declara contrato, budget y esquema de salida
+    level: MUST
+    scope: agent
+
+  - id: A3
+    title: Todo evento queda en el ledger y todo cierre deja su resumen de costo
+    level: MUST
+    scope: agent
+
+  - id: A4
+    title: Un loop autónomo corre en una rama ws/, dentro de sus topes, y lo evalúa quien lo autorizó
+    level: MUST
+    scope: agent

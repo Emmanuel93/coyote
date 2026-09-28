@@ -1,0 +1,20 @@
+{
+  "attribution": {
+    "commit": "",
+    "pr": ""
+  },
+  "includeCoAuthoredBy": false,
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|mcp__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "for c in \"$(command -v coyote)\" \"$HOME/go/bin/coyote\" /opt/homebrew/bin/coyote /usr/local/bin/coyote; do if [ -x \"$c\" ]; then exec \"$c\" gate attribution; fi; done"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,27 @@
+#!/bin/sh
+# coyote: commit-msg (R15). Instalado por coyote; quita del mensaje las atribuciones a herramientas de IA.
+# Usa coyote si lo encuentra (patrones completos; detiene el commit si una frase se atribuye a una
+# herramienta); si no, aplica este filtro básico de líneas.
+msg="$1"
+bin=$(command -v coyote 2>/dev/null)
+for c in "$HOME/go/bin/coyote" /opt/homebrew/bin/coyote /usr/local/bin/coyote; do
+  [ -n "$bin" ] && break
+  [ -x "$c" ] && bin="$c"
+done
+if [ -n "$bin" ]; then
+  exec "$bin" attribution scrub --in-place --commit-msg "$msg"
+fi
+w='([^[:alnum:]]|$)'
+pattern="^[[:space:]]*co-authored-by:.*(noreply@anthropic\.com|claude[ -](code|opus|sonnet|haiku|fable|mythos|[0-9])|cursoragent|cursor[ -]agent|[^[:alnum:]]copilot$w|chatgpt|gpt-?[0-9]|[^[:alnum:]]gemini$w|codeium|windsurf|devin-ai|[^[:alnum:]]codex$w|[^[:alnum:]]aider$w|tabnine|codewhisperer|google-labs-jules|noreply@openai\.com|@ampcode\.com)"
+pattern="$pattern|^[[:space:]]*(claude|copilot|cursor|devin|codex|windsurf|gemini|amp|jules)[- ](session|thread|task|run)(-id)?:"
+pattern="$pattern|^[^[:alnum:]]*((this|este|esta)[[:space:]]+(pr|commit|change|cambio)[[:space:]]+((was|fue)[[:space:]]+)?)?(generated|created|written|made|built|developed|generad[oa]|cread[oa]|escrit[oa]|hech[oa]|desarrollad[oa])[[:space:]]+(with|by|using|via|con|por|usando|mediante)[[:space:]]+\[?(claude|github copilot|copilot|chatgpt|codex|gemini|cursor (agent|bugbot)|windsurf|aider)"
+pattern="$pattern|claude\.ai/code/session_|app\.devin\.ai/sessions/|chatgpt\.com/codex/tasks/|jules\.google\.com/task|ampcode\.com/threads/|noreply@anthropic\.com"
+tmp="$msg.coyote.$$"
+# LC_ALL=C y -a: el mensaje se trata como bytes; un texto que no es UTF-8 no se trunca.
+if LC_ALL=C grep -a -v -i -E "$pattern" "$msg" > "$tmp"; then
+  mv "$tmp" "$msg"
+else
+  status=$?
+  if [ "$status" -eq 1 ]; then mv "$tmp" "$msg"; else rm -f "$tmp"; fi
+fi
+exit 0

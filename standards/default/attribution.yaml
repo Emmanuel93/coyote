@@ -1,0 +1,44 @@
+# Patrones de atribución a herramientas o modelos de IA (regla R15).
+# line_patterns: la línea completa es atribución (trailers, pies, enlaces de sesión) y se elimina.
+# phrase_patterns: la frase es atribución dentro de una línea útil. En archivos se quita la
+#   frase; en mensajes de commit el commit se rechaza para que la persona lo reescriba.
+# Las personas no cuentan: un coautor llamado Claude, Devin o Haider pasa; se exige el correo
+# o el nombre del bot, con límites de palabra. Las frases solo cuentan con nombres de herramienta.
+version: 1
+
+# Fragmentos que los patrones usan como {{nombre}}.
+vars:
+  tools: 'claude\s+code|claude\s+(?:opus|sonnet|haiku|fable)(?:\s+[0-9][0-9.]*)?|claude|chatgpt|gpt-?[0-9][a-z0-9.-]*|github\s+copilot|copilot|gemini|codex|windsurf'
+  link: '\]?(?:\([^)\s]*\))?'
+  keep: '(?P<keep>\s*[.,;:!?"''\]]|\s*$)'
+  en: '(?:written|coded|generated|created|authored|produced|drafted|built|made|developed)\s+(?:entirely\s+|partially\s+|partly\s+|mostly\s+)?(?:with|by|using|via)\s+(?:the\s+help\s+of\s+)?\[?'
+  es: '(?:generad[oa]s?|escrit[oa]s?|codificad[oa]s?|cread[oa]s?|redactad[oa]s?|hech[oa]s?|programad[oa]s?|desarrollad[oa]s?)\s+(?:íntegramente\s+|parcialmente\s+|totalmente\s+|en\s+parte\s+)?(?:con|por|usando|mediante)\s+(?:ayuda\s+de\s+)?\[?'
+
+line_patterns:
+  - id: coauthor-ai
+    pattern: '(?i)^\s*co-authored-by:.*(\bnoreply@anthropic\.com\b|\bclaude[ -](code|opus|sonnet|haiku|fable|mythos|[0-9])|\bcursoragent\b|\bcursor[ -]agent\b|\bcopilot\b|\bchatgpt\b|\bgpt-?[0-9]|\bgemini\b|\bcodeium\b|\bwindsurf\b|\bdevin-ai\b|\bcodex\b|\baider\b|\btabnine\b|\bcodewhisperer\b|\bamazon[ -]q\b|google-labs-jules|\bnoreply@openai\.com\b|@ampcode\.com\b)'
+  - id: ai-session-trailer
+    pattern: '(?i)^\s*(claude|copilot|cursor|devin|codex|windsurf|gemini|amp|jules)[- ](session|thread|task|run)(-id)?:'
+  - id: generated-footer
+    pattern: '(?i)^[^\p{L}\p{N}]*(:robot:[^\p{L}\p{N}]*)?(<(sub|sup|small|p|em|i|b)>[^\p{L}\p{N}]*)*((this|este|esta)\s+(pr|pull\s+request|commit|change|cambio|code|código|patch)\s+((was|fue)\s+)?)?(generated|created|written|made|built|developed|authored|coded|produced|generad[oa]|cread[oa]|escrit[oa]|hech[oa]|desarrollad[oa]|producid[oa])\s+(with|by|using|via|con|por|usando|mediante)\s+\[?(claude(\s+code)?|github\s+copilot|copilot|chatgpt|codex|gemini(\s+code\s+assist)?|cursor\s+(agent|bugbot)|windsurf|cascade|aider|amazon\s+q|tabnine|codeium)\b'
+  - id: robot-emoji
+    pattern: '(?i)🤖.*\b(claude|copilot|codex|gemini|cursor|windsurf|aider|devin|chatgpt|jules|amp|generated|generado)\b'
+  - id: ai-session-url
+    pattern: '(?i)(claude\.ai/code/session_|app\.devin\.ai/sessions/|chatgpt\.com/codex/tasks/|jules\.google\.com/task|ampcode\.com/threads/|cursor\.com/agents\?)'
+  - id: ai-noreply
+    pattern: '(?i)\bnoreply@anthropic\.com\b'
+
+phrase_patterns:
+  # Entre paréntesis se quita con los paréntesis; suelta, solo si la sigue puntuación o el fin
+  # de línea (así "made by Claude Monet" no cuenta).
+  - id: en-made-with-ai
+    pattern: '(?i)\s*\(\b{{en}}(?:{{tools}}){{link}}\s*\)|\s*\b{{en}}(?:{{tools}}){{link}}{{keep}}'
+  - id: es-hecho-con-ia
+    pattern: '(?i)\s*\(\b{{es}}(?:{{tools}}){{link}}\s*\)|\s*\b{{es}}(?:{{tools}}){{link}}{{keep}}'
+  - id: aider-prefix
+    pattern: '(?i)^\s*aider:\s+'
+
+# Rutas donde los patrones aparecen como datos de prueba. Cada proyecto agrega las suyas
+# con un override de R15 (except, con reason), que queda visible en coyote standards diff.
+allow_paths:
+  - "**/testdata/**"

@@ -17,3 +17,4 @@
 2026-09-28T01:46Z|@eramirezhdez/coyote-architect|W-0001|coyote|spec|formatos|specs v1: CCF, CCF-doc, estándar por capas y atribución|doc:docs/specs|-|-|ok
 2026-09-28T01:46Z|@eramirezhdez/coyote-reviewer|W-0001|coyote|rev|seguridad|revisión adversarial: 13 hallazgos, todos corregidos con pruebas|doc:docs/releases/v0.1.0.md|-|-|ok
 2026-09-28T01:47Z|@eramirezhdez/coyote-sr-solution-architect|W-0001|coyote|chore|coyote|adopta coyote en el repo de la herramienta|-|-|-|ok
+2026-09-28T01:47Z|@eramirezhdez/coyote-dev|W-0001|coyote|feat|core|formatos CCF, ledger, estándar por capas y filtro de atribución|-|-|-|ok

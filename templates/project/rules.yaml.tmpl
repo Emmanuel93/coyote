@@ -1,0 +1,14 @@
+# Estándar del proyecto {{.Name}}. Extiende el default de la herramienta
+# (o el del hub de la organización con extends: hub).
+version: 1
+extends: coyote:default
+rules: []
+# Ejemplos:
+# rules:
+#   - id: P1
+#     title: Toda llamada de pago usa la pasarela interna
+#     level: MUST
+#     scope: pr
+#     check: { type: regex_absent, paths: ["src/**"], pattern: 'http\.Post\(' }
+#   - id: R10
+#     override: { level: MAY, until: 2026-12-31, reason: "README heredado", adr: ADR-0001 }
