@@ -68,9 +68,30 @@ type Config struct {
 		ReserveForInteractive float64 `yaml:"reserve_for_interactive,omitempty"`
 	} `yaml:"pace,omitempty"`
 	Repos []RepoRef `yaml:"repos,omitempty"`
+	// Risk sube el riesgo de rutas de los repos del producto para coyote gate
+	// pr (R17): un cambio en ellas pide la revisión de un dueño.
+	Risk struct {
+		R2 []string `yaml:"R2,omitempty"`
+		R3 []string `yaml:"R3,omitempty"`
+	} `yaml:"risk,omitempty"`
 }
 
-var nameRe = regexp.MustCompile(`^[\p{L}\p{N}][\p{L}\p{N}._-]*$`)
+// RiskRules devuelve las reglas de riesgo como R2=patrón y R3=patrón.
+func (c *Config) RiskRules() []string {
+	var out []string
+	for _, p := range c.Risk.R3 {
+		out = append(out, "R3="+strings.TrimSpace(p))
+	}
+	for _, p := range c.Risk.R2 {
+		out = append(out, "R2="+strings.TrimSpace(p))
+	}
+	return out
+}
+
+var (
+	nameRe     = regexp.MustCompile(`^[\p{L}\p{N}][\p{L}\p{N}._-]*$`)
+	riskRuleRe = regexp.MustCompile(`^R[23]=[A-Za-z0-9._/*?{},@+-]+$`)
+)
 
 // FindRoot sube desde start hasta encontrar coyote/project.yaml.
 func FindRoot(start string) (string, error) {
@@ -127,6 +148,11 @@ func (c *Config) Validate() error {
 	}
 	if !valid {
 		errs = append(errs, fmt.Sprintf("autonomy %q inválido (%s)", c.Autonomy, strings.Join(Autonomies, ", ")))
+	}
+	for _, r := range c.RiskRules() {
+		if !riskRuleRe.MatchString(r) || strings.Contains(r, "..") {
+			errs = append(errs, fmt.Sprintf("risk: patrón inválido %q (letras, números y . _ / * ? { } , @ + -)", r[3:]))
+		}
 	}
 	if len(errs) > 0 {
 		return fmt.Errorf("%s: %s", ConfigPath, strings.Join(errs, "; "))

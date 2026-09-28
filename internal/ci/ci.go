@@ -24,6 +24,7 @@ type PR struct {
 	HeadRef  string
 	Repo     string // owner/nombre del repo del PR
 	HeadRepo string // owner/nombre del repo de la rama; distinto si viene de un fork
+	Author   string // login de quien abrió el PR
 	Draft    bool
 }
 
@@ -43,7 +44,10 @@ func ReadPR(path string) (PR, error) {
 		PullRequest *struct {
 			Number int  `json:"number"`
 			Draft  bool `json:"draft"`
-			Base   struct {
+			User   struct {
+				Login string `json:"login"`
+			} `json:"user"`
+			Base struct {
 				SHA  string `json:"sha"`
 				Ref  string `json:"ref"`
 				Repo struct {
@@ -67,7 +71,7 @@ func ReadPR(path string) (PR, error) {
 	}
 	pr := ev.PullRequest
 	out := PR{Number: pr.Number, BaseSHA: pr.Base.SHA, HeadSHA: pr.Head.SHA, BaseRef: pr.Base.Ref, HeadRef: pr.Head.Ref,
-		Repo: pr.Base.Repo.FullName, Draft: pr.Draft}
+		Repo: pr.Base.Repo.FullName, Author: pr.User.Login, Draft: pr.Draft}
 	if pr.Head.Repo != nil {
 		out.HeadRepo = pr.Head.Repo.FullName
 	}

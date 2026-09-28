@@ -92,3 +92,4 @@
 2026-09-28T20:24Z|@eramirezhdez/coyote-devsecops|W-0005|coyote|feat|ci|coyote install --ci github genera el pipeline de impacto de cada repo|-|-|-|ok
 2026-09-28T20:33Z|@eramirezhdez/coyote-dev|W-0005|coyote|refactor|run|núcleo reutilizable de coyote run para el motor de workstreams|-|-|-|ok
 2026-09-28T20:49Z|@eramirezhdez/coyote-architect|W-0005|coyote|feat|ws|motor de workstreams con puntos de control, supervised y autonomous (ADR-0014)|-|-|-|ok
+2026-09-28T20:59Z|@eramirezhdez/coyote-dev|W-0005|coyote|feat|gate|coyote gate pr pide la revisión de un dueño para cambios R2…|-|-|-|ok

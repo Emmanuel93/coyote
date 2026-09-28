@@ -337,7 +337,7 @@ func (a *app) installCI(kind, policy, ref, coyoteRepo string, check, dry bool) e
 	stale := 0
 	for i, self := range repos {
 		others := append(append([]install.CIRepo{}, repos[:i]...), repos[i+1:]...)
-		wf, err := install.GitHubWorkflow(install.CIOptions{Self: self, Others: others, CoyoteRepo: coyoteRepo, CoyoteRef: ref, Policy: policy})
+		wf, err := install.GitHubWorkflow(install.CIOptions{Self: self, Others: others, CoyoteRepo: coyoteRepo, CoyoteRef: ref, Policy: policy, Risk: cfg.RiskRules()})
 		if err != nil {
 			return fail(1, "%v", err)
 		}
@@ -368,8 +368,13 @@ func (a *app) installCI(kind, policy, ref, coyoteRepo string, check, dry bool) e
 		return fail(1, "los workflows no están al día; corre coyote install --ci github")
 	}
 	if !check && !dry {
-		fmt.Fprintf(a.stdout, "\nPara activarlo en cada repo:\n1. Copia coyote/ci/<repo>.yml a .github/workflows/coyote-impact.yml del repo, con un PR.\n"+
-			"2. Crea en cada repo el secreto %s: un token de GitHub de solo lectura (Contents: read) de los repos del producto y de %s.\n", install.SecretName, coyoteRepo)
+		fmt.Fprintf(a.stdout, "\nPara activarlo en cada repo:\n"+
+			"1. Copia coyote/ci/<repo>.yml a .github/workflows/coyote.yml del repo, con un PR.\n"+
+			"2. Crea en cada repo el secreto %s: un token de GitHub de solo lectura (Contents: read) de los repos del producto.\n"+
+			"   Si %s es de otra cuenta, agrega %s con lectura de ese repo; un token fino cubre un solo dueño.\n"+
+			"3. Opcional: %s con Members: read de la organización, para verificar los equipos de CODEOWNERS.\n"+
+			"4. Para exigir la revisión, usa --policy fail y marca el chequeo \"coyote gate pr / riesgo e impacto\" como requerido en la protección de la rama.\n",
+			install.SecretName, coyoteRepo, install.ToolSecretName, install.TeamsSecretName)
 	}
 	return nil
 }

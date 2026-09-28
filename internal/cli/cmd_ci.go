@@ -37,35 +37,60 @@ func cmdCI(a *app, args []string) error {
 	if *policy != "warn" && *policy != "fail" {
 		return fail(2, "--policy %q inválida: warn o fail", *policy)
 	}
-	sources, err := ciSources(repos)
-	if err != nil {
+	p, err := a.prAnalysis(repos, *self, *event, *base, *head)
+	if err != nil || p == nil {
 		return err
 	}
+	report := ciReport(p.im, p.m, len(p.sources), p.pr, p.self, *policy)
+	a.publishReport(report, *summary, *comment, p.pr)
+	if n := breakingCount(p.im); *policy == "fail" && n > 0 {
+		return fail(1, "coyote: el cambio rompe %d %s de otros módulos (política fail)", n, pluralWord(n, "interfaz", "interfaces"))
+	}
+	return nil
+}
+
+// prRun es el análisis de un PR: sus repos, el evento, el mapa y el impacto.
+type prRun struct {
+	sources []product.Source
+	src     product.Sources
+	pr      ci.PR
+	self    string
+	m       *product.Map
+	im      *product.Impact
+}
+
+// prAnalysis lee el evento, arma el mapa con los repos y calcula el impacto
+// del diff del PR. Devuelve nil, sin error, si el PR viene de un fork.
+func (a *app) prAnalysis(repos []string, self, event, base, head string) (*prRun, error) {
+	sources, err := ciSources(repos)
+	if err != nil {
+		return nil, err
+	}
 	var pr ci.PR
-	if *event != "" {
-		if pr, err = ci.ReadPR(*event); err != nil {
-			return fail(1, "%v", err)
+	if event != "" {
+		if pr, err = ci.ReadPR(event); err != nil {
+			return nil, fail(1, "%v", err)
 		}
 	}
-	if *base != "" {
-		pr.BaseSHA = *base
+	if base != "" {
+		pr.BaseSHA = base
 	}
-	if *head != "" {
-		pr.HeadSHA = *head
+	if head != "" {
+		pr.HeadSHA = head
 	}
 	if pr.BaseSHA == "" || pr.HeadSHA == "" {
-		return fail(2, "faltan los commits del PR: corre dentro de GitHub Actions (pull_request) o pasa --base y --head")
+		return nil, fail(2, "faltan los commits del PR: corre dentro de GitHub Actions (pull_request) o pasa --base y --head")
 	}
 	for _, s := range []string{pr.BaseSHA, pr.HeadSHA} {
 		if strings.HasPrefix(s, "-") || strings.ContainsAny(s, " .:\n") {
-			return fail(2, "commit inválido %q", s)
+			return nil, fail(2, "commit inválido %q", s)
 		}
 	}
 	if pr.FromFork() {
 		fmt.Fprintln(a.stdout, "coyote: el PR viene de un fork; el pipeline de impacto no corre con código de forks")
-		return nil
+		return nil, nil
 	}
-	selfName := *self
+	selfName := self
 	if selfName == "" {
 		if gh := os.Getenv("GITHUB_REPOSITORY"); gh != "" {
 			selfName = gh[strings.LastIndex(gh, "/")+1:]
@@ -76,32 +101,33 @@ func cmdCI(a *app, args []string) error {
 		src[s.Name] = s.Dir
 	}
 	if _, ok := src[selfName]; !ok {
-		return fail(2, "el repo del PR %q no está entre los --repo (%s)", selfName, strings.Join(sortedSourceNames(sources), ", "))
+		return nil, fail(2, "el repo del PR %q no está entre los --repo (%s)", selfName, strings.Join(sortedSourceNames(sources), ", "))
 	}
 	scans, err := a.scanAll(sources)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	m := product.Build(scans)
 	rng := pr.BaseSHA + "..." + pr.HeadSHA
 	im, err := m.Impact(product.Query{Changes: []product.Change{{Repo: selfName, Diff: rng}}}, src)
 	if err != nil {
-		return fail(1, "%v", err)
+		return nil, fail(1, "%v", err)
 	}
-	report := ciReport(im, m, len(sources), pr, selfName, *policy)
+	return &prRun{sources: sources, src: src, pr: pr, self: selfName, m: m, im: im}, nil
+}
+
+// publishReport deja el reporte en la salida, en el resumen del job y, si se
+// pide, en el comentario del PR.
+func (a *app) publishReport(report, summary string, comment bool, pr ci.PR) {
 	fmt.Fprint(a.stdout, report)
-	if err := ci.AppendSummary(*summary, report); err != nil {
+	if err := ci.AppendSummary(summary, report); err != nil {
 		fmt.Fprintf(a.stderr, "aviso: no pude escribir el resumen del job: %v\n", err)
 	}
-	if *comment {
+	if comment {
 		if err := ciComment(pr, report); err != nil {
 			fmt.Fprintf(a.stderr, "aviso: no pude comentar en el PR: %v\n", err)
 		}
 	}
-	if n := breakingCount(im); *policy == "fail" && n > 0 {
-		return fail(1, "coyote: el cambio rompe %d %s de otros módulos (política fail)", n, pluralWord(n, "interfaz", "interfaces"))
-	}
-	return nil
 }
 
 // ciSources lee los --repo nombre=ruta.
@@ -162,31 +188,55 @@ const ciMaxRows = 30
 func ciReport(im *product.Impact, m *product.Map, total int, pr ci.PR, self, policy string) string {
 	var b strings.Builder
 	b.WriteString(ci.Marker + "\n")
-	n := len(im.Touched) + len(im.Direct) + len(im.Indirect)
-	others := 0
+	b.WriteString("### coyote: " + impactVerdict(im, self) + "\n\n")
+	b.WriteString(impactBody(im, m, total, policy))
+	return finishReport(&b, "coyote impact", pr, total)
+}
+
+// otherRepos cuenta los repos, además del del PR, a los que llega el cambio.
+func otherRepos(im *product.Impact, self string) int {
+	n := 0
 	for _, r := range im.Repos {
 		if r != self {
-			others++
+			n++
 		}
 	}
-	br := breakingCount(im)
+	return n
+}
+
+// impactVerdict es el titular del impacto.
+func impactVerdict(im *product.Impact, self string) string {
+	n := len(im.Touched) + len(im.Direct) + len(im.Indirect)
+	br, others := breakingCount(im), otherRepos(im, self)
 	switch {
 	case n == 0:
-		b.WriteString("### coyote: sin cambios de contrato\n\nEl PR no toca endpoints ni tópicos del producto.\n")
+		return "sin cambios de contrato"
 	case br > 0:
-		fmt.Fprintf(&b, "### coyote: el cambio rompe %d %s\n\n", br, pluralWord(br, "interfaz", "interfaces"))
+		return fmt.Sprintf("el cambio rompe %d %s", br, pluralWord(br, "interfaz", "interfaces"))
 	case others > 0:
-		fmt.Fprintf(&b, "### coyote: el cambio llega a %d %s\n\n", others, pluralWord(others, "repo más", "repos más"))
-	default:
-		b.WriteString("### coyote: el cambio queda dentro de este repo\n\n")
+		return fmt.Sprintf("el cambio llega a %d %s", others, pluralWord(others, "repo más", "repos más"))
 	}
-	if n > 0 {
-		fmt.Fprintf(&b, "%d %s · %d %s · %d a través de un BFF · política `%s`\n\n",
-			len(im.Touched), pluralWord(len(im.Touched), "interfaz tocada", "interfaces tocadas"),
-			len(im.Direct), pluralWord(len(im.Direct), "consumidor directo", "consumidores directos"), len(im.Indirect), policy)
-		b.WriteString(clipSections(impactMarkdown(im, m, total)))
+	return "el cambio queda dentro de este repo"
+}
+
+// impactBody son los conteos y las tablas del impacto, recortadas.
+func impactBody(im *product.Impact, m *product.Map, total int, policy string) string {
+	n := len(im.Touched) + len(im.Direct) + len(im.Indirect)
+	if n == 0 {
+		return "El PR no toca endpoints ni tópicos del producto.\n"
 	}
-	fmt.Fprintf(&b, "\n<sub>coyote impact · %s...%s · el mapa sale del código de los %d repos, sin modelo</sub>\n", short(pr.BaseSHA), short(pr.HeadSHA), total)
+	var b strings.Builder
+	fmt.Fprintf(&b, "%d %s · %d %s · %d a través de un BFF · política `%s`\n\n",
+		len(im.Touched), pluralWord(len(im.Touched), "interfaz tocada", "interfaces tocadas"),
+		len(im.Direct), pluralWord(len(im.Direct), "consumidor directo", "consumidores directos"), len(im.Indirect), policy)
+	b.WriteString(clipSections(impactMarkdown(im, m, total)))
+	return b.String()
+}
+
+// finishReport cierra el reporte con su pie, acorta los commits y lo recorta
+// al tamaño de un comentario.
+func finishReport(b *strings.Builder, what string, pr ci.PR, total int) string {
+	fmt.Fprintf(b, "\n<sub>%s · %s...%s · el mapa sale del código de los %d repos, sin modelo</sub>\n", what, short(pr.BaseSHA), short(pr.HeadSHA), total)
 	out := strings.NewReplacer(pr.BaseSHA, short(pr.BaseSHA), pr.HeadSHA, short(pr.HeadSHA)).Replace(b.String())
 	return ci.Clip(out, ci.RunURL())
 }

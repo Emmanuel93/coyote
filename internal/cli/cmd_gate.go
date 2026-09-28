@@ -20,7 +20,7 @@ import (
 	"github.com/Emmanuel93/coyote/internal/userdir"
 )
 
-const gateUsage = "check [--ide claude-code|cursor|codex|copilot] < hook.json | attribution < hook.json"
+const gateUsage = "check [--ide claude-code|cursor|codex|copilot] < hook.json | attribution < hook.json | pr --repo nombre=ruta... [--policy warn|fail]"
 
 func cmdGate(a *app, args []string) error {
 	if len(args) == 0 {
@@ -40,6 +40,8 @@ func cmdGate(a *app, args []string) error {
 		return nil
 	case "check":
 		return gateCheck(a, args[1:])
+	case "pr":
+		return gatePR(a, args[1:])
 	}
 	return fail(2, "uso: coyote gate "+gateUsage)
 }

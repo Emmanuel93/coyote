@@ -9,7 +9,7 @@ import (
 
 func TestGitHubWorkflow(t *testing.T) {
 	o := CIOptions{Self: CIRepo{"servicios", "acme/servicios"}, Others: []CIRepo{{"app", "acme/app"}, {"backoffice", "acme/backoffice-web"}},
-		CoyoteRepo: "acme/coyote", CoyoteRef: "v0.5.0", Policy: "warn"}
+		CoyoteRepo: "acme/coyote", CoyoteRef: "v0.5.0", Policy: "warn", Risk: []string{"R3=services/*/src/**/pagos/**", "R2=**/*.graphqls"}}
 	wf, err := GitHubWorkflow(o)
 	if err != nil {
 		t.Fatal(err)
@@ -25,21 +25,25 @@ func TestGitHubWorkflow(t *testing.T) {
 		"repository: acme/app", "repository: acme/backoffice-web", "token: ${{ secrets.COYOTE_PRODUCT_TOKEN }}",
 		"repository: acme/coyote", "ref: v0.5.0", "actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
 		"--repo servicios=repos/servicios", "--repo backoffice=repos/backoffice", "--self servicios --policy warn --comment",
+		"pull_request_review:", "gate pr", "--risk 'R3=services/*/src/**/pagos/**'", "--risk 'R2=**/*.graphqls'",
+		"token: ${{ secrets.COYOTE_TOOL_TOKEN || secrets.COYOTE_PRODUCT_TOKEN }}", "COYOTE_TEAMS_TOKEN: ${{ secrets.COYOTE_TEAMS_TOKEN }}",
 	} {
 		if !strings.Contains(wf, want) {
 			t.Errorf("falta %q:\n%s", want, wf)
 		}
 	}
-	if strings.Contains(wf, "pull_request_target") || strings.Count(wf, "secrets.") != 3 {
-		t.Errorf("el secreto solo va en los checkouts de los otros repos y de coyote:\n%s", wf)
+	if strings.Contains(wf, "pull_request_target") || strings.Count(wf, "secrets.") != 5 {
+		t.Errorf("los secretos solo van en los checkouts y en la verificación de equipos:\n%s", wf)
 	}
-	// Nada sin validar entra al YAML.
-	bad := []CIOptions{o, o, o, o, o}
+	// Nada sin validar entra al YAML ni al shell.
+	bad := []CIOptions{o, o, o, o, o, o, o}
 	bad[0].Self.Name = "x${{ secrets.X }}"
 	bad[1].Others = []CIRepo{{"app", "acme/app\n  run: rm -rf /"}}
 	bad[2].CoyoteRef = "main"
 	bad[3].Policy = "maybe"
 	bad[4].Others = []CIRepo{{"servicios", "acme/otra"}}
+	bad[5].Risk = []string{"R3=x'; curl evil #"}
+	bad[6].Risk = []string{"R1=**"}
 	for i, b := range bad {
 		if _, err := GitHubWorkflow(b); err == nil {
 			t.Errorf("caso %d: debía rechazarse", i)

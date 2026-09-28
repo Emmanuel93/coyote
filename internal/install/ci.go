@@ -12,8 +12,15 @@ const (
 	setupGoAction  = "actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0"
 )
 
-// SecretName es el secreto con el token de solo lectura de los repos del producto.
-const SecretName = "COYOTE_PRODUCT_TOKEN"
+// Secretos del workflow. Un token fino de GitHub cubre los repos de un solo
+// dueño: si coyote vive en otra cuenta que el producto, su checkout usa
+// COYOTE_TOOL_TOKEN. COYOTE_TEAMS_TOKEN, opcional, deja verificar los
+// equipos de CODEOWNERS (Members: read de la organización).
+const (
+	SecretName      = "COYOTE_PRODUCT_TOKEN"
+	ToolSecretName  = "COYOTE_TOOL_TOKEN"
+	TeamsSecretName = "COYOTE_TEAMS_TOKEN"
+)
 
 // CIRepo es un repo del producto en GitHub.
 type CIRepo struct {
@@ -25,15 +32,18 @@ type CIRepo struct {
 type CIOptions struct {
 	Self       CIRepo
 	Others     []CIRepo
-	CoyoteRepo string // owner/nombre del repo de coyote
-	CoyoteRef  string // etiqueta de la versión, p. ej. v0.5.0
-	Policy     string // warn o fail
+	CoyoteRepo string   // owner/nombre del repo de coyote
+	CoyoteRef  string   // etiqueta de la versión, p. ej. v0.5.0
+	Policy     string   // warn o fail
+	Risk       []string // reglas de riesgo del proyecto: R2=patrón o R3=patrón
 }
 
 var (
 	fullNameRe = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})/[A-Za-z0-9._-]{1,100}$`)
 	refRe      = regexp.MustCompile(`^v\d+\.\d+\.\d+$`)
 	nameRe     = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
+	// riskRe solo deja caracteres de patrón: la regla va entre comillas simples en el shell.
+	riskRe = regexp.MustCompile(`^R[23]=[A-Za-z0-9._/*?{},@+-]+$`)
 )
 
 // Validate revisa todo lo que entra al YAML: ningún valor se interpola sin
@@ -59,12 +69,19 @@ func (o CIOptions) Validate() error {
 	if o.Policy != "warn" && o.Policy != "fail" {
 		return fmt.Errorf("política inválida %q: warn o fail", o.Policy)
 	}
+	for _, r := range o.Risk {
+		if !riskRe.MatchString(r) || strings.Contains(r, "..") {
+			return fmt.Errorf("regla de riesgo inválida %q: R2=patrón o R3=patrón, con letras, números y . _ / * ? { } , @ + -", r)
+		}
+	}
 	return nil
 }
 
-// GitHubWorkflow arma .github/workflows/coyote-impact.yml para un repo del
-// producto (ADR-0013). En cada PR interno trae los otros repos con el token de
-// solo lectura, compila coyote de una versión etiquetada y reporta el impacto.
+// GitHubWorkflow arma .github/workflows/coyote.yml para un repo del producto
+// (ADR-0013). En cada PR interno, y con cada revisión, trae los otros repos
+// con el token de solo lectura, compila coyote de una versión etiquetada y
+// corre coyote gate pr: el impacto en el producto, el riesgo y la revisión
+// de un dueño (R17).
 func GitHubWorkflow(o CIOptions) (string, error) {
 	if err := o.Validate(); err != nil {
 		return "", err
@@ -72,20 +89,24 @@ func GitHubWorkflow(o CIOptions) (string, error) {
 	var b strings.Builder
 	w := func(format string, a ...any) { fmt.Fprintf(&b, format+"\n", a...) }
 	w("# Generado por coyote install --ci github (ADR-0013). No lo edites aquí: cámbialo en el proyecto del producto.")
-	w("# Necesita el secreto %s: un token de solo lectura (Contents: read) de los repos del producto y del de coyote.", SecretName)
-	w("name: coyote impact")
+	w("# Secretos: %s, un token de solo lectura (Contents: read) de los repos del producto;", SecretName)
+	w("# %s, si coyote vive en otra cuenta; %s (opcional), Members: read para verificar los equipos de CODEOWNERS.", ToolSecretName, TeamsSecretName)
+	w("name: coyote gate pr")
 	w("on:")
 	w("  pull_request:")
 	w("    types: [opened, synchronize, reopened, ready_for_review]")
+	w("  pull_request_review:")
+	w("    types: [submitted, dismissed]")
 	w("permissions:")
 	w("  contents: read")
 	w("  pull-requests: write")
 	w("concurrency:")
-	w("  group: coyote-impact-${{ github.event.pull_request.number }}")
+	w("  group: coyote-gate-${{ github.event.pull_request.number }}")
 	w("  cancel-in-progress: true")
 	w("jobs:")
-	w("  impacto:")
-	w("    # Solo PRs de ramas de este repo: un fork no recibe el secreto ni corre coyote.")
+	w("  gate:")
+	w("    name: riesgo e impacto")
+	w("    # Solo PRs de ramas de este repo: un fork no recibe los secretos ni corre coyote.")
 	w("    if: github.event.pull_request.head.repo.full_name == github.repository")
 	w("    runs-on: ubuntu-latest")
 	w("    timeout-minutes: 15")
@@ -112,7 +133,7 @@ func GitHubWorkflow(o CIOptions) (string, error) {
 	w("          repository: %s", o.CoyoteRepo)
 	w("          ref: %s", o.CoyoteRef)
 	w("          path: coyote-src")
-	w("          token: ${{ secrets.%s }}", SecretName)
+	w("          token: ${{ secrets.%s || secrets.%s }}", ToolSecretName, SecretName)
 	w("          persist-credentials: false")
 	w("      - uses: %s", setupGoAction)
 	w("        with:")
@@ -126,14 +147,18 @@ func GitHubWorkflow(o CIOptions) (string, error) {
 	w("          GOSUMDB: \"off\"")
 	w("          CGO_ENABLED: \"0\"")
 	w("        run: go build -trimpath -o \"$RUNNER_TEMP/coyote\" ./cmd/coyote")
-	w("      - name: Impacto en el producto")
+	w("      - name: Riesgo, impacto y revisión")
 	w("        env:")
 	w("          GITHUB_TOKEN: ${{ github.token }}")
+	w("          %s: ${{ secrets.%s }}", TeamsSecretName, TeamsSecretName)
 	w("        run: >-")
-	w("          \"$RUNNER_TEMP/coyote\" ci impact")
+	w("          \"$RUNNER_TEMP/coyote\" gate pr")
 	w("          --repo %s=repos/%s", o.Self.Name, o.Self.Name)
 	for _, r := range o.Others {
 		w("          --repo %s=repos/%s", r.Name, r.Name)
+	}
+	for _, r := range o.Risk {
+		w("          --risk '%s'", r)
 	}
 	w("          --self %s --policy %s --comment", o.Self.Name, o.Policy)
 	return b.String(), nil

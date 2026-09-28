@@ -523,3 +523,37 @@ func (m *Map) contractChanges(rd *reader, dir, repo string, ch *fileChanges, lef
 	}
 	return added, removed
 }
+
+// ChangedFiles lista los archivos que cambia un rango de git (base...head,
+// base..head o una revisión contra el árbol de trabajo): los nuevos, los
+// modificados y los borrados. Lee con plomería, como el resto del paquete.
+func ChangedFiles(dir, diff string) ([]string, error) {
+	if diff == "" {
+		return nil, fmt.Errorf("falta el rango de git")
+	}
+	ch, err := changedLines(dir, diff, nil)
+	if err != nil {
+		return nil, err
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, m := range []map[string][]lineRange{ch.new, ch.old} {
+		for f := range m {
+			if !seen[f] {
+				seen[f] = true
+				out = append(out, f)
+			}
+		}
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+// FileAt lee un archivo de texto tal como está en una revisión, sin tocar el
+// árbol de trabajo: el CODEOWNERS que manda es el de la rama base.
+func FileAt(dir, rev, path string) (string, bool) {
+	if rev == "" || strings.HasPrefix(rev, "-") || strings.HasPrefix(path, "-") || strings.Contains(path, "..") {
+		return "", false
+	}
+	return fileText(dir, rev, path)
+}
