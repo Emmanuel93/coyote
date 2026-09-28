@@ -1,0 +1,250 @@
+package cli
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
+	"sync"
+	"testing"
+)
+
+// gateProject crea un proyecto coyote y deja el entorno como el de una
+// persona en su terminal (sin variables de sesión de agente).
+func gateProject(t *testing.T) (string, string) {
+	t.Helper()
+	base := setup(t)
+	for _, k := range agentEnv {
+		t.Setenv(k, "")
+	}
+	t.Setenv("CLAUDE_PROJECT_DIR", "")
+	t.Setenv("CURSOR_PROJECT_DIR", "")
+	t.Setenv("COYOTE_STATE_DIR", filepath.Join(base, "state"))
+	root := filepath.Join(base, "tienda")
+	must(t, run(t, base, "", "init", "tienda", "--type", "backend", "--purpose", "API de pedidos de la tienda demo"), 0, "init")
+	old := isTerminal
+	isTerminal = func() bool { return true }
+	t.Cleanup(func() { isTerminal = old })
+	return base, root
+}
+
+func hook(t *testing.T, root, tool string, input map[string]any, extra map[string]any) string {
+	t.Helper()
+	m := map[string]any{"session_id": "s1", "hook_event_name": "PreToolUse", "cwd": root, "tool_name": tool, "tool_input": input}
+	for k, v := range extra {
+		m[k] = v
+	}
+	b, _ := json.Marshal(m)
+	return string(b)
+}
+
+var propRe = regexp.MustCompile(`P-[a-z0-9]{6}`)
+
+func TestGateFlujoDeAprobacion(t *testing.T) {
+	_, root := gateProject(t)
+	bash := func(cmd string) string { return hook(t, root, "Bash", map[string]any{"command": cmd, "description": "x"}, nil) }
+
+	// Lectura: pasa sin registro.
+	before := ledgerText(t, root)
+	must(t, run(t, root, bash("git status"), "gate", "check"), 0, "lectura")
+	if ledgerText(t, root) != before {
+		t.Error("una lectura no debe escribir en el ledger")
+	}
+
+	// Sin aprobación: bloquea, encola y registra la propuesta una sola vez.
+	r := run(t, root, bash("go test ./..."), "gate", "check")
+	must(t, r, 2, "sin aprobación")
+	id := propRe.FindString(r.stderr)
+	if id == "" || !strings.Contains(r.stderr, "coyote approve "+id) {
+		t.Fatalf("el mensaje debe decir cómo aprobar: %s", r.stderr)
+	}
+	must(t, run(t, root, bash("go test ./..."), "gate", "check"), 2, "segundo intento")
+	if n := strings.Count(ledgerText(t, root), "prop:"+id); n != 1 {
+		t.Errorf("la propuesta debe quedar una vez en el ledger, quedó %d", n)
+	}
+	out := run(t, root, "", "approvals")
+	must(t, out, 0, "approvals")
+	if !strings.Contains(out.stdout, id) || !strings.Contains(out.stdout, "2 intentos") || !strings.Contains(out.stdout, "@ana/claude-code") {
+		t.Errorf("la cola no muestra la propuesta:\n%s", out.stdout)
+	}
+	rv := run(t, root, "", "review", id)
+	must(t, rv, 0, "review")
+	if !strings.Contains(rv.stdout, "$ go test ./...") {
+		t.Errorf("review debe mostrar el comando:\n%s", rv.stdout)
+	}
+
+	// Un agente no puede aprobar, ni desde el IDE ni sin terminal.
+	t.Setenv("CLAUDECODE", "1")
+	must(t, run(t, root, "", "approve", id), 1, "aprobar desde una sesión de agente")
+	t.Setenv("CLAUDECODE", "")
+	isTerminal = func() bool { return false }
+	must(t, run(t, root, "", "approve", id), 1, "aprobar sin terminal")
+	isTerminal = func() bool { return true }
+
+	// La persona aprueba dos usos.
+	must(t, run(t, root, "", "approve", id[:5], "--uses", "2"), 0, "approve")
+	rec := filepath.Join(root, "coyote", "approvals", id+".json")
+	if _, err := os.Stat(rec); err != nil {
+		t.Fatalf("falta el registro: %v", err)
+	}
+	must(t, run(t, root, bash("go test ./... "), "gate", "check"), 0, "primer uso")
+	must(t, run(t, root, bash("go test ./..."), "gate", "check"), 0, "segundo uso")
+	r = run(t, root, bash("go test ./..."), "gate", "check")
+	must(t, r, 2, "usos agotados")
+	if !strings.Contains(ledgerText(t, root), "|gate|gate|aprobado: Bash: go test ./...|apr:"+id) {
+		t.Errorf("el uso no quedó en el ledger:\n%s", ledgerText(t, root))
+	}
+
+	// Un registro modificado a mano deja de valer.
+	id2 := propRe.FindString(r.stderr)
+	must(t, run(t, root, "", "approve", id2, "--uses", "5"), 0, "approve 2")
+	data := readFile(t, filepath.Join(root, "coyote", "approvals", id2+".json"))
+	if err := os.WriteFile(filepath.Join(root, "coyote", "approvals", id2+".json"), []byte(strings.Replace(data, `"uses": 5`, `"uses": 50`, 1)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	must(t, run(t, root, bash("go test ./..."), "gate", "check"), 2, "registro alterado")
+	all := run(t, root, "", "approvals", "--all")
+	if !strings.Contains(all.stdout, "firma inválida") {
+		t.Errorf("approvals --all debe señalar el registro alterado:\n%s", all.stdout)
+	}
+
+	// Revocar corta una aprobación vigente.
+	r = run(t, root, bash("make check"), "gate", "check")
+	id3 := propRe.FindString(r.stderr)
+	must(t, run(t, root, "", "approve", id3, "--uses", "3"), 0, "approve 3")
+	must(t, run(t, root, bash("make check"), "gate", "check"), 0, "uso antes de revocar")
+	must(t, run(t, root, "", "revoke", id3, "--reason", "ya no hace falta"), 0, "revoke")
+	must(t, run(t, root, bash("make check"), "gate", "check"), 2, "revocada")
+
+	// Rechazar devuelve el motivo al agente.
+	r = run(t, root, bash("rm -rf vendor"), "gate", "check")
+	id4 := propRe.FindString(r.stderr)
+	must(t, run(t, root, "", "reject", id4, "--reason", "no borres vendor, usa go mod tidy"), 0, "reject")
+	r = run(t, root, bash("rm -rf vendor"), "gate", "check")
+	must(t, r, 2, "rechazada")
+	if !strings.Contains(r.stderr, "usa go mod tidy") {
+		t.Errorf("el agente debe ver el motivo: %s", r.stderr)
+	}
+	must(t, run(t, root, "", "reject", id4, "--reason", "x"), 2, "motivo sin sentido")
+
+	// Aprobar un comando antes de que se pida.
+	must(t, run(t, root, "", "approve", "--bash", "go vet ./... && go test ./...", "--uses", "1", "--for", "30m"), 0, "approve --bash")
+	must(t, run(t, root, bash("go vet ./... && go test ./..."), "gate", "check"), 0, "comando preaprobado")
+	must(t, run(t, root, "", "approve", "--bash", "git status"), 0, "lectura no se aprueba")
+	must(t, run(t, root, "", "approve", "--bash", "cat ~/.ssh/id_rsa"), 1, "credenciales no se aprueban")
+	must(t, run(t, root, "", "approve", "--bash", "make", "--for", "48h"), 2, "más de 24 h")
+	must(t, run(t, root, "", "approve", "--bash", "make", "--uses", "500"), 2, "más de 100 usos")
+}
+
+func TestGateEditaYBloquea(t *testing.T) {
+	_, root := gateProject(t)
+	file := filepath.Join(root, "main.go")
+	if err := os.WriteFile(file, []byte("package main\n\nfunc main() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	edit := hook(t, root, "Edit", map[string]any{"file_path": file, "old_string": "func main() {}", "new_string": "func main() { println(1) }"},
+		map[string]any{"agent_type": "coyote-dev", "agent_id": "a1"})
+	r := run(t, root, edit, "gate", "check")
+	must(t, r, 2, "edición sin aprobación")
+	id := propRe.FindString(r.stderr)
+	rv := run(t, root, "", "review", id)
+	if !strings.Contains(rv.stdout, "-func main() {}") || !strings.Contains(rv.stdout, "+func main() { println(1) }") ||
+		!strings.Contains(rv.stdout, "@ana/coyote-dev") {
+		t.Errorf("review debe mostrar el diff y el agente:\n%s", rv.stdout)
+	}
+	must(t, run(t, root, "", "approve", "--all"), 0, "approve --all")
+	must(t, run(t, root, edit, "gate", "check"), 0, "edición aprobada")
+	if !strings.Contains(ledgerText(t, root), "|@ana/coyote-dev|-|tienda|gate|gate|aprobado: Edit main.go") {
+		t.Errorf("el ledger debe registrar al agente que reportó el IDE:\n%s", ledgerText(t, root))
+	}
+
+	// Bloqueos que ninguna aprobación levanta.
+	for _, c := range []string{
+		hook(t, root, "Write", map[string]any{"file_path": filepath.Join(root, ".claude", "settings.json"), "content": "{}"}, nil),
+		hook(t, root, "Bash", map[string]any{"command": "coyote approve --all"}, nil),
+		hook(t, root, "Bash", map[string]any{"command": "git commit -m 'feat(x): y' -m 'Co-Authored-By: Claude <noreply@anthropic.com>'"}, nil),
+		hook(t, root, "Bash", map[string]any{"command": "git -c user.email=noreply@anthropic.com commit -m 'feat(x): y'"}, nil),
+		hook(t, root, "Bash", map[string]any{"command": "coyote commit -m 'fix(x): y' --agent coyote-reviewer"}, map[string]any{"agent_type": "coyote-dev"}),
+	} {
+		r := run(t, root, c, "gate", "check")
+		must(t, r, 2, "bloqueo: "+c)
+		if !strings.Contains(r.stderr, "bloqueado") {
+			t.Errorf("se esperaba un bloqueo, no una propuesta: %s", r.stderr)
+		}
+	}
+	q := run(t, root, "", "approvals")
+	if propRe.MatchString(q.stdout) {
+		t.Errorf("un bloqueo no debe dejar propuestas en la cola:\n%s", q.stdout)
+	}
+	if strings.Contains(ledgerText(t, root), "Co-Authored-By") {
+		t.Error("el ledger no debe copiar la atribución que bloqueó")
+	}
+}
+
+func TestGateFallaCerrado(t *testing.T) {
+	base, root := gateProject(t)
+	outside := filepath.Join(base, "sin-proyecto")
+	if err := os.MkdirAll(outside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		dir, stdin, what string
+		want            int
+	}{
+		{root, "no es json", "entrada ilegible", 2},
+		{root, `{"hook_event_name":"PreToolUse","tool_input":{}}`, "sin herramienta", 2},
+		{outside, hook(t, outside, "Bash", map[string]any{"command": "rm -rf x"}, nil), "fuera de un proyecto", 2},
+		{outside, hook(t, outside, "Read", map[string]any{"file_path": "x"}, nil), "lectura fuera de un proyecto", 0},
+	}
+	for _, c := range cases {
+		r := run(t, c.dir, c.stdin, "gate", "check")
+		must(t, r, c.want, c.what)
+	}
+	// Cursor recibe JSON y el mismo criterio.
+	cur, _ := json.Marshal(map[string]any{"hook_event_name": "preToolUse", "tool_name": "Shell", "conversation_id": "c1",
+		"tool_input": map[string]any{"command": "npm install", "working_directory": root}, "workspace_roots": []string{root}})
+	r := run(t, root, string(cur), "gate", "check", "--ide", "cursor")
+	must(t, r, 2, "Cursor sin aprobación")
+	if !strings.Contains(r.stdout, `"permission":"deny"`) {
+		t.Errorf("Cursor necesita deny en JSON: %s", r.stdout)
+	}
+	cur, _ = json.Marshal(map[string]any{"hook_event_name": "preToolUse", "tool_name": "Read", "conversation_id": "c1",
+		"tool_input": map[string]any{"file_path": filepath.Join(root, "README.md")}, "workspace_roots": []string{root}})
+	r = run(t, root, string(cur), "gate", "check", "--ide", "cursor")
+	must(t, r, 0, "Cursor lectura")
+	if !strings.Contains(r.stdout, `"permission":"allow"`) {
+		t.Errorf("Cursor necesita allow en JSON: %s", r.stdout)
+	}
+	// La aprobación de otra máquina (otra clave) no vale aquí.
+	r = run(t, root, hook(t, root, "Bash", map[string]any{"command": "make"}, nil), "gate", "check")
+	id := propRe.FindString(r.stderr)
+	must(t, run(t, root, "", "approve", id), 0, "approve")
+	t.Setenv("COYOTE_STATE_DIR", filepath.Join(base, "otra-maquina"))
+	must(t, run(t, root, hook(t, root, "Bash", map[string]any{"command": "make"}, nil), "gate", "check"), 2, "clave de otra máquina")
+}
+
+func TestGateUsosEnParalelo(t *testing.T) {
+	_, root := gateProject(t)
+	in := hook(t, root, "Bash", map[string]any{"command": "go test ./..."}, nil)
+	must(t, run(t, root, "", "approve", "--bash", "go test ./...", "--uses", "3"), 0, "approve")
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	allowed := 0
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			r := run(t, root, in, "gate", "check")
+			if r.code == 0 {
+				mu.Lock()
+				allowed++
+				mu.Unlock()
+			}
+		}()
+	}
+	wg.Wait()
+	if allowed != 3 {
+		t.Errorf("con 3 usos pasaron %d llamadas en paralelo", allowed)
+	}
+}

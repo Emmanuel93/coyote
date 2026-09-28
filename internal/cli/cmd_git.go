@@ -410,34 +410,6 @@ var (
 		`|-c\s+user\.(name|email)=("[^"]*"|'[^']*'|\S+)`)
 )
 
-func cmdGate(a *app, args []string) error {
-	if len(args) == 0 || args[0] != "attribution" {
-		return fail(2, "uso: coyote gate attribution < hook.json (PreToolUse de Claude Code, Codex o Copilot; beforeShellExecution de Cursor)")
-	}
-	data, err := io.ReadAll(io.LimitReader(a.stdin, 1<<20))
-	if err != nil {
-		return err
-	}
-	text, idents := hookText(data)
-	if text == "" && len(idents) == 0 {
-		return nil
-	}
-	attr, err := attribution.Default()
-	if err != nil {
-		return err
-	}
-	for _, id := range idents {
-		if f, ok := attr.AIIdentity(id[0], id[1]); ok {
-			return fail(2, "coyote: bloqueado por R15: la autoría del commit sería una herramienta de IA (%s). Usa la identidad de una persona.", f.Text)
-		}
-	}
-	if found := attr.Check(text, true); len(found) > 0 {
-		return fail(2, "coyote: bloqueado por R15: el mensaje lleva atribución a herramientas de IA (%s: %q). Quita esa línea y vuelve a intentar.",
-			found[0].PatternID, shortText(found[0].Text, 100))
-	}
-	return nil
-}
-
 // hookText extrae de la entrada de un hook el texto que hay que revisar y las
 // identidades que el comando fija. Acepta las formas de Claude Code y Codex
 // (tool_name, tool_input), Cursor (command), Copilot (toolName, toolArgs como
