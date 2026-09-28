@@ -193,6 +193,9 @@ func (a *app) recordAsk(question string, hits []index.Hit, ws, agent string) err
 	if err != nil {
 		return err
 	}
+	if agent, err = a.agentFor(root, agent); err != nil {
+		return err
+	}
 	person := identity.Resolve(root)
 	var refs []string
 	for i, h := range hits {

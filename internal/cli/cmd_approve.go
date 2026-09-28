@@ -508,9 +508,9 @@ func cmdPropose(a *app, args []string) error {
 	case gate.Block:
 		return fail(1, "ese comando se bloquea siempre: %s", d.Reason)
 	}
-	who := *agent
-	if who == "" {
-		who = os.Getenv("COYOTE_IDE")
+	who, err := a.agentFor(c.root, *agent)
+	if err != nil {
+		return err
 	}
 	unlock, err := approval.Lock(c.root)
 	if err != nil {

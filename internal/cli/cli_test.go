@@ -89,6 +89,11 @@ func setup(t *testing.T) string {
 	t.Setenv("GIT_CONFIG_GLOBAL", gitconfig)
 	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 	t.Setenv("COYOTE_USER", "ana")
+	// Las pruebas simulan a una persona: sin variables de sesión de agente,
+	// aunque corran dentro de un IDE.
+	for _, k := range agentEnv {
+		t.Setenv(k, "")
+	}
 	return base
 }
 
@@ -628,6 +633,12 @@ func TestPushPull(t *testing.T) {
 	git(t, ana, "add", "-A")
 	must(t, run(t, ana, "", "commit", "-m", "docs(cobros): invariante de idempotencia"), 0, "commit")
 	must(t, run(t, ana, "", "push", "--agent", "coyote-dev"), 1, "agente en main")
+	// Dentro de una sesión de agente, publicar en main también es de un agente.
+	t.Setenv("CLAUDECODE", "1")
+	if r := run(t, ana, "", "push"); r.code != 1 || !strings.Contains(r.stderr, "A4/R17") {
+		t.Fatalf("una sesión de agente no publica en main: %d %s", r.code, r.stderr)
+	}
+	t.Setenv("CLAUDECODE", "")
 
 	// Luis clona y trae lo nuevo de Ana.
 	luis := filepath.Join(base, "luis")

@@ -72,6 +72,9 @@ func cmdPush(a *app, args []string) error {
 	if err != nil {
 		return fail(1, "no existe el remoto %q: agrégalo con git remote add %s <url>", *remote, *remote)
 	}
+	if *agent, err = a.agentFor(root, *agent); err != nil {
+		return err
+	}
 	if (*agent != "" || cfg.Autonomy == "autonomous") && protectedBranch(branch) {
 		return fail(1, "A4/R17: un agente publica en ramas de trabajo (ws/…, coyote/…); %s la publica una persona", branch)
 	}

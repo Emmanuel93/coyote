@@ -311,3 +311,35 @@ func TestInstallYDoctor(t *testing.T) {
 	in := hook(t, root, "Edit", map[string]any{"file_path": filepath.Join(root, ".claude", "hooks", "coyote-gate.sh"), "old_string": "exit 2", "new_string": "exit 0"}, nil)
 	must(t, run(t, root, in, "gate", "check"), 2, "editar el hook del gate")
 }
+
+func TestIdentidadDeAgente(t *testing.T) {
+	_, root := gateProject(t)
+	must(t, run(t, root, "", "record", "feat", "algo", "--agent", "agente-inventado"), 2, "agente fuera del roster")
+	must(t, run(t, root, "", "record", "feat", "cambio del revisor", "--agent", "coyote-reviewer"), 0, "agente del roster")
+	must(t, run(t, root, "", "record", "feat", "cambio desde cursor", "--agent", "cursor"), 0, "IDE como agente")
+	t.Setenv("CLAUDECODE", "1")
+	must(t, run(t, root, "", "record", "feat", "cambio sin declarar"), 0, "sesión de agente")
+	t.Setenv("CLAUDECODE", "")
+	t.Setenv("COYOTE_IDE", "cursor")
+	must(t, run(t, root, "", "note", "los cobros son idempotentes", "--type", "inv", "--scope", "cobros"), 0, "nota desde cursor")
+	t.Setenv("COYOTE_IDE", "")
+	led := ledgerText(t, root)
+	for _, want := range []string{"|@ana/coyote-reviewer|", "|@ana/cursor|-|tienda|feat|", "|@ana/claude-code|-|tienda|feat|-|cambio sin declarar|",
+		"|@ana/cursor|-|tienda|note|cobros|"} {
+		if !strings.Contains(led, want) {
+			t.Errorf("falta %q en el ledger:\n%s", want, led)
+		}
+	}
+	if strings.Contains(led, "agente-inventado") {
+		t.Error("un agente inventado no debe llegar al ledger")
+	}
+	// Un agente del proyecto es válido.
+	if err := os.MkdirAll(filepath.Join(root, "coyote", "agents"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "coyote", "agents", "tienda-pagos.md"),
+		[]byte("---\nname: tienda-pagos\ndescription: cobro\nmodel: sonnet\nmax_turns: 3\ntools: [Read]\n---\nConoce el cobro.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	must(t, run(t, root, "", "record", "feat", "cambio de pagos", "--agent", "tienda-pagos"), 0, "agente del proyecto")
+}

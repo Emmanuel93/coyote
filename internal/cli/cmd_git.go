@@ -86,6 +86,9 @@ func cmdCommit(a *app, args []string) error {
 	if err != nil {
 		return err
 	}
+	if *agent, err = a.agentFor(root, *agent); err != nil {
+		return err
+	}
 	if !gitx.IsRepo(root) {
 		return fail(1, "el proyecto no está en un repo git")
 	}

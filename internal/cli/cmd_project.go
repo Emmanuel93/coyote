@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Emmanuel93/coyote/internal/agentsmd"
+	"github.com/Emmanuel93/coyote/internal/approval"
 	"github.com/Emmanuel93/coyote/internal/ccf"
 	"github.com/Emmanuel93/coyote/internal/ccfdoc"
 	"github.com/Emmanuel93/coyote/internal/fsx"
@@ -91,6 +92,8 @@ type statusReport struct {
 	Today      int               `json:"events_today"`
 	Last       string            `json:"last_event,omitempty"`
 	Approvals  int               `json:"approvals"`
+	Gate       []string          `json:"gate"`
+	Pending    int               `json:"pending"`
 	Warnings   []string          `json:"warnings,omitempty"`
 	LedgerBugs int               `json:"ledger_invalid_lines"`
 }
@@ -144,6 +147,14 @@ func cmdStatus(a *app, args []string) error {
 			}
 		}
 	}
+	r.Gate = gateInstalled(root)
+	if q, err := (&approval.Store{Root: root, Now: a.now}).Queue(); err == nil {
+		for _, p := range q {
+			if p.Status == "pending" {
+				r.Pending++
+			}
+		}
+	}
 	if *asJSON {
 		enc := json.NewEncoder(a.stdout)
 		enc.SetIndent("", "  ")
@@ -168,8 +179,17 @@ func cmdStatus(a *app, args []string) error {
 		ledgerLine += fmt.Sprintf(" · %d líneas inválidas", r.LedgerBugs)
 	}
 	fmt.Fprintf(tw, "Ledger\t%s\n", ledgerLine)
-	fmt.Fprintf(tw, "Aprobaciones\t%d registradas\n", r.Approvals)
-	fmt.Fprintf(tw, "Autonomía\t%s\n", r.Autonomy)
+	gateLine := "no instalado (coyote install --ide claude-code o cursor)"
+	if len(r.Gate) > 0 {
+		gateLine = "activo en " + strings.Join(r.Gate, ", ")
+	}
+	fmt.Fprintf(tw, "Gate\t%s · %d propuestas pendientes\n", gateLine, r.Pending)
+	fmt.Fprintf(tw, "Aprobaciones\t%d registros\n", r.Approvals)
+	mode := r.Autonomy
+	if mode != "manual" {
+		mode += " (hasta v0.4 el gate aplica manual)"
+	}
+	fmt.Fprintf(tw, "Autonomía\t%s\n", mode)
 	tw.Flush()
 	for _, w := range r.Warnings {
 		fmt.Fprintln(a.stdout, "aviso: "+w)
@@ -195,6 +215,9 @@ func cmdNote(a *app, args []string) error {
 	}
 	root, cfg, err := a.project()
 	if err != nil {
+		return err
+	}
+	if *agent, err = a.agentFor(root, *agent); err != nil {
 		return err
 	}
 	text := strings.Join(pos, " ")
@@ -273,6 +296,9 @@ func cmdRecord(a *app, args []string) error {
 	}
 	root, cfg, err := a.project()
 	if err != nil {
+		return err
+	}
+	if *agent, err = a.agentFor(root, *agent); err != nil {
 		return err
 	}
 	person := identity.Resolve(root)
@@ -459,4 +485,15 @@ func cmdHooks(a *app, args []string) error {
 	}
 	fmt.Fprintf(a.stdout, "hook commit-msg %s en %s\n", status, p)
 	return nil
+}
+
+// gateInstalled dice en qué IDEs está instalado el gate humano.
+func gateInstalled(root string) []string {
+	var out []string
+	for _, f := range []struct{ ide, rel string }{{"claude-code", ".claude/settings.json"}, {"cursor", ".cursor/hooks.json"}} {
+		if data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(f.rel))); err == nil && strings.Contains(string(data), "coyote-gate.sh") {
+			out = append(out, f.ide)
+		}
+	}
+	return out
 }
