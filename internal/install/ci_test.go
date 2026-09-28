@@ -1,0 +1,64 @@
+package install
+
+import (
+	"strings"
+	"testing"
+
+	"go.yaml.in/yaml/v3"
+)
+
+func TestGitHubWorkflow(t *testing.T) {
+	o := CIOptions{Self: CIRepo{"servicios", "acme/servicios"}, Others: []CIRepo{{"app", "acme/app"}, {"backoffice", "acme/backoffice-web"}},
+		CoyoteRepo: "acme/coyote", CoyoteRef: "v0.5.0", Policy: "warn"}
+	wf, err := GitHubWorkflow(o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]any
+	if err := yaml.Unmarshal([]byte(wf), &doc); err != nil {
+		t.Fatalf("YAML inválido: %v\n%s", err, wf)
+	}
+	for _, want := range []string{
+		"if: github.event.pull_request.head.repo.full_name == github.repository",
+		"contents: read", "pull-requests: write", "persist-credentials: false",
+		"ref: ${{ github.event.pull_request.head.sha }}", "fetch-depth: 0",
+		"repository: acme/app", "repository: acme/backoffice-web", "token: ${{ secrets.COYOTE_PRODUCT_TOKEN }}",
+		"repository: acme/coyote", "ref: v0.5.0", "actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+		"--repo servicios=repos/servicios", "--repo backoffice=repos/backoffice", "--self servicios --policy warn --comment",
+	} {
+		if !strings.Contains(wf, want) {
+			t.Errorf("falta %q:\n%s", want, wf)
+		}
+	}
+	if strings.Contains(wf, "pull_request_target") || strings.Count(wf, "secrets.") != 3 {
+		t.Errorf("el secreto solo va en los checkouts de los otros repos y de coyote:\n%s", wf)
+	}
+	// Nada sin validar entra al YAML.
+	bad := []CIOptions{o, o, o, o, o}
+	bad[0].Self.Name = "x${{ secrets.X }}"
+	bad[1].Others = []CIRepo{{"app", "acme/app\n  run: rm -rf /"}}
+	bad[2].CoyoteRef = "main"
+	bad[3].Policy = "maybe"
+	bad[4].Others = []CIRepo{{"servicios", "acme/otra"}}
+	for i, b := range bad {
+		if _, err := GitHubWorkflow(b); err == nil {
+			t.Errorf("caso %d: debía rechazarse", i)
+		}
+	}
+}
+
+func TestGitHubFullName(t *testing.T) {
+	for in, want := range map[string]string{
+		"git@github.com:acme/servicios.git":     "acme/servicios",
+		"https://github.com/acme/app":           "acme/app",
+		"https://github.com/acme/app.git/":      "acme/app",
+		"ssh://git@github.com/acme/web-app.git": "acme/web-app",
+		"https://gitlab.com/acme/app.git":       "",
+		"git@github.com:acme/app;rm -rf /.git":  "",
+	} {
+		got, ok := GitHubFullName(in)
+		if got != want || ok != (want != "") {
+			t.Errorf("%q → %q %v, se esperaba %q", in, got, ok, want)
+		}
+	}
+}

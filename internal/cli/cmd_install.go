@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime/debug"
 	"sort"
 	"strings"
 
@@ -15,9 +16,11 @@ import (
 	"github.com/Emmanuel93/coyote/internal/identity"
 	"github.com/Emmanuel93/coyote/internal/install"
 	"github.com/Emmanuel93/coyote/internal/ledger"
+	"github.com/Emmanuel93/coyote/internal/product"
 	"github.com/Emmanuel93/coyote/internal/project"
 	"github.com/Emmanuel93/coyote/internal/standards"
 	"github.com/Emmanuel93/coyote/internal/userdir"
+	"github.com/Emmanuel93/coyote/internal/version"
 )
 
 func ideList(ide string) ([]string, error) {
@@ -66,12 +69,22 @@ func (a *app) installPlan(root string, cfg *project.Config, ides []string) ([]in
 }
 
 func cmdInstall(a *app, args []string) error {
-	fs := a.flags("install", "--ide claude-code|cursor|all [--check] [--dry-run]")
+	fs := a.flags("install", "--ide claude-code|cursor|all | --ci github [--check] [--dry-run]")
 	ide := fs.String("ide", "", "IDE a configurar: claude-code, cursor o all")
+	ciKind := fs.String("ci", "", "pipeline de impacto del producto: github")
+	policy := fs.String("policy", "warn", "con --ci: warn solo reporta; fail hace fallar el chequeo si el cambio rompe a otro módulo")
+	coyoteRef := fs.String("coyote-ref", "", "con --ci: versión etiquetada de coyote que compila el pipeline (por defecto, la de este binario)")
+	coyoteRepo := fs.String("coyote-repo", "", "con --ci: owner/nombre del repo de coyote en GitHub")
 	check := fs.Bool("check", false, "falla si la configuración no está vigente, sin escribir (para CI)")
 	dry := fs.Bool("dry-run", false, "muestra los cambios sin escribir")
 	if _, err := parseArgs(fs, args); err != nil {
 		return err
+	}
+	if *ciKind != "" {
+		if *ide != "" {
+			return fail(2, "usa --ide o --ci, no los dos")
+		}
+		return a.installCI(*ciKind, *policy, *coyoteRef, *coyoteRepo, *check, *dry)
 	}
 	if *ide == "" {
 		fs.Usage()
@@ -278,4 +291,95 @@ func (a *app) ideChecks(root string, cfg *project.Config, ide string, add func(n
 	} else {
 		add("gate: clave local", "ok", "las aprobaciones se firman en esta máquina")
 	}
+}
+
+// installCI genera el workflow de impacto de cada repo del producto en
+// coyote/ci/<repo>.yml (ADR-0013). Llevarlo a cada repo es un PR de ese repo.
+func (a *app) installCI(kind, policy, ref, coyoteRepo string, check, dry bool) error {
+	if kind != "github" {
+		return fail(2, "--ci %q: por ahora solo github", kind)
+	}
+	root, cfg, err := a.project()
+	if err != nil {
+		return err
+	}
+	if cfg.Type != "product" {
+		return fail(1, "el pipeline de impacto es de un proyecto de tipo product (coyote init --type product)")
+	}
+	if ref == "" {
+		ref = version.Version
+	}
+	if coyoteRepo == "" {
+		coyoteRepo = selfRepo()
+	}
+	sources, _, err := productSources(root, cfg, nil)
+	if err != nil {
+		return err
+	}
+	dirs := map[string]string{}
+	for _, s := range sources {
+		dirs[s.Name] = s.Dir
+	}
+	var repos []install.CIRepo
+	for _, r := range cfg.Repos {
+		full, ok := install.GitHubFullName(r.URL)
+		if !ok && dirs[r.Name] != "" {
+			full, ok = install.GitHubFullName(product.OriginURL(dirs[r.Name]))
+		}
+		if !ok {
+			return fail(1, "%s: no sé su repo de GitHub; regístralo con coyote repo add %s <url de GitHub> --path <ruta>", r.Name, r.Name)
+		}
+		repos = append(repos, install.CIRepo{Name: r.Name, FullName: full})
+	}
+	if len(repos) < 2 {
+		return fail(1, "el producto necesita al menos dos repos para ver el impacto entre ellos")
+	}
+	stale := 0
+	for i, self := range repos {
+		others := append(append([]install.CIRepo{}, repos[:i]...), repos[i+1:]...)
+		wf, err := install.GitHubWorkflow(install.CIOptions{Self: self, Others: others, CoyoteRepo: coyoteRepo, CoyoteRef: ref, Policy: policy})
+		if err != nil {
+			return fail(1, "%v", err)
+		}
+		relPath := "coyote/ci/" + self.Name + ".yml"
+		old, _ := os.ReadFile(filepath.Join(root, filepath.FromSlash(relPath)))
+		status := "sin cambios"
+		switch {
+		case old == nil:
+			status = "creado"
+		case string(old) != wf:
+			status = "actualizado"
+		}
+		if status != "sin cambios" {
+			stale++
+		}
+		if check || dry {
+			if status != "sin cambios" {
+				status = "pendiente: " + status
+			}
+		} else if status != "sin cambios" {
+			if _, err := writeProductFile(root, relPath, wf); err != nil {
+				return err
+			}
+		}
+		fmt.Fprintf(a.stdout, "%-40s %s (%s)\n", relPath, status, self.FullName)
+	}
+	if check && stale > 0 {
+		return fail(1, "los workflows no están al día; corre coyote install --ci github")
+	}
+	if !check && !dry {
+		fmt.Fprintf(a.stdout, "\nPara activarlo en cada repo:\n1. Copia coyote/ci/<repo>.yml a .github/workflows/coyote-impact.yml del repo, con un PR.\n"+
+			"2. Crea en cada repo el secreto %s: un token de GitHub de solo lectura (Contents: read) de los repos del producto y de %s.\n", install.SecretName, coyoteRepo)
+	}
+	return nil
+}
+
+// selfRepo deduce owner/nombre del repo de coyote de la ruta del módulo.
+func selfRepo() string {
+	if bi, ok := debug.ReadBuildInfo(); ok {
+		if name, ok := strings.CutPrefix(bi.Main.Path, "github.com/"); ok && strings.Count(name, "/") == 1 {
+			return name
+		}
+	}
+	return ""
 }

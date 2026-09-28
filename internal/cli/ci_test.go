@@ -144,3 +144,33 @@ func TestCIImpact(t *testing.T) {
 		}
 	}
 }
+
+func TestInstallCI(t *testing.T) {
+	base := setup(t)
+	productoDemo(t, base)
+	root := filepath.Join(base, "producto")
+	must(t, run(t, base, "", "init", "producto", "--type", "product", "--purpose", "tienda demo"), 0, "init")
+	for _, r := range []string{"servicios", "app", "backoffice"} {
+		must(t, run(t, root, "", "repo", "add", r, "--path", "../"+r), 0, "repo add "+r)
+	}
+	// Sin URL ni remoto no sabe a qué repo de GitHub apunta.
+	must(t, run(t, root, "", "install", "--ci", "github", "--coyote-ref", "v0.5.0", "--coyote-repo", "acme/coyote"), 1, "sin remoto")
+	for _, r := range []string{"servicios", "app", "backoffice"} {
+		git(t, filepath.Join(base, r), "remote", "add", "origin", "git@github.com:acme/"+r+".git")
+	}
+	// Un binario sin versión etiquetada no genera el workflow.
+	must(t, run(t, root, "", "install", "--ci", "github", "--coyote-repo", "acme/coyote"), 1, "versión sin etiqueta")
+	r := run(t, root, "", "install", "--ci", "github", "--coyote-ref", "v0.5.0", "--coyote-repo", "acme/coyote")
+	must(t, r, 0, "install --ci github")
+	if !strings.Contains(r.stdout, "coyote/ci/app.yml") || !strings.Contains(r.stdout, "COYOTE_PRODUCT_TOKEN") {
+		t.Errorf("salida:\n%s", r.stdout)
+	}
+	wf := readFile(t, filepath.Join(root, "coyote", "ci", "app.yml"))
+	if !strings.Contains(wf, "--self app") || !strings.Contains(wf, "repository: acme/servicios") || strings.Contains(wf, "repository: acme/app\n") {
+		t.Errorf("workflow de app:\n%s", wf)
+	}
+	must(t, run(t, root, "", "install", "--ci", "github", "--coyote-ref", "v0.5.0", "--coyote-repo", "acme/coyote", "--check"), 0, "check vigente")
+	must(t, run(t, root, "", "install", "--ci", "github", "--coyote-ref", "v0.5.1", "--coyote-repo", "acme/coyote", "--check"), 1, "check con otra versión")
+	must(t, run(t, root, "", "install", "--ci", "gitlab"), 2, "otro proveedor")
+	must(t, run(t, root, "", "install", "--ci", "github", "--ide", "cursor"), 2, "ide y ci a la vez")
+}

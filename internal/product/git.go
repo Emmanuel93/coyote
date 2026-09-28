@@ -140,3 +140,12 @@ func HeadSHA(dir string) string {
 	}
 	return strings.TrimSpace(string(out))
 }
+
+// OriginURL devuelve la URL del remoto origin de un repo, o "".
+func OriginURL(dir string) string {
+	out, err := gitRead(dir, "config", "--get", "remote.origin.url").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
