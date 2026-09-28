@@ -1,6 +1,6 @@
 # Cierre W-0003 — v0.3 gate
 
-Responsable del resultado: @eramirezhdez (modo manual). Se cierra con la decisión de G3.
+Responsable del resultado: @eramirezhdez (modo manual). Cerrado con la aprobación de G3 (`coyote/approvals/P-0003.json`).
 
 ## Resultado
 

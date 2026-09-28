@@ -1,6 +1,6 @@
 # Plan de ejecución — Coyote
 
-Estado: v0.2.0 aprobada en G2 (P-0002) · v0.3 construida y verificada, esperando el gate G3 · actualizado 2026-09-28
+Estado: v0.3.0 aprobada en G3 (P-0003) · v0.4 en planeación · actualizado 2026-09-28
 
 Este plan ejecuta la propuesta aprobada ("Plan de construcción — Framework Coyote"). Cada release se razona con la plantilla de cinco partes que usarán los agentes de Coyote (problema, restricciones, opciones, decisión, riesgos) y cierra con un gate humano: nada se etiqueta, se publica ni toca otros proyectos sin autorización explícita.
 
@@ -140,9 +140,9 @@ G2 autorizó (P-0002): etiquetar v0.2.0, validar tu token con una sola lectura a
 | T21 | Agentes y skills | Una definición sirve a todos los IDEs | 14 agentes y skills `coyote-*` con esquema de salida y R15; los del proyecto en `coyote/agents` y `coyote/skills` | Hecho |
 | T22 | `install` y `doctor --ide` | Configurar un IDE debe ser un comando, verificable en CI | Claude Code y Cursor; configuración fusionada sin pisar la tuya; `--check` | Hecho |
 | T23 | Identidad y autonomía | El ledger debe decir qué agente actuó, sin depender de lo que declara | Roster, identidad del IDE en el ledger, sesiones de agente sin poder aprobar | Hecho |
-| T24 | Verificación y G3 | Evidencia antes de activar el gate en proyectos reales | 24 pruebas de gate o más, demo de punta a punta, revisión adversarial y `docs/releases/v0.3.0.md` | En gate G3: 138 casos de gate; 4 hallazgos y 4 notas corregidos |
+| T24 | Verificación y G3 | Evidencia antes de activar el gate en proyectos reales | 24 pruebas de gate o más, demo de punta a punta, revisión adversarial y `docs/releases/v0.3.0.md` | Hecho: 138 casos de gate; 4 hallazgos y 4 notas corregidos; G3 aprobado (P-0003) |
 
-G3 autoriza: el piloto en seco sobre un dominio real en solo lectura, activar el gate en el repo de coyote y en los proyectos que elijas, y los supuestos D6, D11, D19, D20, D21 y D22.
+G3 autorizó (P-0003): etiquetar v0.3.0, conservar la historia con las firmas del entorno, confirmar D6, D11, D19, D20, D21 y D22, y arrancar v0.4. El piloto en seco abarca los tres repos del producto juntos (servicios, app y backoffice), en solo lectura, porque un cambio en uno afecta a los otros. Activar el gate en tus proyectos lo haces tú con `coyote install`.
 
 ## v0.4 a v1.0
 
@@ -155,15 +155,15 @@ Siguen el orden de la propuesta. Cada una recibirá su razonamiento completo al 
 | D2 nube | Sin servidores; GitHub como backend | Menor costo y nada que operar para el MVP || Confirmado en G2 |
 | D18 índice local | En memoria con caché en `.coyote/`; SQLite después (ADR-0007) | Sin dependencias nuevas; git es la fuente de verdad || Confirmado en G2 |
 | D4 embeddings | Ninguno en v0.2 (BM25 local); locales cuando lleguen | No sacar código a terceros sin autorización || Confirmado en G2 |
-| D6 aprobación R2–R3 | CLI con registro firmado en v0.3; pull request con `coyote gate pr` en CI después | La CLI funciona sin red; el PR agrega revisión de equipo | G3 |
-| D11 IDE del piloto | Claude Code | Es el de nivel 1 con hooks más completos | G3 |
+| D6 aprobación R2–R3 | CLI con registro firmado en v0.3; pull request con `coyote gate pr` en CI después | La CLI funciona sin red; el PR agrega revisión de equipo | Confirmado en G3 |
+| D11 IDE del piloto | Claude Code | Es el de nivel 1 con hooks más completos | Confirmado en G3 |
 | D10 visibilidad de costos | Cada persona ve lo suyo, admins todo | Menor exposición por defecto | G4 |
 | D12 hub | `kredius`, sin crearlo hasta G5 | Aislamiento | G5 |
 | D13 nombres de archivo | `README.coyote.md` y `CONTEXT.coyote.md` | Coherente con `README.md` y `AGENTS.md` | Confirmado en G1 |
 | D14 alcance de R15 | Commits, PRs, comentarios, docs, releases y autoría del commit | Es lo que pediste | Confirmado en G1 |
 | D15 web | Plantillas Go embebidas, solo lectura y solo en 127.0.0.1 | Un solo binario, sin superficie de red || Confirmado en G2 |
 | D16 tokens | Entorno, `gh auth token` o llavero del sistema; device flow con OAuth App (ADR-0008) | No dejar secretos en disco || Confirmado en G2 |
-| D19 autonomía por defecto | `manual` | Nada con efectos sin aprobación mientras no haya evidencia | G3 |
-| D20 lectura sin aprobación | Lista cerrada de comandos de solo lectura en la herramienta; sin patrones propios del proyecto | Leer no tiene efectos y evita la fatiga | G3 |
-| D21 validez de una aprobación | Solo en la máquina donde se dio (firma con clave local), 24 h como máximo | Un registro copiado o fabricado no sirve | G3 |
-| D22 gate sin coyote | Falla cerrado: el IDE no ejecuta herramientas en un proyecto con gate | Un gate que se apaga solo no es gate | G3 |
+| D19 autonomía por defecto | `manual` | Nada con efectos sin aprobación mientras no haya evidencia | Confirmado en G3 |
+| D20 lectura sin aprobación | Lista cerrada de comandos de solo lectura en la herramienta; sin patrones propios del proyecto | Leer no tiene efectos y evita la fatiga | Confirmado en G3 |
+| D21 validez de una aprobación | Solo en la máquina donde se dio (firma con clave local), 24 h como máximo | Un registro copiado o fabricado no sirve | Confirmado en G3 |
+| D22 gate sin coyote | Falla cerrado: el IDE no ejecuta herramientas en un proyecto con gate | Un gate que se apaga solo no es gate | Confirmado en G3 |

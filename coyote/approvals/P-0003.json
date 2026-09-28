@@ -1,0 +1,25 @@
+{
+  "id": "P-0003",
+  "gate": "G3",
+  "release": "v0.3.0",
+  "workstream": "W-0003",
+  "decision": "approved",
+  "approver": "@eramirezhdez",
+  "date": "2026-09-28",
+  "reviewed_commit": "816fe57",
+  "authorizes": [
+    "etiquetar v0.3.0 y generar los binarios",
+    "conservar la historia: los commits firmados por la llave del entorno no se reescriben; desde 6a37ca8 no se firma",
+    "confirmar los supuestos D6, D11, D19, D20, D21 y D22",
+    "restaurar .claude/settings.json del espacio de trabajo de construcción a su versión del commit",
+    "arrancar v0.4, con el piloto en seco sobre los tres repos del producto juntos (servicios, app y backoffice), en solo lectura y con análisis de impacto entre repos"
+  ],
+  "conditions": [
+    "el push lo hace la persona con sus propias credenciales",
+    "el piloto no modifica los repos del producto: solo lee y entrega propuestas para revisar",
+    "los nombres de la organización y de sus repos no entran al código de la herramienta (C1)",
+    "activar el gate en sus proyectos lo hace la persona con coyote install"
+  ],
+  "response": "continua; restaurar settings.json: sí; piloto: el proyecto abarca servicios, app y backoffice, se incluyen los tres porque un cambio en uno afecta a los otros, y el pipeline debe sacar su contexto y ver cada cambio de manera holística",
+  "evidence": "docs/releases/v0.3.0.md"
+}

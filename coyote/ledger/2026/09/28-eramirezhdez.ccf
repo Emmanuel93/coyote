@@ -57,3 +57,5 @@
 2026-09-28T07:45Z|@eramirezhdez/coyote-reviewer|W-0003|coyote|rev|seguridad|revisión adversarial de v0.3: 4 hallazgos y 4 notas, corregidos con pruebas|doc:docs/specs/gate-v1.md|-|-|ok
 2026-09-28T07:46Z|@eramirezhdez/coyote-devsecops|W-0003|coyote|fix|gate|cierra los hallazgos de la revisión de v0.3|-|-|-|ok
 2026-09-28T07:49Z|@eramirezhdez/coyote-scribe|W-0003|coyote|doc|release|reporte de v0.3.0 para el gate G3|-|-|-|ok
+2026-09-28T17:23Z|@eramirezhdez/coyote-scribe|W-0003|coyote|close|release|W-0003 cerrado: v0.3.0 construida, revisada y aprobada|doc:coyote/workstreams/W-0003-gate/close.md apr:P-0003|-|-|ok
+2026-09-28T17:23Z|@eramirezhdez/coyote-scribe|W-0003|coyote|doc|release|aprobación de G3 para v0.3.0|-|-|-|ok
