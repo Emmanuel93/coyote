@@ -1,0 +1,19 @@
+# ts|actor|project|repo|type|scope|what|refs|tokens in/cache/out|cost in+out|status
+2026-09-28T01:02Z|@eramirezhdez/coyote-dev|-|coyote|init|coyote|proyecto inicializado con coyote|-|-|-|ok
+2026-09-28T01:03Z|@eramirezhdez/coyote-architect|W-0001|coyote|note|attribution|inv: ningún commit, PR, doc o release lleva atribución a herramientas de…|doc:CONTEXT.coyote.md|-|-|ok
+2026-09-28T01:03Z|@eramirezhdez/coyote-architect|W-0001|coyote|note|git|inv: toda operación git usa el binario del sistema para respetar identidad,…|doc:CONTEXT.coyote.md|-|-|ok
+2026-09-28T01:03Z|@eramirezhdez/coyote-architect|W-0001|coyote|note|ledger|inv: el ledger solo agrega líneas; un archivo por día y persona…|doc:CONTEXT.coyote.md|-|-|ok
+2026-09-28T01:03Z|@eramirezhdez/coyote-architect|W-0001|coyote|note|standards|inv: relajar una regla exige reason, redefinir no baja de nivel y…|doc:CONTEXT.coyote.md|-|-|ok
+2026-09-28T01:03Z|@eramirezhdez/coyote-architect|W-0001|coyote|note|code|inv: código, pruebas, plantillas, estándar y ejemplos no nombran organizaciones ni repos…|doc:CONTEXT.coyote.md|-|-|ok
+2026-09-28T01:03Z|@eramirezhdez/coyote-architect|W-0001|coyote|note|cli|dec: CLI solo con biblioteca estándar; la única dependencia es go-yaml, copiada…|doc:CONTEXT.coyote.md|-|-|ok
+2026-09-28T01:03Z|@eramirezhdez/coyote-architect|W-0001|coyote|note|formats|dec: CCF para el ledger y CCF-doc para README.coyote.md y CONTEXT.coyote.md|doc:CONTEXT.coyote.md|-|-|ok
+2026-09-28T01:03Z|@eramirezhdez/coyote-architect|W-0001|coyote|note|build|gap: sin acceso al proxy de módulos se compila con GOFLAGS=-mod=mod y…|doc:CONTEXT.coyote.md|-|-|ok
+2026-09-28T01:03Z|@eramirezhdez/coyote-architect|W-0001|coyote|note|release|how: make dist genera binarios de macOS y Linux con la versión…|doc:CONTEXT.coyote.md|-|-|ok
+2026-09-28T01:03Z|@eramirezhdez/coyote-architect|W-0001|coyote|note|ccf|term: Coyote Compact Format: una línea por evento, once campos separados por…|doc:CONTEXT.coyote.md|-|-|ok
+2026-09-28T01:03Z|@eramirezhdez/coyote-architect|W-0001|coyote|note|tokens|risk: el estimador local de tokens puede desviarse del conteo real; v0.2…|doc:CONTEXT.coyote.md|-|-|ok
+2026-09-28T01:03Z|@eramirezhdez/coyote-architect|W-0001|coyote|note|remote|todo: push, pull y get context con OAuth device flow y cuotas…|doc:CONTEXT.coyote.md|-|-|ok
+2026-09-28T01:46Z|@eramirezhdez/coyote-sr-solution-architect|W-0001|coyote|plan|plan|plan de ejecución v0.1 con releases y gates G1 a G6|doc:docs/plan/EXECUTION_PLAN.md|-|-|ok
+2026-09-28T01:46Z|@eramirezhdez/coyote-sr-solution-architect|W-0001|coyote|adr|arquitectura|ADR-0001 a ADR-0006 propuestas: Go, git, formatos, dependencias, atribución, tokens|adr:ADR-0001 adr:ADR-0006|-|-|ok
+2026-09-28T01:46Z|@eramirezhdez/coyote-architect|W-0001|coyote|spec|formatos|specs v1: CCF, CCF-doc, estándar por capas y atribución|doc:docs/specs|-|-|ok
+2026-09-28T01:46Z|@eramirezhdez/coyote-reviewer|W-0001|coyote|rev|seguridad|revisión adversarial: 13 hallazgos, todos corregidos con pruebas|doc:docs/releases/v0.1.0.md|-|-|ok
+2026-09-28T01:47Z|@eramirezhdez/coyote-sr-solution-architect|W-0001|coyote|chore|coyote|adopta coyote en el repo de la herramienta|-|-|-|ok

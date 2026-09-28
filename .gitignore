@@ -1,0 +1,8 @@
+# Binarios y distribuciones
+/bin/
+/dist/
+# Estado local de coyote (índice, caché); nunca se versiona
+.coyote/
+# Cobertura y temporales de pruebas
+*.out
+*.test

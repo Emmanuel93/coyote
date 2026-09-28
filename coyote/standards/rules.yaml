@@ -1,0 +1,28 @@
+# Estándar del repo de la herramienta: el default que distribuye más dos reglas propias.
+version: 1
+extends: coyote:default
+rules:
+  - id: C1
+    title: El código de la herramienta no nombra organizaciones ni repos reales
+    level: MUST
+    scope: repo
+    why: Coyote es independiente de los proyectos donde se usa; el default se generalizó de ellos sin copiar nombres.
+    check:
+      type: regex_absent
+      paths: ["cmd/**", "internal/**", "templates/**", "standards/**", "examples/**", "embed.go"]
+      pattern: '(?i)kredius|fintech-'
+    fix: Usa nombres genéricos (acme, demo) y deja lo propio de una organización en su hub
+
+  - id: C2
+    title: La CI corre vet, pruebas y el lint del propio estándar
+    level: MUST
+    scope: repo
+    check: { type: regex_present, files: [.github/workflows/ci.yml], pattern: '(?s)go vet.*go test.*coyote standards lint' }
+    fix: Revisa .github/workflows/ci.yml
+
+  # La especificación de atribución muestra los patrones como ejemplos literales.
+  - id: R15
+    override:
+      except: [docs/specs/attribution-v1.md]
+      reason: la spec de atribución cita los patrones como ejemplos; el resto del repo se revisa completo
+      adr: ADR-0005

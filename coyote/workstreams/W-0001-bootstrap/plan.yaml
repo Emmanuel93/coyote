@@ -1,0 +1,21 @@
+# Formato preliminar de workstream (el motor que lo ejecuta llega en v0.3 y v0.4).
+id: W-0001
+title: Bootstrap de coyote v0.1 (local)
+owner: "@eramirezhdez"
+autonomy: manual
+risk: R1
+reasoning: docs/plan/EXECUTION_PLAN.md#v01-init--razonamiento
+gate: G1                    # etiquetar v0.1.0, publicar en GitHub y arrancar v0.2
+steps:
+  - { id: T1, does: espacio aislado y entorno sin red, agent: coyote-devsecops, output: [go.mod, third_party/go-yaml/COYOTE.md] }
+  - { id: T2, does: plan razonado y ADR-0001 a ADR-0006, agent: coyote-sr-solution-architect, output: [docs/plan/EXECUTION_PLAN.md, coyote/decisions/] }
+  - { id: T3, does: formatos CCF v1 y CCF-doc v1, agent: coyote-architect, output: [internal/ccf, internal/ccfdoc, docs/specs/] }
+  - { id: T4, does: ledger append-only por día y persona, agent: coyote-dev, output: internal/ledger }
+  - { id: T5, does: estándar por capas y lint, agent: coyote-dev, output: [internal/standards, standards/default/] }
+  - { id: T6, does: filtro de atribución en cinco capas, agent: coyote-security, output: [internal/attribution, templates/project/commit-msg] }
+  - { id: T7, does: CLI local, agent: coyote-dev, output: [internal/cli, cmd/coyote] }
+  - { id: T8, does: dogfooding del propio estándar, agent: coyote-librarian, output: [README.coyote.md, CONTEXT.coyote.md, AGENTS.md] }
+  - { id: T9, does: ejemplo sintético y CI, agent: coyote-devsecops, output: [examples/acme-shop, .github/workflows/ci.yml] }
+  - { id: T10, does: verificación y revisión adversarial, agent: coyote-reviewer, output: docs/releases/v0.1.0.md }
+  - { id: T11, does: entrega en Documents y gate G1, agent: coyote-scribe, gate: human }
+close: { summary: close.md }
