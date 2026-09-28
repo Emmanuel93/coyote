@@ -43,7 +43,7 @@ func TestReadOnlyShell(t *testing.T) {
 		"coyote approvals", "coyote review P-abc123", "coyote install --check", "coyote generate agents --check",
 		"git log --format='%h %s' 2>/dev/null", "git status 2>&1 | tail -5", "echo listo && git status --short",
 		"sort go.mod | uniq -c", "jq .version package.json", "diff a.txt b.txt", "cd internal && ls", "tree -L 2",
-		"git -C internal log -1", "sleep 1",
+		"git -C internal log -1", "sleep 1", "coyote ws status W-0002", "coyote ws check W-0002 --json", "coyote ws status",
 	}
 	for _, c := range allow {
 		a := claude(t, "Bash", map[string]any{"command": c, "description": "x"}, root)
@@ -97,6 +97,9 @@ func TestCredentialsAndGateAreBlocked(t *testing.T) {
 		{"Bash", map[string]any{"command": "sh -c 'coyote run --agent coyote-dev x'"}},
 		{"Bash", map[string]any{"command": "\"coyote\" run --agent coyote-dev x"}},
 		{"Bash", map[string]any{"command": "c\\oyote approve P-1"}},
+		{"Bash", map[string]any{"command": "coyote ws run W-0002"}},
+		{"Bash", map[string]any{"command": "coyote -C . ws continue W-0002 --redo 'otra vez'"}},
+		{"Bash", map[string]any{"command": "git status && env COYOTE_IDE= coyote ws  run W-0002"}},
 		{"Bash", map[string]any{"command": "rm .claude/settings.json"}},
 		{"Bash", map[string]any{"command": "echo '{\"disableAllHooks\": true}' > x.json"}},
 		{"Bash", map[string]any{"command": "git config core.hooksPath /tmp/h"}},

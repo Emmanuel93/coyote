@@ -149,7 +149,7 @@ func cmdInstall(a *app, args []string) error {
 	}
 	fmt.Fprintf(a.stdout, "Listo. Prueba el gate con coyote doctor --ide %s y haz commit de la configuración.\n", *ide)
 	if cfg.Autonomy != "" && cfg.Autonomy != "manual" {
-		fmt.Fprintf(a.stdout, "Aviso: autonomy es %s en project.yaml; hasta v0.4 el gate aplica manual.\n", cfg.Autonomy)
+		fmt.Fprintf(a.stdout, "Aviso: autonomy es %s en project.yaml: el motor de workstreams (coyote ws) se detiene menos, pero el gate sigue pidiendo aprobación para cada acción con efectos (ADR-0014).\n", cfg.Autonomy)
 	}
 	return nil
 }
@@ -282,7 +282,7 @@ func (a *app) ideChecks(root string, cfg *project.Config, ide string, add func(n
 		add("gate: atribución", "ok", "bloquea commits con atribución de IA")
 	}
 	if cfg.Autonomy != "" && cfg.Autonomy != "manual" {
-		add("autonomía", "warn", cfg.Autonomy+" llega en v0.4; hoy el gate aplica manual")
+		add("autonomía", "ok", cfg.Autonomy+": el motor de workstreams se detiene menos; cada acción con efectos se sigue aprobando")
 	} else {
 		add("autonomía", "ok", "manual: cada acción con efectos se aprueba")
 	}

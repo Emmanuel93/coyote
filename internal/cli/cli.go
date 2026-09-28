@@ -61,6 +61,7 @@ func init() {
 		{"extract", "[repo...] [--stdout] [--check]", "propone README.coyote.md y CONTEXT.coyote.md de cada repo desde su código", cmdExtract},
 		{"impact", "<endpoint|texto> | --topic T | --diff repo=RANGO [--format md]", "qué rompe un cambio en los repos del producto", cmdImpact},
 		{"run", "--agent A \"tarea\" [--ws W] [--risk R] [--diff repo=RANGO] [--dry-run]", "corre un paso de un agente con Claude Code, con topes, gate y costo", cmdRun},
+		{"ws", "check|status|run|continue <W> [--redo TEXTO | --retry]", "corre el plan de un workstream con puntos de control (ADR-0014)", cmdWS},
 		{"ci", "impact --repo nombre=ruta... [--policy warn|fail] [--comment]", "impacto de un PR en los repos del producto, dentro del pipeline", cmdCI},
 		{"router", "[--init] [--risk R]", "modelo y topes que el router da a cada agente", cmdRouter},
 		{"close", "<W> [--dry-run]", "cierra un workstream con su consumo real desde el ledger", cmdClose},

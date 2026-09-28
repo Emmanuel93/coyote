@@ -92,3 +92,18 @@ func TestParseLista(t *testing.T) {
 		t.Error("una lista sin resultado es un error")
 	}
 }
+
+func TestArgsResume(t *testing.T) {
+	r := Request{Agent: "coyote-dev", MaxTurns: 5, MaxUSD: 1, Resume: "8f1c2a4e-1b2c-4d5e-9f00-aa11bb22cc33"}
+	got := strings.Join(Args(r), " ")
+	if !strings.Contains(got, "--permission-mode dontAsk --resume 8f1c2a4e-1b2c-4d5e-9f00-aa11bb22cc33 --max-turns 5") {
+		t.Errorf("--resume: %s", got)
+	}
+	// Un id que parece una opción, o raro, no se pasa.
+	for _, bad := range []string{"--dangerously-skip-permissions", "-x12345678", "abc", "a b c d e f g h", "sesión-ñ-123456"} {
+		r.Resume = bad
+		if strings.Contains(strings.Join(Args(r), " "), "--resume") {
+			t.Errorf("%q no debe llegar a --resume", bad)
+		}
+	}
+}

@@ -87,7 +87,7 @@ func Generate(root string, st *standards.Standard, autonomy string) (string, err
 	w("- Este archivo resume README.coyote.md y CONTEXT.coyote.md; ábrelos solo para editarlos o citarlos.\n")
 	mode := autonomy
 	if autonomy != "manual" {
-		mode += " (hasta v0.4 el gate aplica manual)"
+		mode += " (el motor de workstreams se detiene menos; el gate aplica igual)"
 	}
 	w("- Modo de autonomía: %s. Toda acción con efectos pasa por el gate de coyote: si una llamada se bloquea, queda en la cola; "+
 		"pide a la persona `coyote review <id>` y `coyote approve <id>` y repite exactamente la misma llamada. No busques rodeos.\n", mode)

@@ -108,4 +108,4 @@ El gate falla cerrado: una entrada ilegible, un error o un pánico bloquean las 
 - En Cursor, Codex y Copilot el IDE no reporta el subagente: un comando puede declarar otro `--agent`, y la persona lo ve al aprobarlo.
 - Un archivo de secretos del proyecto (`.env`) se lee libremente; protégelo con los permisos de lectura del IDE.
 - IDEs sin hook previo (Devin, Zed) no están cubiertos: llegan con el gate de CI en v0.5.
-- `supervised` y `autonomous` se aceptan en `project.yaml`, pero hasta v0.4 el gate aplica `manual`.
+- `supervised` y `autonomous` cambian cuándo se detiene el motor de workstreams (ADR-0014), no lo que el gate deja pasar: en los tres modos el gate aplica `manual`.

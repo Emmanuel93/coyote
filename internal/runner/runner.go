@@ -13,6 +13,7 @@ import (
 
 	"os"
 	"os/exec"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -32,12 +33,22 @@ type Request struct {
 	Prompt   string   // va por la entrada estándar
 	Timeout  time.Duration
 	Env      []string // variables extra para Claude Code
+	Resume   string   // sesión que se retoma: el agente repite lo que la persona aprobó
 }
+
+// sessionRe acota el id de una sesión que se retoma: nunca empieza con guion.
+var sessionRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{7,127}$`)
+
+// ValidSession informa si un id de sesión se puede pasar a --resume.
+func ValidSession(id string) bool { return sessionRe.MatchString(id) }
 
 // Args arma la línea de Claude Code. --permission-mode dontAsk niega lo que
 // no está permitido en lugar de esperar una respuesta que en headless nadie da.
 func Args(r Request) []string {
 	args := []string{"-p", "--output-format", "json", "--agent", r.Agent, "--permission-mode", "dontAsk"}
+	if ValidSession(r.Resume) {
+		args = append(args, "--resume", r.Resume)
+	}
 	if r.Model != "" {
 		args = append(args, "--model", r.Model)
 	}

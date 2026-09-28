@@ -254,6 +254,11 @@ func (c *approvalCtx) detail(p approval.Proposal) string {
 	switch p.Kind {
 	case "shell":
 		return fmt.Sprintf("  en %s:\n    $ %s", p.Cwd, strings.ReplaceAll(p.Command, "\n", "\n      "))
+	case "ws":
+		// Se autoriza el plan exacto que correrá solo: se muestra entero.
+		if plan, ok := in["plan"].(string); ok {
+			return fmt.Sprintf("  %s, en la rama %v:\n    %s", p.Path, in["branch"], strings.ReplaceAll(strings.TrimRight(plan, "\n"), "\n", "\n    "))
+		}
 	case "archivo":
 		oldS, okOld := in["old_string"].(string)
 		newS, okNew := in["new_string"].(string)

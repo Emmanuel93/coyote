@@ -187,7 +187,7 @@ func cmdStatus(a *app, args []string) error {
 	fmt.Fprintf(tw, "Aprobaciones\t%d registros\n", r.Approvals)
 	mode := r.Autonomy
 	if mode != "manual" {
-		mode += " (hasta v0.4 el gate aplica manual)"
+		mode += " (el motor de workstreams se detiene menos; el gate aplica igual)"
 	}
 	fmt.Fprintf(tw, "Autonomía\t%s\n", mode)
 	tw.Flush()
