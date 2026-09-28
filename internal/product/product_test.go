@@ -709,6 +709,41 @@ func TestVerboDeCadaLlamada(t *testing.T) {
 			t.Errorf("%s: %q, se esperaba %q (%v)", p, got[p], m, got)
 		}
 	}
+	// Cliente con WebClient: lambdas con bloque, envoltorios propios y una
+	// URI de respuesta que no es una llamada.
+	client := `class Cliente {
+    private final WebClient webClient;
+    List<Object> cola(String estado) {
+        return webClient.get()
+                .uri(uri -> {
+                    var b = uri.path("/x/cinco").queryParam("page", 0);
+                    if (estado != null) b.queryParam("estado", estado);
+                    return b.build();
+                })
+                .retrieve().bodyToMono(List.class).block();
+    }
+    Object lista(String u) { return get(u, uri -> uri.path("/x/seis").build()); }
+    Object alta(String u, Object body) { return post(u, "/x/siete", body); }
+    private Object get(String u, Function<UriBuilder, URI> uri) { return webClient.get().uri(uri).retrieve(); }
+    private Object post(String u, String path, Object body) { return webClient.post().uri(path).retrieve(); }
+    ResponseEntity<Object> creado(Object p) {
+        URI location = ServletUriComponentsBuilder.fromCurrentRequest().path("/{key}").buildAndExpand(p).toUri();
+        return ResponseEntity.created(location).build();
+    }
+}`
+	got = map[string]string{}
+	for _, e := range springEntries(client, "svc", ".", "Cliente.java", javaCtx{resolve: resolver("Cliente.java", client)}) {
+		got[e.Path] = e.Method
+	}
+	want = map[string]string{"/x/cinco": "GET", "/x/seis": "GET", "/x/siete": "POST"}
+	for p, m := range want {
+		if got[p] != m {
+			t.Errorf("%s: %q, se esperaba %q (%v)", p, got[p], m, got)
+		}
+	}
+	if _, ok := got["/{}"]; ok || len(got) != 3 {
+		t.Errorf("la URI de la cabecera Location no es una llamada: %v", got)
+	}
 }
 
 func TestProductoresYPropiedades(t *testing.T) {
@@ -836,5 +871,45 @@ func TestArbolDeTrabajo(t *testing.T) {
 	}
 	if _, _, entries, err := Decode(text); err != nil || len(entries) != 2 {
 		t.Errorf("la nota no rompe la lectura: %v %d", err, len(entries))
+	}
+}
+
+func TestAfinidadEntreBFF(t *testing.T) {
+	e := func(repo, mod, role, method, p string) Entry {
+		return Entry{Repo: repo, Module: mod, Role: role, Method: method, Path: p, File: mod + "/x", Line: 1}
+	}
+	m := Load(nil, []Entry{
+		e("svc", "bff-movil", Exposes, "GET", "/avisos"),
+		e("svc", "bff-movil", Exposes, "GET", "/perfil"),
+		e("svc", "bff-web", Exposes, "GET", "/avisos"),
+		e("svc", "bff-web", Exposes, "GET", "/reportes"),
+		e("app", ".", Calls, "GET", "/perfil"),   // la app ya habla con bff-movil
+		e("app", ".", Calls, "GET", "/avisos"),   // ambigua entre los dos BFF
+		e("web", ".", Calls, "GET", "/reportes"), // el backoffice habla con bff-web
+		e("web", ".", Calls, "GET", "/avisos"),
+		e("otro", ".", Calls, "GET", "/avisos"), // sin afinidad: sigue ambigua
+		e("svc", "algo", Calls, "GET", "/{}"),   // solo parámetros: no se enlaza
+	})
+	to := map[string][]string{}
+	amb := map[string]bool{}
+	for _, l := range m.Links {
+		from, p := m.Entries[l.From], m.Entries[l.To]
+		if from.Path != "/avisos" && from.Path != "/{}" {
+			continue
+		}
+		to[from.Repo] = append(to[from.Repo], p.Module)
+		amb[from.Repo] = amb[from.Repo] || l.Ambiguous
+	}
+	if strings.Join(to["app"], ",") != "bff-movil" || amb["app"] {
+		t.Errorf("la app va a bff-movil: %v", to["app"])
+	}
+	if strings.Join(to["web"], ",") != "bff-web" || amb["web"] {
+		t.Errorf("el backoffice va a bff-web: %v", to["web"])
+	}
+	if len(to["otro"]) != 2 || !amb["otro"] {
+		t.Errorf("sin afinidad la llamada queda ambigua: %v", to["otro"])
+	}
+	if len(to["svc"]) != 0 {
+		t.Errorf("una ruta sin segmentos fijos no se enlaza: %v", to["svc"])
 	}
 }

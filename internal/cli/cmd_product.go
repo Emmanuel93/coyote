@@ -191,6 +191,7 @@ func cmdMap(a *app, args []string) error {
 	check := fs.Bool("check", false, "falla si el mapa guardado no refleja el código (para la CI); no escribe")
 	asJSON := fs.Bool("json", false, "salida JSON")
 	top := fs.Int("top", 10, "grupos de llamadas sin proveedor a mostrar")
+	showAmbiguous := fs.Bool("ambiguous", false, "lista las llamadas que coinciden igual con más de un servicio")
 	pos, err := parseArgs(fs, args)
 	if err != nil {
 		return err
@@ -293,10 +294,40 @@ func cmdMap(a *app, args []string) error {
 			return err
 		}
 	}
+	if *showAmbiguous {
+		printAmbiguous(a, m)
+	}
 	for _, n := range notes {
 		fmt.Fprintln(a.stdout, "nota: "+n)
 	}
 	return nil
+}
+
+// printAmbiguous muestra cada llamada ambigua con los servicios candidatos.
+func printAmbiguous(a *app, m *product.Map) {
+	by := map[int][]int{}
+	var order []int
+	for _, l := range m.Links {
+		if !l.Ambiguous {
+			continue
+		}
+		if _, ok := by[l.From]; !ok {
+			order = append(order, l.From)
+		}
+		by[l.From] = append(by[l.From], l.To)
+	}
+	if len(order) == 0 {
+		return
+	}
+	fmt.Fprintf(a.stdout, "\nLlamadas ambiguas (%d): el mapa las enlaza con todos los candidatos\n", len(order))
+	for _, i := range order {
+		e := m.Entries[i]
+		fmt.Fprintf(a.stdout, "  %s  llama %s  (%s)\n", hitWhere(e), e.Describe(), e.Ref(""))
+		for _, j := range by[i] {
+			p := m.Entries[j]
+			fmt.Fprintf(a.stdout, "      ↳ %s  expone %s  (%s:%d)\n", hitWhere(p), p.Describe(), p.File, p.Line)
+		}
+	}
 }
 
 // unlinkedGroup agrupa llamadas sin proveedor por repo, módulo y prefijo.

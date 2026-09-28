@@ -425,14 +425,48 @@ func springEntries(text, repo, mod, file string, cx javaCtx) []Entry {
 			}
 		}
 	}
-	// Llamadas salientes: WebClient (.uri/.path) y RestTemplate.
+	// Llamadas salientes: WebClient o RestClient (.uri/.path), sus métodos
+	// envoltorio (get(…), post(…)) y RestTemplate.
+	callSeen := map[string]bool{}
+	addCall := func(at int, method, raw string) {
+		norm := NormPath(raw)
+		if norm == "" {
+			return
+		}
+		line := lineOf(text, at)
+		k := fmt.Sprintf("%d|%s", line, norm)
+		if callSeen[k] {
+			return
+		}
+		callSeen[k] = true
+		out = append(out, Entry{Repo: repo, Module: mod, Role: Calls, Method: method, Path: norm, Raw: raw, File: file, Line: line})
+	}
 	for _, loc := range uriCallRe.FindAllStringSubmatchIndex(text, -1) {
 		raw := text[loc[4]:loc[5]]
-		norm := NormPath(raw)
-		if norm == "" || (text[loc[2]:loc[3]] == "path" && !strings.HasPrefix(raw, "/")) {
+		if text[loc[2]:loc[3]] == "uri" {
+			addCall(loc[0], verbBefore(text, loc[0]), raw)
 			continue
 		}
-		out = append(out, Entry{Repo: repo, Module: mod, Role: Calls, Method: verbBefore(text, loc[0]), Path: norm, Raw: raw, File: file, Line: lineOf(text, loc[0])})
+		// .path(…) cuenta solo dentro de una llamada saliente: .uri(u -> u.path(…)),
+		// un envoltorio get(…)/post(…) o RestTemplate. Fuera de ellas arma otra
+		// URI (la cabecera Location de una respuesta, por ejemplo).
+		if !strings.HasPrefix(raw, "/") {
+			continue
+		}
+		if method, ok := callVerb(text, loc[0]); ok {
+			addCall(loc[0], method, raw)
+		}
+	}
+	if clientRe.MatchString(text) {
+		for _, loc := range helperCallRe.FindAllStringSubmatchIndex(text, -1) {
+			args, _ := balanced(text, loc[3])
+			for _, part := range topLevel(args) {
+				if m := stringLit.FindStringSubmatch(strings.TrimSpace(part)); m != nil && strings.HasPrefix(strings.TrimSpace(part), `"`) && strings.HasPrefix(m[1], "/") {
+					addCall(loc[0], strings.ToUpper(text[loc[2]:loc[3]]), m[1])
+					break
+				}
+			}
+		}
 	}
 	for _, loc := range restTplRe.FindAllStringSubmatchIndex(text, -1) {
 		raw := ""
@@ -568,7 +602,7 @@ func verbBefore(text string, i int) string {
 	if start < 0 {
 		start = 0
 	}
-	if j := strings.LastIndexAny(text[start:i], ";{}"); j >= 0 {
+	if j := strings.LastIndexAny(text[start:i], ";}"); j >= 0 {
 		start += j + 1
 	}
 	ms := verbRe.FindAllStringSubmatch(text[start:i], -1)
@@ -593,6 +627,57 @@ func verbIn(text string, i int) string {
 	}
 	return ""
 }
+
+// callVerb busca la llamada que encierra la posición i y dice su verbo HTTP:
+// .uri(…) toma el de su cadena (webClient.get().uri(…)); un envoltorio
+// get(…)/post(…) o un método de RestTemplate, el suyo. ok es false si i no
+// está dentro de una llamada saliente.
+func callVerb(text string, i int) (string, bool) {
+	depth := 0
+	for j := i - 1; j >= 0 && j > i-2000; j-- {
+		switch text[j] {
+		case ')':
+			depth++
+		case '(':
+			if depth > 0 {
+				depth--
+				continue
+			}
+			k := j
+			for k > 0 && (isIdent(text[k-1])) {
+				k--
+			}
+			name := text[k:j]
+			switch {
+			case name == "uri":
+				return verbBefore(text, k), true
+			case httpVerbs[name]:
+				return strings.ToUpper(name), true
+			case restVerbs[name] != "":
+				return restVerbs[name], true
+			case name == "exchange":
+				return verbIn(text, j), true
+			}
+		case ';':
+			return "", false
+		}
+	}
+	return "", false
+}
+
+func isIdent(c byte) bool {
+	return c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+}
+
+var (
+	httpVerbs = map[string]bool{"get": true, "post": true, "put": true, "patch": true, "delete": true}
+	restVerbs = map[string]string{"getForObject": "GET", "getForEntity": "GET", "postForObject": "POST", "postForEntity": "POST",
+		"postForLocation": "POST", "patchForObject": "PATCH"}
+	// clientRe reconoce un archivo que hace llamadas HTTP salientes.
+	clientRe = regexp.MustCompile(`\b(?:WebClient|RestClient|RestTemplate)\b`)
+	// helperCallRe: un método propio get(…)/post(…) (no un .get() de un mapa).
+	helperCallRe = regexp.MustCompile(`(?:^|[^.\w])(get|post|put|patch|delete)\s*\(`)
+)
 
 var (
 	// constRefRe reconoce CONSTANTE o Clase.CONSTANTE.

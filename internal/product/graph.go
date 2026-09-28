@@ -52,12 +52,20 @@ func (m *Map) link() {
 			}
 		}
 	}
+	type pending struct {
+		from, score int
+		to          []int
+	}
+	var calls []pending
 	for i, e := range m.Entries {
 		if e.Unresolved {
 			continue
 		}
 		switch e.Role {
 		case Calls:
+			if onlyParams(e.Path) {
+				continue // sin un segmento fijo no hay con qué comparar
+			}
 			best, cands := -1, []int(nil)
 			for _, j := range exposes {
 				p := m.Entries[j]
@@ -75,11 +83,8 @@ func (m *Map) link() {
 					cands = append(cands, j)
 				}
 			}
-			if best < 0 {
-				continue
-			}
-			for _, j := range cands {
-				m.Links = append(m.Links, Link{From: i, To: j, Score: best, Ambiguous: len(cands) > 1})
+			if best >= 0 {
+				calls = append(calls, pending{i, best, cands})
 			}
 		case Listens:
 			for _, j := range publishes {
@@ -89,6 +94,67 @@ func (m *Map) link() {
 			}
 		}
 	}
+	// Afinidad: si una llamada coincide igual con varios servicios (dos BFF
+	// que exponen /notifications), gana el servicio con el que su módulo, o
+	// si no su repo, ya habla sin ambigüedad.
+	modAff := map[string]map[string]int{}
+	repoAff := map[string]map[string]int{}
+	bump := func(aff map[string]map[string]int, k, v string) {
+		if aff[k] == nil {
+			aff[k] = map[string]int{}
+		}
+		aff[k][v]++
+	}
+	for _, c := range calls {
+		if len(c.to) == 1 {
+			from, to := m.Entries[c.from], m.Entries[c.to[0]]
+			bump(modAff, from.Repo+"|"+from.Module, to.Repo+"|"+to.Module)
+			bump(repoAff, from.Repo, to.Repo+"|"+to.Module)
+		}
+	}
+	for _, c := range calls {
+		to := c.to
+		if len(to) > 1 {
+			from := m.Entries[c.from]
+			to = m.prefer(to, modAff[from.Repo+"|"+from.Module])
+			if len(to) > 1 {
+				to = m.prefer(to, repoAff[from.Repo])
+			}
+		}
+		for _, j := range to {
+			m.Links = append(m.Links, Link{From: c.from, To: j, Score: c.score, Ambiguous: len(to) > 1})
+		}
+	}
+}
+
+// prefer deja los candidatos del módulo proveedor con más afinidad.
+func (m *Map) prefer(cands []int, aff map[string]int) []int {
+	best := 0
+	for _, j := range cands {
+		if n := aff[m.Entries[j].Repo+"|"+m.Entries[j].Module]; n > best {
+			best = n
+		}
+	}
+	if best == 0 {
+		return cands
+	}
+	var out []int
+	for _, j := range cands {
+		if aff[m.Entries[j].Repo+"|"+m.Entries[j].Module] == best {
+			out = append(out, j)
+		}
+	}
+	return out
+}
+
+// onlyParams informa si una ruta no tiene ningún segmento fijo.
+func onlyParams(p string) bool {
+	for _, s := range strings.Split(strings.Trim(p, "/"), "/") {
+		if s != "" && s != Param {
+			return false
+		}
+	}
+	return true
 }
 
 // Stats resume el mapa por repo.
