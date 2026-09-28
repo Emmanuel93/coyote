@@ -100,3 +100,4 @@
 2026-09-28T22:01Z|@eramirezhdez/coyote-security|W-0005|coyote|fix|gate|detecta coyote run y ws por palabras, sin enumerar envoltorios|-|-|-|ok
 2026-09-28T22:01Z|@eramirezhdez/coyote-security|W-0005|coyote|fix|ci|rutas del PR como código en el comentario, Ctrl-\\ y PR de…|-|-|-|ok
 2026-09-28T22:03Z|@eramirezhdez/coyote-dev|W-0005|coyote|fix|ci|el resumen del riesgo agrupa los motivos con sus archivos|-|-|-|ok
+2026-09-28T22:06Z|@eramirezhdez/coyote-reviewer|W-0005|coyote|doc|release|reporte de v0.5.0 para el gate G5|-|-|-|ok

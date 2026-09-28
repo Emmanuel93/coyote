@@ -1,6 +1,6 @@
 # Plan de ejecución — Coyote
 
-Estado: v0.4.0 aprobada en G4 (P-0004) · v0.5 en construcción · actualizado 2026-09-28
+Estado: v0.4.0 aprobada en G4 (P-0004) · v0.5.0 lista para G5 (docs/releases/v0.5.0.md) · actualizado 2026-09-28
 
 Este plan ejecuta la propuesta aprobada ("Plan de construcción — Framework Coyote"). Cada release se razona con la plantilla de cinco partes que usarán los agentes de Coyote (problema, restricciones, opciones, decisión, riesgos) y cierra con un gate humano: nada se etiqueta, se publica ni toca otros proyectos sin autorización explícita.
 
@@ -290,8 +290,8 @@ G4 autoriza: el presupuesto para correr agentes con `coyote run` en tu Mac, llev
 | T34 | `coyote install --ci github` | Instalarlo debe ser un comando, igual que el gate | Workflow por repo del producto con permisos mínimos, sin forks, y la documentación del secreto; `--check` | Hecho: corre `gate pr`, con las reglas de riesgo del proyecto y un secreto aparte para leer coyote |
 | T35 | Motor de workstreams | Sin motor, `supervised` y `autonomous` son palabras | `coyote ws check\|run\|continue\|status`: contrato por paso (A2), artefactos encadenados, puntos de control, tope del plan, rama `ws/` en autónomo; pruebas con un `claude` simulado | Hecho: estado desde el ledger; `autonomous` con la aprobación del plan por hash; retoma la sesión tras la cola del gate |
 | T36 | `coyote gate pr` | La aprobación en equipo sin compartir claves | Riesgo por rutas e impacto; un R2, R3 o un cambio que rompe pide la revisión de un dueño; reporte en el PR | Hecho: CODEOWNERS de la rama base; los tres repos del piloto no tienen CODEOWNERS |
-| T37 | Corridas medidas | Evidencia antes de dejar correr planes | Tus primeras corridas en el piloto, con su costo y caché en el ledger y en el reporte de G5 | Pendiente |
-| T38 | Verificación y G5 | Evidencia antes de aplicar coyote en los repos de la organización | Pruebas, revisión adversarial y `docs/releases/v0.5.0.md` | Pendiente |
+| T37 | Corridas medidas | Evidencia antes de dejar correr planes | Tus primeras corridas en el piloto, con su costo y caché en el ledger y en el reporte de G5 | Pendiente: las lanzas tú; condición para `supervised` en el piloto |
+| T38 | Verificación y G5 | Evidencia antes de aplicar coyote en los repos de la organización | Pruebas, revisión adversarial y `docs/releases/v0.5.0.md` | Hecho: dos pasadas adversariales (13 hallazgos y 5 más, corregidos); `gate pr` validado en solo lectura sobre el PR #1 de servicios |
 
 G5 autoriza:
 
