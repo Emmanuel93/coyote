@@ -477,7 +477,7 @@ func TestProposals(t *testing.T) {
 	if strings.Contains(app.Readme, "mod|raíz") {
 		t.Error("el repo entero no se lista como módulo")
 	}
-	if !strings.Contains(app.Context, "inv|tienda_pedidos|usa 2 interfaces de servicios: bff-movil; un cambio en ellos lo afecta") {
+	if !strings.Contains(app.Context, "inv|tienda_pedidos|usa 2 interfaces de servicios: bff-movil; un cambio en ellas lo afecta") {
 		t.Errorf("un módulo que consume otro repo declara de qué depende:\n%s", app.Context)
 	}
 }

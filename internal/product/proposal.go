@@ -425,7 +425,7 @@ func (sc *Scan) context(mods []*modInfo, today string, omitted *int) string {
 				break
 			}
 		}
-		line := fmt.Sprintf("inv|%s|usa %s de %s; un cambio en ellos lo afecta|%s", scopeName(sc.Repo, mi.path),
+		line := fmt.Sprintf("inv|%s|usa %s de %s; un cambio en ellas lo afecta|%s", scopeName(sc.Repo, mi.path),
 			plural(total, "interfaz", "interfaces"), clean(listOf(topKeys(mi.providers, len(mi.providers)), 3)), clean(ref))
 		if !b.try(line) {
 			*omitted++
