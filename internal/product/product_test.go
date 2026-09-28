@@ -997,3 +997,28 @@ public class CosasClient {
 		}
 	}
 }
+
+func TestLectorEnLote(t *testing.T) {
+	dir := t.TempDir()
+	put(t, dir, "a.txt", "uno\n")
+	put(t, dir, "sub/b.txt", "dos\n")
+	gitRepo(t, dir)
+	put(t, dir, "a.txt", "cambiado\n")
+	rd := newReader()
+	rd.prefetch(dir, "HEAD", []string{"a.txt", "sub/b.txt", "no-existe.txt"})
+	if s, ok := rd.text(dir, "HEAD", "a.txt"); !ok || s != "uno\n" {
+		t.Errorf("a.txt en HEAD: %q %v", s, ok)
+	}
+	if s, ok := rd.text(dir, "HEAD", "sub/b.txt"); !ok || s != "dos\n" {
+		t.Errorf("sub/b.txt en HEAD: %q %v", s, ok)
+	}
+	if _, ok := rd.text(dir, "HEAD", "no-existe.txt"); ok {
+		t.Error("un archivo que no existe en la revisión queda ausente")
+	}
+	if s, _ := rd.text(dir, "", "a.txt"); s != "cambiado\n" {
+		t.Errorf("sin revisión se lee el árbol de trabajo: %q", s)
+	}
+	if n := len(rd.moduleFiles(dir, "sub")); n != 1 {
+		t.Errorf("archivos del módulo sub: %d", n)
+	}
+}

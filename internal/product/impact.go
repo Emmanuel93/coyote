@@ -96,6 +96,7 @@ func (e Entry) Describe() string {
 // Impact cruza el cambio contra el mapa.
 func (m *Map) Impact(q Query, src Sources) (*Impact, error) {
 	im := &Impact{Query: q.String()}
+	rd := newReader()
 	touched := map[int]string{}
 	switch {
 	case q.Endpoint != "":
@@ -170,7 +171,7 @@ func (m *Map) Impact(q Query, src Sources) (*Impact, error) {
 			// Lo que el diff agrega o elimina del contrato, aunque el mapa sea
 			// de otro commit: se compara cada archivo antes y después.
 			left, right, worktree := diffSides(dir, c.Diff)
-			added, removed := m.contractChanges(dir, c.Repo, ch, left, right, worktree)
+			added, removed := m.contractChanges(rd, dir, c.Repo, ch, left, right, worktree)
 			known := map[string]bool{}
 			for _, e := range m.Entries {
 				known[contractID(e)] = true
@@ -192,8 +193,7 @@ func (m *Map) Impact(q Query, src Sources) (*Impact, error) {
 			m = Load(m.SHAs, append(append([]Entry(nil), m.Entries...), extra...))
 		}
 		for _, p := range preps {
-			dir, rev := p.dir, p.rev
-			m.touchByFiles(p.repo, p.ranges, func(f string) (string, bool) { return fileText(dir, rev, f) }, touched, im)
+			m.touchByFiles(rd, p.repo, p.dir, p.rev, p.ranges, touched, im)
 		}
 		for i, e := range m.Entries {
 			if why, ok := marks[contractID(e)]; ok {
@@ -265,7 +265,7 @@ func (m *Map) Impact(q Query, src Sources) (*Impact, error) {
 		key := e.Repo + "|" + e.Module
 		g := graphs[key]
 		if g == nil {
-			g = newMentionGraph(dir, e.Module)
+			g = newMentionGraph(rd, dir, e.Module)
 			graphs[key] = g
 		}
 		// Por método: el endpoint del módulo cuya implementación llega, por
@@ -398,9 +398,9 @@ type mentionGraph struct {
 	mentions map[string][]string // archivo → archivos que lo mencionan
 }
 
-func newMentionGraph(dir, mod string) *mentionGraph {
+func newMentionGraph(rd *reader, dir, mod string) *mentionGraph {
 	g := &mentionGraph{types: map[string][]string{}, texts: map[string]string{}, mentions: map[string][]string{}}
-	for _, rel := range moduleFiles(dir, mod) {
+	for _, rel := range rd.moduleFiles(dir, mod) {
 		ext := path.Ext(rel)
 		if (ext != ".java" && ext != ".kt") || isTestPath(rel) {
 			continue

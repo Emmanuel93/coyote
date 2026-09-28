@@ -426,9 +426,9 @@ type moduleCtx struct {
 	cfg    map[string]cfgClass
 }
 
-func loadModuleCtx(dir, mod string) *moduleCtx {
+func loadModuleCtx(rd *reader, dir, mod string) *moduleCtx {
 	mc := &moduleCtx{consts: constTable{}, props: map[string]string{}, cfg: map[string]cfgClass{}}
-	for _, rel := range moduleFiles(dir, mod) {
+	for _, rel := range rd.moduleFiles(dir, mod) {
 		ext := strings.ToLower(path.Ext(rel))
 		if (ext == ".java" || ext == ".kt") && !isTestPath(rel) {
 			if data, ok := readRegular(dir, rel); ok {
@@ -444,25 +444,6 @@ func loadModuleCtx(dir, mod string) *moduleCtx {
 		}
 	}
 	return mc
-}
-
-// moduleFiles lista los archivos de un módulo con la misma lista que el mapa
-// (git, con lo nuevo sin commit), para que el análisis vea lo mismo que el mapa.
-func moduleFiles(dir, mod string) []string {
-	list, _, err := files(dir)
-	if err != nil {
-		return nil
-	}
-	if mod == "." || mod == "" {
-		return list
-	}
-	var out []string
-	for _, f := range list {
-		if strings.HasPrefix(f, mod+"/") {
-			out = append(out, f)
-		}
-	}
-	return out
 }
 
 // underSrc informa si una ruta está dentro de una carpeta de código fuente.

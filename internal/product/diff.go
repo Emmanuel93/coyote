@@ -248,13 +248,24 @@ var typeDeclRe = regexp.MustCompile(`\b(?:class|record|interface|enum|type)\s+([
 // touchByFiles marca lo que tocan los archivos cambiados: interfaces en las
 // líneas cambiadas, las interfaces cuyo método contiene el cambio y las que
 // usan un tipo que cambió.
-func (m *Map) touchByFiles(repo string, changes map[string][]lineRange, text func(string) (string, bool), touched map[int]string, im *Impact) {
+func (m *Map) touchByFiles(rd *reader, repo, dir, rev string, changes map[string][]lineRange, touched map[int]string, im *Impact) {
 	byFile := map[string][]int{}
 	for i, e := range m.Entries {
 		if e.Repo == repo {
 			byFile[e.File] = append(byFile[e.File], i)
 		}
 	}
+	// Todo lo que se va a leer en esa revisión, en un solo lote.
+	var want []string
+	for f := range changes {
+		want = append(want, f)
+	}
+	for f := range byFile {
+		want = append(want, f)
+	}
+	sort.Strings(want)
+	rd.prefetch(dir, rev, want)
+	text := func(f string) (string, bool) { return rd.text(dir, rev, f) }
 	lines := map[string][]string{}
 	linesOf := func(f string) ([]string, bool) {
 		if l, ok := lines[f]; ok {
@@ -318,9 +329,12 @@ func (m *Map) touchByFiles(repo string, changes map[string][]lineRange, text fun
 				}
 			}
 		}
-		if len(idx) == 0 && haveText {
+		if len(idx) == 0 && haveText && codeExt[strings.ToLower(filepath.Ext(f))] && !isTestPath(f) {
 			for _, mt := range typeDeclRe.FindAllStringSubmatch(strings.Join(ls, "\n"), -1) {
-				changedTypes = append(changedTypes, mt[1])
+				// Un tipo es un nombre con minúsculas: SPEI o M son constantes o genéricos.
+				if len(mt[1]) >= 3 && strings.ToUpper(mt[1]) != mt[1] {
+					changedTypes = append(changedTypes, mt[1])
+				}
 			}
 		}
 	}
@@ -354,8 +368,13 @@ func (m *Map) touchByFiles(repo string, changes map[string][]lineRange, text fun
 		}
 	}
 	if len(users) > 20 {
-		im.Notes = append(im.Notes, fmt.Sprintf("los tipos que cambiaron (%s) se usan en %d archivos con interfaces: revisa si el cambio es de contrato",
-			strings.Join(changedTypes, ", "), len(users)))
+		shown := changedTypes
+		more := ""
+		if len(shown) > 8 {
+			shown, more = shown[:8], fmt.Sprintf(" y %d más", len(changedTypes)-8)
+		}
+		im.Notes = append(im.Notes, fmt.Sprintf("los tipos que cambiaron (%s%s) se usan en %d archivos con interfaces: revisa si el cambio es de contrato",
+			strings.Join(shown, ", "), more, len(users)))
 	}
 }
 
@@ -391,7 +410,7 @@ func (m *Map) moduleFor(repo, file string) string {
 
 // contractChanges compara las interfaces de cada archivo de código cambiado
 // antes y después del diff: lo que se elimina y lo que se agrega.
-func (m *Map) contractChanges(dir, repo string, ch *fileChanges, left, right string, worktree bool) (added, removed []Entry) {
+func (m *Map) contractChanges(rd *reader, dir, repo string, ch *fileChanges, left, right string, worktree bool) (added, removed []Entry) {
 	names := map[string]bool{}
 	for f := range ch.old {
 		names[f] = true
@@ -404,6 +423,21 @@ func (m *Map) contractChanges(dir, repo string, ch *fileChanges, left, right str
 		files = append(files, f)
 	}
 	sort.Strings(files)
+	var olds, news []string
+	for _, f := range files {
+		if codeExt[strings.ToLower(filepath.Ext(f))] && !isTestPath(f) {
+			if _, ok := ch.old[f]; ok {
+				olds = append(olds, f)
+			}
+			if _, ok := ch.new[f]; ok {
+				news = append(news, f)
+			}
+		}
+	}
+	rd.prefetch(dir, left, olds)
+	if !worktree {
+		rd.prefetch(dir, right, news)
+	}
 	ctxs := map[string]*moduleCtx{}
 	for _, f := range files {
 		if !codeExt[strings.ToLower(filepath.Ext(f))] || isTestPath(f) {
@@ -412,19 +446,19 @@ func (m *Map) contractChanges(dir, repo string, ch *fileChanges, left, right str
 		mod := m.moduleFor(repo, f)
 		var lt, rt string
 		if _, ok := ch.old[f]; ok && left != "" {
-			lt, _ = fileText(dir, left, f)
+			lt, _ = rd.text(dir, left, f)
 		}
 		if _, ok := ch.new[f]; ok {
 			switch {
 			case worktree:
-				rt, _ = fileText(dir, "", f)
+				rt, _ = rd.text(dir, "", f)
 			case right != "":
-				rt, _ = fileText(dir, right, f)
+				rt, _ = rd.text(dir, right, f)
 			}
 		}
 		mc := ctxs[mod]
 		if mc == nil && (strings.HasSuffix(f, ".java") || strings.HasSuffix(f, ".kt")) {
-			mc = loadModuleCtx(dir, mod)
+			mc = loadModuleCtx(rd, dir, mod)
 			ctxs[mod] = mc
 		}
 		before, after := extractText(repo, mod, f, lt, mc), extractText(repo, mod, f, rt, mc)
