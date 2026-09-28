@@ -21,3 +21,4 @@
 2026-09-28T01:47Z|@eramirezhdez/coyote-dev|W-0001|coyote|feat|cli|catorce comandos para proyectos, ledger, estándar y atribución|-|-|-|ok
 2026-09-28T01:47Z|@eramirezhdez/coyote-dev|W-0001|coyote|doc|examples|proyecto sintético acme-shop desde el dominio|-|-|-|ok
 2026-09-28T01:47Z|@eramirezhdez/coyote-devsecops|W-0001|coyote|ci|-|vet, pruebas, lint del estándar y atribución en cada cambio|-|-|-|ok
+2026-09-28T01:47Z|@eramirezhdez/coyote-scribe|W-0001|coyote|doc|release|README y reporte de v0.1.0 para el gate G1|-|-|-|ok
