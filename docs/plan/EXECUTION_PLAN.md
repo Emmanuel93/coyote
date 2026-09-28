@@ -135,12 +135,12 @@ G2 autorizó (P-0002): etiquetar v0.2.0, validar tu token con una sola lectura a
 | ID | Tarea | Razonamiento | Aceptación | Estado |
 | --- | --- | --- | --- | --- |
 | T18 | Plan y ADR-0009, ADR-0010 | El gate cambia cómo trabajan los agentes; se razona antes del código | Esta sección, los ADRs y el workstream W-0003 | Hecho |
-| T19 | Gate por hash | Es el núcleo de A1: sin él, lo demás es declarativo | `gate check` con entradas de Claude Code, Cursor, Codex y Copilot; lectura libre; rutas protegidas; falla cerrado | Pendiente |
-| T20 | Cola de aprobaciones | La persona necesita ver y decidir rápido, con rastro | `approvals`, `review`, `approve`, `reject`, `revoke`; registros firmados; usos, caducidad y revocación en el ledger | Pendiente |
-| T21 | Agentes y skills | Una definición sirve a todos los IDEs | 14 agentes y skills `coyote-*` con esquema de salida y R15; los del proyecto en `coyote/agents` y `coyote/skills` | Pendiente |
-| T22 | `install` y `doctor --ide` | Configurar un IDE debe ser un comando, verificable en CI | Claude Code y Cursor; configuración fusionada sin pisar la tuya; `--check` | Pendiente |
-| T23 | Identidad y autonomía | El ledger debe decir qué agente actuó, sin depender de lo que declara | Roster, identidad del IDE en el ledger, sesiones de agente sin poder aprobar | Pendiente |
-| T24 | Verificación y G3 | Evidencia antes de activar el gate en proyectos reales | 24 pruebas de gate o más, demo de punta a punta, revisión adversarial y `docs/releases/v0.3.0.md` | Pendiente |
+| T19 | Gate por hash | Es el núcleo de A1: sin él, lo demás es declarativo | `gate check` con entradas de Claude Code, Cursor, Codex y Copilot; lectura libre; rutas protegidas; falla cerrado | Hecho |
+| T20 | Cola de aprobaciones | La persona necesita ver y decidir rápido, con rastro | `approvals`, `review`, `approve`, `reject`, `revoke`; registros firmados; usos, caducidad y revocación en el ledger | Hecho |
+| T21 | Agentes y skills | Una definición sirve a todos los IDEs | 14 agentes y skills `coyote-*` con esquema de salida y R15; los del proyecto en `coyote/agents` y `coyote/skills` | Hecho |
+| T22 | `install` y `doctor --ide` | Configurar un IDE debe ser un comando, verificable en CI | Claude Code y Cursor; configuración fusionada sin pisar la tuya; `--check` | Hecho |
+| T23 | Identidad y autonomía | El ledger debe decir qué agente actuó, sin depender de lo que declara | Roster, identidad del IDE en el ledger, sesiones de agente sin poder aprobar | Hecho |
+| T24 | Verificación y G3 | Evidencia antes de activar el gate en proyectos reales | 24 pruebas de gate o más, demo de punta a punta, revisión adversarial y `docs/releases/v0.3.0.md` | En curso |
 
 G3 autoriza: el piloto en seco sobre un dominio real en solo lectura, activar el gate en el repo de coyote y en los proyectos que elijas, y los supuestos D6, D11, D19, D20, D21 y D22.
 

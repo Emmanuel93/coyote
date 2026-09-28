@@ -52,3 +52,4 @@
 2026-09-28T07:04Z|@eramirezhdez/coyote-devsecops|W-0003|coyote|feat|gate|gate por hash con cola de aprobaciones firmadas|-|-|-|ok
 2026-09-28T07:12Z|@eramirezhdez/coyote-architect|W-0003|coyote|feat|agents|14 agentes, 8 skills e instalación para Claude Code y Cursor|-|-|-|ok
 2026-09-28T07:14Z|@eramirezhdez/coyote-devsecops|W-0003|coyote|feat|identity|agentes del roster y sesiones de agente en el ledger|-|-|-|ok
+2026-09-28T07:16Z|@eramirezhdez/coyote-scribe|W-0003|coyote|doc|specs|gate v1 e instalación v1; README con el flujo de aprobación|-|-|-|ok

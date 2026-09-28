@@ -16,6 +16,8 @@ CLI en Go para contexto versionado, gates humanos, estándar por capas y costo t
 - Módulo project (`internal/project`): init, repos y hook commit-msg; interfaz Init, AddRepo
 - Módulo index (`internal/index`): índice, BM25 y paquetes de contexto; interfaz Build, Search, Pack
 - Módulo remoto (`internal/pace, internal/auth, internal/github`): ritmo humano, token y API de GitHub; interfaz Limiter, Token
+- Módulo gate (`internal/gate, internal/approval`): gate por hash y aprobaciones firmadas; interfaz Evaluate, Store
+- Módulo install (`agents, skills, internal/agents, internal/install`): agentes, skills y configuración por IDE; interfaz Plan
 - Docs `docs/specs`: especificaciones
 - Docs `docs/plan/EXECUTION_PLAN.md`: plan razonado por release
 - Depende de go-yaml: YAML; copia en third_party
@@ -33,11 +35,16 @@ CLI en Go para contexto versionado, gates humanos, estándar por capas y costo t
 - [gap] build: sin acceso al proxy de módulos se compila con GOFLAGS=-mod=mod y GOPROXY=off; el Makefile ya lo hace (Makefile)
 - [how] release: make dist genera binarios de macOS y Linux con la versión inyectada por ldflags (Makefile)
 - [term] ccf: Coyote Compact Format: una línea por evento, once campos separados por barra vertical (docs/specs/ccf-v1.md)
-- [risk] tokens: el estimador local de tokens puede desviarse del conteo real; v0.2 lo contrasta con count_tokens (ADR-0006)
-- [todo] agents: motor de agentes, aprobaciones por hash y hooks de IDE llegan en v0.3 (docs/plan/EXECUTION_PLAN.md)
+- [risk] tokens: el estimador local de tokens puede desviarse del conteo real; v0.4 lo contrasta con el uso que reporta el proveedor (ADR-0006)
+- [todo] autonomy: supervised y autonomous con su motor, el router y el cierre con costo llegan en v0.4 (docs/plan/EXECUTION_PLAN.md)
 - [inv] index: el índice se reconstruye desde git; .coyote/ es caché y nunca se versiona (ADR-0007)
 - [inv] sync: push y pull usan el git del sistema; coyote nunca guarda credenciales de git (ADR-0008)
 - [inv] web: coyote web escucha solo en loopback, valida Host y es de solo lectura (internal/web/web.go)
+- [inv] gate: toda acción con efectos de un agente pasa por coyote gate check; leer es libre, lo demás se aprueba (ADR-0009)
+- [inv] gate: un agente nunca aprueba, edita el gate ni lee credenciales; el gate falla cerrado (docs/specs/gate-v1.md)
+- [inv] approvals: una aprobación vale en la máquina que la firmó, por 24 h y usos contados en el ledger (docs/specs/gate-v1.md)
+- [dec] agents: una definición por agente y skill; coyote install la traduce a Claude Code y Cursor sin pisar su configuración (ADR-0010)
+- [gap] gate: los bloqueos por texto pueden bloquear un commit que solo menciona rutas del gate o credenciales (docs/specs/gate-v1.md)
 
 ## Reglas obligatorias (MUST)
 
