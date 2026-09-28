@@ -54,6 +54,7 @@ func init() {
 		{"push", "[--remote origin] [--agent A] [--dry-run]", "publica con autoría, estándar y ritmo humano revisados", cmdPush},
 		{"pull", "[--remote origin]", "trae cambios y resume el contexto nuevo", cmdPull},
 		{"auth", "login | status [--check] | logout", "token de GitHub en el llavero, nunca en archivos", cmdAuth},
+		{"web", "[--addr 127.0.0.1:7410]", "costos por proyecto y por persona en el navegador", cmdWeb},
 		{"generate", "agents [--check]", "genera AGENTS.md desde los documentos coyote", cmdGenerate},
 		{"hooks", "install [--force]", "instala el hook commit-msg", cmdHooks},
 		{"doctor", "", "verifica herramienta, identidad, documentos y estándar", cmdDoctor},

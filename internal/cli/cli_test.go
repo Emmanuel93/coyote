@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -711,4 +712,30 @@ func TestAuthStatusYLogin(t *testing.T) {
 		t.Fatalf("status inesperado o con el token completo:\n%s", r.stdout)
 	}
 	must(t, run(t, dir, "", "auth", "login", "--device"), 1, "device flow sin client ID")
+}
+
+func TestWeb(t *testing.T) {
+	base := setup(t)
+	root := filepath.Join(base, "w")
+	must(t, run(t, base, "", "init", "w", "--purpose", "prueba web"), 0, "init")
+	must(t, run(t, root, "", "record", "run", "implementa pedidos", "--agent", "coyote-dev", "--tokens", "12k/8k/1k", "--cost", "0.01+0.02", "--refs", "model:sonnet-5"), 0, "record")
+	must(t, run(t, root, "", "web", "--addr", "0.0.0.0:7410"), 2, "web fuera de loopback")
+	old := webServe
+	defer func() { webServe = old }()
+	var body string
+	webServe = func(srv *http.Server, ln net.Listener) error {
+		defer ln.Close()
+		req := httptest.NewRequest(http.MethodGet, "/?since=all", nil)
+		req.Host = "127.0.0.1"
+		rec := httptest.NewRecorder()
+		srv.Handler.ServeHTTP(rec, req)
+		body = rec.Body.String()
+		return nil
+	}
+	must(t, run(t, root, "", "web", "--addr", "127.0.0.1:0"), 0, "web")
+	for _, want := range []string{"$0.03", "sonnet-5", "@ana", "12k"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("falta %q en la página:\n%s", want, body)
+		}
+	}
 }

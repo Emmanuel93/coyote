@@ -37,6 +37,7 @@ CLI en Go para contexto versionado, gates humanos, estándar por capas y costo t
 - [todo] remote: push, pull y get context con OAuth device flow y cuotas a ritmo humano llegan en v0.2 (docs/plan/EXECUTION_PLAN.md)
 - [inv] index: el índice se reconstruye desde git; .coyote/ es caché y nunca se versiona (ADR-0007)
 - [inv] sync: push y pull usan el git del sistema; coyote nunca guarda credenciales de git (ADR-0008)
+- [inv] web: coyote web escucha solo en loopback, valida Host y es de solo lectura (internal/web/web.go)
 
 ## Reglas obligatorias (MUST)
 
