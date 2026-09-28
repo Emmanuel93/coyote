@@ -17,3 +17,4 @@ how|release|make dist genera binarios de macOS y Linux con la versión inyectada
 term|ccf|Coyote Compact Format: una línea por evento, once campos separados por barra vertical|docs/specs/ccf-v1.md
 risk|tokens|el estimador local de tokens puede desviarse del conteo real; v0.2 lo contrasta con count_tokens|ADR-0006
 todo|remote|push, pull y get context con OAuth device flow y cuotas a ritmo humano llegan en v0.2|docs/plan/EXECUTION_PLAN.md
+inv|index|el índice se reconstruye desde git; .coyote/ es caché y nunca se versiona|ADR-0007

@@ -495,3 +495,91 @@ func TestNoEscribeFueraDelProyecto(t *testing.T) {
 		t.Fatalf("se escribió fuera del proyecto: %v", entries)
 	}
 }
+
+func TestContextoYPreguntas(t *testing.T) {
+	base := setup(t)
+	root := filepath.Join(base, "tienda")
+	must(t, run(t, base, "", "init", "tienda", "--type", "backend", "--purpose", "API de pedidos y pagos"), 0, "init")
+	must(t, run(t, root, "", "note", "un pedido se confirma solo con un pago capturado", "--type", "inv", "--scope", "pagos"), 0, "note pagos")
+	must(t, run(t, root, "", "note", "un envío no sale sin dirección validada", "--type", "inv", "--scope", "envios"), 0, "note envios")
+
+	r := run(t, root, "", "get", "context", "--scope", "pagos", "--budget", "600")
+	must(t, r, 0, "get context")
+	if !strings.Contains(r.stdout, "pago capturado") || strings.Contains(r.stdout, "dirección validada") {
+		t.Errorf("paquete de pagos inesperado:\n%s", r.stdout)
+	}
+	r = run(t, root, "", "get", "context", "--format", "ccf")
+	must(t, r, 0, "get context ccf")
+	if !strings.HasPrefix(r.stdout, "# contexto|tienda|") {
+		t.Errorf("formato CCF inesperado:\n%s", r.stdout)
+	}
+	must(t, run(t, root, "", "get", "context", "--budget", "10"), 2, "presupuesto demasiado chico")
+	must(t, run(t, root, "", "get", "context", "otro"), 1, "repo desconocido")
+
+	r = run(t, root, "", "ask", "cuándo se confirma un pedido", "--record")
+	must(t, r, 0, "ask")
+	if !strings.Contains(r.stdout, "pago capturado") || !strings.Contains(r.stdout, "CONTEXT.coyote.md#L") {
+		t.Errorf("ask sin la invariante o sin referencia:\n%s", r.stdout)
+	}
+	if !strings.Contains(ledgerText(t, root), "|ask|-|cuándo se confirma un pedido|doc:CONTEXT.coyote.md#L") {
+		t.Errorf("ask --record no quedó en el ledger:\n%s", ledgerText(t, root))
+	}
+	r = run(t, root, "", "ask", "xyzzy inexistente")
+	must(t, r, 0, "ask sin resultados")
+	if !strings.Contains(r.stdout, "sin resultados") {
+		t.Errorf("se esperaba 'sin resultados':\n%s", r.stdout)
+	}
+	must(t, run(t, root, "", "index", "--rebuild"), 0, "index")
+	if _, err := os.Stat(filepath.Join(root, ".coyote", "index.json")); err != nil {
+		t.Error("no se escribió la caché del índice")
+	}
+	if st := git(t, root, "status", "--porcelain", "--", ".coyote"); st != "" {
+		t.Errorf(".coyote/ debe estar ignorado por git:\n%s", st)
+	}
+}
+
+func TestContextoDeOtroRepo(t *testing.T) {
+	base := setup(t)
+	// Repo remoto (bare) con documentos coyote y código que no debe bajarse.
+	src := filepath.Join(base, "pagos-src")
+	must(t, run(t, base, "", "init", "pagos-src", "--type", "backend", "--purpose", "servicio de pagos"), 0, "init remoto")
+	must(t, run(t, src, "", "note", "todo cobro es idempotente por clave", "--type", "inv", "--scope", "cobros"), 0, "note remoto")
+	if err := os.MkdirAll(filepath.Join(src, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "src", "main.go"), []byte("package main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, src, "add", "-A")
+	must(t, run(t, src, "", "commit", "-m", "feat: servicio de pagos"), 0, "commit remoto")
+	bare := filepath.Join(base, "pagos.git")
+	git(t, base, "clone", "-q", "--bare", src, bare)
+
+	root := filepath.Join(base, "hub")
+	must(t, run(t, base, "", "init", "hub", "--type", "hub", "--purpose", "proyecto multi-repo"), 0, "init hub")
+	must(t, run(t, root, "", "repo", "add", "pagos", "file://"+bare), 0, "repo add")
+	must(t, run(t, root, "", "repo", "add", "malo", "https://user:tok@example.com/x.git"), 1, "URL con credenciales")
+	must(t, run(t, root, "", "repo", "add", "malo", "--upload-pack=touch x"), 2, "URL que parece opción")
+	cfg := readFile(t, filepath.Join(root, "coyote", "project.yaml"))
+	if !strings.Contains(cfg, "name: pagos") || !strings.Contains(cfg, "# manual | supervised | autonomous") {
+		t.Errorf("project.yaml sin el repo o sin sus comentarios:\n%s", cfg)
+	}
+	r := run(t, root, "", "get", "context", "pagos")
+	must(t, r, 0, "get context de otro repo")
+	if !strings.Contains(r.stdout, "idempotente por clave") || !strings.Contains(r.stdout, "# Contexto: pagos") {
+		t.Errorf("contexto remoto inesperado:\n%s", r.stdout)
+	}
+	docs := filepath.Join(root, ".coyote", "repos", "pagos")
+	if _, err := os.Stat(filepath.Join(docs, "src", "main.go")); err == nil {
+		t.Fatal("se bajó código del repo; solo deben venir sus documentos")
+	}
+	if _, err := os.Stat(filepath.Join(docs, "CONTEXT.coyote.md")); err != nil {
+		t.Fatal("no se trajo CONTEXT.coyote.md")
+	}
+	r = run(t, root, "", "repo", "list")
+	must(t, r, 0, "repo list")
+	if !strings.Contains(r.stdout, "traídos") {
+		t.Errorf("repo list sin estado:\n%s", r.stdout)
+	}
+	must(t, run(t, root, "", "ask", "cobro idempotente", "--repo", "pagos"), 0, "ask a otro repo")
+}

@@ -18,7 +18,8 @@ mod|ccfdoc|README.coyote.md y CONTEXT.coyote.md: gramática y topes|internal/ccf
 mod|ledger|archivos append-only por día y persona|internal/ledger|Ledger
 mod|standards|estándar por capas, overrides y checks del lint|internal/standards|Load, Lint
 mod|attribution|detecta y quita atribución a IA|internal/attribution|Config
-mod|project|project.yaml, coyote init y hook commit-msg|internal/project|Init
+mod|project|project.yaml, coyote init, repos del proyecto y hook commit-msg|internal/project|Init, AddRepo
+mod|index|índice local, búsqueda BM25 y paquetes de contexto|internal/index|Build, Search, Pack
 docs|docs/specs|especificaciones CCF, CCF-doc, estándar y atribución
 docs|docs/plan/EXECUTION_PLAN.md|plan de ejecución razonado por release y gates
 dep|go-yaml|YAML del estándar y frontmatter; copia en third_party

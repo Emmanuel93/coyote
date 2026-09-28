@@ -403,3 +403,125 @@ func HookInstalled(dir string) bool {
 	}
 	return false
 }
+
+var (
+	repoNameRe = regexp.MustCompile(`^[\p{L}\p{N}][\p{L}\p{N}._-]*$`)
+	scpLikeRe  = regexp.MustCompile(`^[A-Za-z0-9._-]+@[A-Za-z0-9.-]+:[^\s]+$`)
+)
+
+// ValidateRepo revisa un repo antes de guardarlo: nombre simple, URL sin
+// credenciales ni transportes que ejecuten comandos, y nada que git pueda
+// confundir con una opción.
+func ValidateRepo(r RepoRef) error {
+	if !repoNameRe.MatchString(r.Name) {
+		return fmt.Errorf("nombre de repo inválido %q: usa letras, números, punto, guion o guion bajo", r.Name)
+	}
+	if r.URL == "" && r.Path == "" {
+		return fmt.Errorf("el repo %s necesita una URL o una ruta local", r.Name)
+	}
+	for _, v := range []string{r.URL, r.Path, r.Branch} {
+		if strings.HasPrefix(strings.TrimSpace(v), "-") {
+			return fmt.Errorf("%q no puede empezar con guion", v)
+		}
+		if strings.ContainsAny(v, "\n\r\x00") {
+			return fmt.Errorf("valor inválido %q", v)
+		}
+	}
+	if u := r.URL; u != "" {
+		switch {
+		case strings.Contains(u, "::"):
+			return fmt.Errorf("transporte no permitido en %q", u)
+		case scpLikeRe.MatchString(u):
+		case strings.HasPrefix(u, "https://") || strings.HasPrefix(u, "ssh://") || strings.HasPrefix(u, "file://"):
+			rest := u[strings.Index(u, "://")+3:]
+			host := rest
+			if i := strings.Index(rest, "/"); i >= 0 {
+				host = rest[:i]
+			}
+			if at := strings.LastIndex(host, "@"); at >= 0 && strings.Contains(host[:at], ":") {
+				return fmt.Errorf("la URL lleva credenciales; usa la URL sin usuario ni token (git usa tus credenciales del sistema)")
+			}
+			if strings.HasPrefix(u, "https://") && strings.Contains(host, "@") {
+				return fmt.Errorf("la URL https lleva usuario; quítalo y deja que git use tu credential helper")
+			}
+		default:
+			return fmt.Errorf("URL no soportada %q: usa https://, ssh://, git@host:owner/repo.git o file://", u)
+		}
+	}
+	return nil
+}
+
+// AddRepo agrega o actualiza un repo en coyote/project.yaml conservando
+// comentarios y formato del resto del archivo.
+func AddRepo(root string, r RepoRef) (string, error) {
+	if err := ValidateRepo(r); err != nil {
+		return "", err
+	}
+	if err := fsx.NoSymlinks(root, ConfigPath); err != nil {
+		return "", err
+	}
+	p := filepath.Join(root, filepath.FromSlash(ConfigPath))
+	data, err := os.ReadFile(p)
+	if err != nil {
+		return "", err
+	}
+	var doc yaml.Node
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		return "", fmt.Errorf("%s: %w", ConfigPath, err)
+	}
+	if doc.Kind != yaml.DocumentNode || len(doc.Content) == 0 || doc.Content[0].Kind != yaml.MappingNode {
+		return "", fmt.Errorf("%s no es un mapa YAML", ConfigPath)
+	}
+	top := doc.Content[0]
+	var repos *yaml.Node
+	for i := 0; i+1 < len(top.Content); i += 2 {
+		if top.Content[i].Value == "repos" {
+			repos = top.Content[i+1]
+		}
+	}
+	if repos == nil || repos.Kind != yaml.SequenceNode {
+		repos = &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
+		top.Content = append(top.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: "repos"}, repos)
+	}
+	entry := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map", Style: yaml.FlowStyle}
+	for _, kv := range [][2]string{{"name", r.Name}, {"url", r.URL}, {"path", r.Path}, {"branch", r.Branch}} {
+		if kv[1] == "" {
+			continue
+		}
+		entry.Content = append(entry.Content,
+			&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: kv[0]},
+			&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: kv[1]})
+	}
+	status := "agregado"
+	replaced := false
+	for i, n := range repos.Content {
+		for j := 0; j+1 < len(n.Content); j += 2 {
+			if n.Content[j].Value == "name" && n.Content[j+1].Value == r.Name {
+				repos.Content[i], replaced, status = entry, true, "actualizado"
+			}
+		}
+	}
+	if !replaced {
+		repos.Content = append(repos.Content, entry)
+	}
+	var buf bytes.Buffer
+	enc := yaml.NewEncoder(&buf)
+	enc.SetIndent(2)
+	if err := enc.Encode(&doc); err != nil {
+		return "", err
+	}
+	if err := enc.Close(); err != nil {
+		return "", err
+	}
+	if _, err := Load(root); err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(p, buf.Bytes(), 0o644); err != nil {
+		return "", err
+	}
+	if _, err := Load(root); err != nil {
+		_ = os.WriteFile(p, data, 0o644) // lo escrito no se puede leer: se deja como estaba
+		return "", err
+	}
+	return status, nil
+}
