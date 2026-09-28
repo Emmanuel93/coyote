@@ -20,3 +20,4 @@
 2026-09-28T01:47Z|@eramirezhdez/coyote-dev|W-0001|coyote|feat|core|formatos CCF, ledger, estándar por capas y filtro de atribución|-|-|-|ok
 2026-09-28T01:47Z|@eramirezhdez/coyote-dev|W-0001|coyote|feat|cli|catorce comandos para proyectos, ledger, estándar y atribución|-|-|-|ok
 2026-09-28T01:47Z|@eramirezhdez/coyote-dev|W-0001|coyote|doc|examples|proyecto sintético acme-shop desde el dominio|-|-|-|ok
+2026-09-28T01:47Z|@eramirezhdez/coyote-devsecops|W-0001|coyote|ci|-|vet, pruebas, lint del estándar y atribución en cada cambio|-|-|-|ok

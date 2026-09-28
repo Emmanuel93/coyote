@@ -1,0 +1,49 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  # go-yaml está copiado en third_party: la CI no descarga módulos.
+  GOFLAGS: -mod=mod
+  GOPROXY: "off"
+  GOSUMDB: "off"
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # R2 y R15 revisan los commits desde que se adoptó coyote
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go test
+        run: go test -race ./...
+
+      - name: build
+        run: make build
+
+      - name: coyote standards lint
+        run: ./bin/coyote standards lint
+
+      - name: AGENTS.md vigente (R7)
+        run: ./bin/coyote generate agents --check
+
+      - name: sin atribución a IA en docs y commits (R15)
+        run: ./bin/coyote attribution check --commits 50
+
+      - name: ejemplo acme-shop
+        run: ./bin/coyote -C examples/acme-shop standards lint
