@@ -12,7 +12,7 @@ La regla A1 dice que ningún agente ejecuta acciones con efectos sin aprobación
 
 1. **R15.** Un commit, tag, PR o release con atribución a IA, o con la autoría de una herramienta, se bloquea.
 2. **Bloqueos que ninguna aprobación levanta:**
-   - que un agente corra `coyote approve`, `reject`, `revoke`, `auth`, `hooks` o `install`, o que lance otros agentes con `coyote run`, `coyote ws run` o `coyote ws continue`, también detrás de un envoltorio o una construcción del shell (`env`, `script`, `bash -c`, `xargs`, `eval`, `timeout`, llaves, `if`, `for`, `$'…'`, `${IFS}`);
+   - que un agente corra `coyote approve`, `reject`, `revoke`, `auth`, `hooks` o `install`, o que lance otros agentes con `coyote run`, `coyote ws run` o `coyote ws continue`. No importa qué lo invoque: el gate busca la palabra `coyote` seguida del subcomando en cada segmento (`watch`, `xargs`, `find -exec`…). También sigue las variables que guardan `coyote` y lee como comando el texto que el shell ejecutaría (`bash -c`, `eval`, `script -c`, `$(…)`, un `echo … | bash`). Un mensaje de commit, un título o un patrón de `grep` que solo lo mencionan no cuentan;
    - que escriba en el gate: `.claude/settings*.json`, `.claude/hooks/`, `.cursor/hooks*`, `.git/`, `.coyote/`, `coyote/approvals/`, `coyote/ledger/`, `coyote/project.yaml` (ahí vive la autonomía), la configuración global del IDE, de git o del shell;
    - que lea o escriba credenciales: `~/.ssh`, `~/.aws`, `~/.config/gh`, `~/.netrc`, la clave local de coyote y parecidas; también recorrer una carpeta que las contiene (`grep -r ~`) o leer `.git/config` del proyecto, que puede llevar un token en la URL de un remoto;
    - que un subagente declare en un comando un agente distinto del que reporta el IDE.

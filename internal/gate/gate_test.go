@@ -116,6 +116,19 @@ func TestCredentialsAndGateAreBlocked(t *testing.T) {
 		{"Bash", map[string]any{"command": "for i in 1; do coyote ws run W-0001; done"}},
 		{"Bash", map[string]any{"command": "flock /tmp/l coyote approve --all"}},
 		{"Bash", map[string]any{"command": "while true; do coyote approve --all; done"}},
+		// Programas que corren su argumento, sin enumerarlos, e indirecciones.
+		{"Bash", map[string]any{"command": "watch -n1 coyote ws continue W-0001"}},
+		{"Bash", map[string]any{"command": "parallel coyote ws run ::: W-0001"}},
+		{"Bash", map[string]any{"command": "chronic coyote ws run W-0001"}},
+		{"Bash", map[string]any{"command": `find . -name x -exec coyote ws run W-0001 \;`}},
+		{"Bash", map[string]any{"command": "c=coyote; $c ws run W-0001"}},
+		{"Bash", map[string]any{"command": "C=./bin/coyote; ${C} approve --all"}},
+		{"Bash", map[string]any{"command": "export C=coyote && $C approve P-1"}},
+		{"Bash", map[string]any{"command": `echo "coyote ws run W-0001" | bash`}},
+		{"Bash", map[string]any{"command": `echo "$(coyote ws run W-0001)"`}},
+		{"Bash", map[string]any{"command": "alias x='coyote ws run'; x W-0001"}},
+		{"Bash", map[string]any{"command": `python3 -c "import os; os.system('coyote ws run W-0001')"`}},
+		{"Bash", map[string]any{"command": "ssh localhost 'coyote approve --all'"}},
 		{"Bash", map[string]any{"command": "rm .claude/settings.json"}},
 		{"Bash", map[string]any{"command": "echo '{\"disableAllHooks\": true}' > x.json"}},
 		{"Bash", map[string]any{"command": "git config core.hooksPath /tmp/h"}},
@@ -158,7 +171,11 @@ func TestCredentialsAndGateAreBlocked(t *testing.T) {
 		}
 	}
 	// Un commit que solo menciona el comando no es un agente aprobando.
-	for _, c := range []string{`git commit -m "docs: explica coyote approve"`, `git commit -m "feat(ws): coyote ws run corre el plan"`, `coyote note "la persona corre coyote ws run" --type how`} {
+	for _, c := range []string{`git commit -m "docs: explica coyote approve"`, `git commit -m "feat(ws): coyote ws run corre el plan"`, `coyote note "la persona corre coyote ws run" --type how`,
+		`git commit -m "fix(run): la corrida de coyote run la registra"`, `coyote commit -m "docs(ws): coyote ws continue acepta el paso"`,
+		`grep -rn "coyote run" docs/ > /tmp/x`, `sed -i 's/coyote run/coyote ws run/' README.md`, "./bin/coyote status && make run",
+		`gh pr create --title "coyote ws run" --body "corre el plan"`, "go run ./cmd/coyote status",
+		`bash scripts/notas.sh "coyote install --ci ahora fija las acciones"`} {
 		if d := ps.Evaluate(claude(t, "Bash", map[string]any{"command": c}, root)); d.Verdict != NeedsApproval {
 			t.Errorf("%s: un texto que menciona el comando se trató como %s: %s", c, d.Verdict, d.Reason)
 		}
