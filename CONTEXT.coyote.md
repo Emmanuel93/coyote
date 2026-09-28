@@ -15,8 +15,8 @@ dec|formats|CCF para el ledger y CCF-doc para README.coyote.md y CONTEXT.coyote.
 gap|build|sin acceso al proxy de módulos se compila con GOFLAGS=-mod=mod y GOPROXY=off; el Makefile ya lo hace|Makefile
 how|release|make dist genera binarios de macOS y Linux con la versión inyectada por ldflags|Makefile
 term|ccf|Coyote Compact Format: una línea por evento, once campos separados por barra vertical|docs/specs/ccf-v1.md
-risk|tokens|el estimador local de tokens puede desviarse del conteo real; v0.4 lo contrasta con el uso que reporta el proveedor|ADR-0006
-todo|autonomy|supervised y autonomous con su motor, el router y el cierre con costo llegan en v0.4|docs/plan/EXECUTION_PLAN.md
+risk|tokens|el estimador local de tokens puede desviarse del real; los eventos run ya traen el uso que reporta Claude Code|ADR-0006
+todo|autonomy|supervised y autonomous con su motor llegan en v0.5, después de medir corridas reales|docs/plan/EXECUTION_PLAN.md
 inv|index|el índice se reconstruye desde git; .coyote/ es caché y nunca se versiona|ADR-0007
 inv|sync|push y pull usan el git del sistema; coyote nunca guarda credenciales de git|ADR-0008
 inv|web|coyote web escucha solo en loopback, valida Host y es de solo lectura|internal/web/web.go
@@ -25,3 +25,7 @@ inv|gate|un agente nunca aprueba, edita el gate ni lee credenciales; el gate fal
 inv|approvals|una aprobación vale en la máquina que la firmó, por 24 h y usos contados en el ledger|docs/specs/gate-v1.md
 dec|agents|una definición por agente y skill; coyote install la traduce a Claude Code y Cursor sin pisar su configuración|ADR-0010
 gap|gate|los bloqueos por texto pueden bloquear un commit que solo menciona rutas del gate o credenciales|docs/specs/gate-v1.md
+inv|product|leer un repo del producto nunca lo modifica ni corre sus programas: git de plomería, sin filtros ni transportes|docs/specs/product-v1.md
+dec|run|coyote run corre Claude Code headless con el gate, topes de turnos y dólares y evento run en el ledger|ADR-0012
+gap|run|el costo de una corrida es la estimación de Claude Code, no la factura; sin precios queda todo como entrada|docs/specs/run-v1.md
+gap|product|un tópico elegido por un mapa de configuración o un cliente generado quedan sin enlace en el mapa|docs/specs/product-v1.md

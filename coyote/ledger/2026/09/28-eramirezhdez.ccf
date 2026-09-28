@@ -76,3 +76,8 @@
 2026-09-28T19:17Z|@eramirezhdez/coyote-dev|W-0004|coyote|fix|product|diff con diff-tree y diff-index para no reescribir el índice de los…|-|-|-|ok
 2026-09-28T19:29Z|@eramirezhdez/coyote-dev|W-0004|coyote|feat|run|coyote run con Claude Code headless, router v1 y coyote close|-|-|-|ok
 2026-09-28T19:56Z|@eramirezhdez/coyote-dev|W-0004|coyote|fix|product|cierra los hallazgos de la revisión de v0.4|-|-|-|ok
+2026-09-28T19:58Z|@eramirezhdez/claude-code|-|coyote|note|product|inv: leer un repo del producto nunca lo modifica ni corre sus…|doc:CONTEXT.coyote.md|-|-|ok
+2026-09-28T19:58Z|@eramirezhdez/claude-code|-|coyote|note|run|dec: coyote run corre Claude Code headless con el gate, topes de…|doc:CONTEXT.coyote.md|-|-|ok
+2026-09-28T19:58Z|@eramirezhdez/claude-code|-|coyote|note|run|gap: el costo de una corrida es la estimación de Claude Code,…|doc:CONTEXT.coyote.md|-|-|ok
+2026-09-28T19:58Z|@eramirezhdez/claude-code|-|coyote|note|product|gap: un tópico elegido por un mapa de configuración o un cliente…|doc:CONTEXT.coyote.md|-|-|ok
+2026-09-28T20:00Z|@eramirezhdez/coyote-scribe|W-0004|coyote|doc|release|especificaciones de producto y corridas, y reporte de v0.4.0 para G4|-|-|-|ok

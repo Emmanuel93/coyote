@@ -12,12 +12,14 @@ CLI en Go para contexto versionado, gates humanos, estándar por capas y costo t
 - Módulo cli (`internal/cli`): comandos y salida; interfaz Main
 - Módulo formatos (`internal/ccf, internal/ccfdoc, internal/ledger`): ledger CCF y documentos CCF-doc; interfaz Line, Doc
 - Módulo standards (`internal/standards`): estándar por capas y lint; interfaz Load, Lint
-- Módulo attribution (`internal/attribution`): atribución a IA e identidades de bots; interfaz Config
+- Módulo attribution (`internal/attribution`): atribución a IA; interfaz Config
 - Módulo project (`internal/project`): init, repos y hook commit-msg; interfaz Init, AddRepo
 - Módulo index (`internal/index`): índice, BM25 y paquetes de contexto; interfaz Build, Search, Pack
-- Módulo remoto (`internal/pace, internal/auth, internal/github`): ritmo humano, token y API de GitHub; interfaz Limiter, Token
+- Módulo remoto (`internal/pace, internal/auth, internal/github`): ritmo, token y GitHub; interfaz Limiter, Token
 - Módulo gate (`internal/gate, internal/approval`): gate por hash y aprobaciones firmadas; interfaz Evaluate, Store
-- Módulo install (`agents, skills, internal/agents, internal/install`): agentes, skills y configuración por IDE; interfaz Plan
+- Módulo install (`agents, skills, internal/agents, internal/install`): agentes, skills e IDEs; interfaz Plan
+- Módulo product (`internal/product`): mapa e impacto entre repos; interfaz Build, Impact
+- Módulo run (`internal/runner, internal/router`): corridas, router y cierre; interfaz Run, Decide
 - Docs `docs/specs`: especificaciones
 - Docs `docs/plan/EXECUTION_PLAN.md`: plan razonado por release
 - Depende de go-yaml: YAML; copia en third_party
@@ -35,8 +37,8 @@ CLI en Go para contexto versionado, gates humanos, estándar por capas y costo t
 - [gap] build: sin acceso al proxy de módulos se compila con GOFLAGS=-mod=mod y GOPROXY=off; el Makefile ya lo hace (Makefile)
 - [how] release: make dist genera binarios de macOS y Linux con la versión inyectada por ldflags (Makefile)
 - [term] ccf: Coyote Compact Format: una línea por evento, once campos separados por barra vertical (docs/specs/ccf-v1.md)
-- [risk] tokens: el estimador local de tokens puede desviarse del conteo real; v0.4 lo contrasta con el uso que reporta el proveedor (ADR-0006)
-- [todo] autonomy: supervised y autonomous con su motor, el router y el cierre con costo llegan en v0.4 (docs/plan/EXECUTION_PLAN.md)
+- [risk] tokens: el estimador local de tokens puede desviarse del real; los eventos run ya traen el uso que reporta Claude Code (ADR-0006)
+- [todo] autonomy: supervised y autonomous con su motor llegan en v0.5, después de medir corridas reales (docs/plan/EXECUTION_PLAN.md)
 - [inv] index: el índice se reconstruye desde git; .coyote/ es caché y nunca se versiona (ADR-0007)
 - [inv] sync: push y pull usan el git del sistema; coyote nunca guarda credenciales de git (ADR-0008)
 - [inv] web: coyote web escucha solo en loopback, valida Host y es de solo lectura (internal/web/web.go)
@@ -45,6 +47,10 @@ CLI en Go para contexto versionado, gates humanos, estándar por capas y costo t
 - [inv] approvals: una aprobación vale en la máquina que la firmó, por 24 h y usos contados en el ledger (docs/specs/gate-v1.md)
 - [dec] agents: una definición por agente y skill; coyote install la traduce a Claude Code y Cursor sin pisar su configuración (ADR-0010)
 - [gap] gate: los bloqueos por texto pueden bloquear un commit que solo menciona rutas del gate o credenciales (docs/specs/gate-v1.md)
+- [inv] product: leer un repo del producto nunca lo modifica ni corre sus programas: git de plomería, sin filtros ni transportes (docs/specs/product-v1.md)
+- [dec] run: coyote run corre Claude Code headless con el gate, topes de turnos y dólares y evento run en el ledger (ADR-0012)
+- [gap] run: el costo de una corrida es la estimación de Claude Code, no la factura; sin precios queda todo como entrada (docs/specs/run-v1.md)
+- [gap] product: un tópico elegido por un mapa de configuración o un cliente generado quedan sin enlace en el mapa (docs/specs/product-v1.md)
 
 ## Reglas obligatorias (MUST)
 

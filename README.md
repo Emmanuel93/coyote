@@ -57,6 +57,33 @@ Leer, buscar y pedir contexto no piden aprobación. Las aprobaciones valen para 
 
 `coyote init` nunca sobrescribe: en un repo existente solo agrega lo que falta.
 
+## Un producto en varios repos
+
+```sh
+coyote init mi-producto --type product
+coyote repo add servicios --path ../servicios    # los repos se leen, nunca se escriben
+coyote repo add app --path ../app
+coyote map                                       # qué expone y qué consume cada módulo
+coyote impact --diff servicios=main...HEAD --format md   # a quién afecta la rama, en los tres repos
+coyote extract                                   # propone README.coyote.md y CONTEXT.coyote.md de cada repo
+```
+
+`coyote impact` también acepta un endpoint (`"GET /api/v1/pedidos/{id}"`), un tópico (`--topic`) o varios repos a la vez (un cambio coordinado). Dice qué cambia, quién lo usa directo y quién lo usa a través de un BFF, y marca lo que se rompe.
+
+## Correr agentes con costo a la vista
+
+```sh
+coyote router                                     # modelo y topes de cada agente con el gasto del mes
+coyote run --agent coyote-architect --ws W-0005 --risk R2 "diseña el alta de convenios"
+coyote close W-0005                               # consumo real del workstream en close.md
+```
+
+`coyote run` corre Claude Code en modo headless con el gate activo:
+
+- Topes de turnos y de dólares por corrida.
+- Un router que baja de modelo al 80 % del presupuesto mensual y no corre al 100 %.
+- Un evento en el ledger con tokens, modelo y costo estimado.
+
 ## Comandos
 
 | Comando | Para qué |
@@ -81,6 +108,12 @@ Leer, buscar y pedir contexto no piden aprobación. Las aprobaciones valen para 
 | `ask "pregunta"` | busca en el contexto del proyecto o de otro repo, sin llamar a ningún modelo |
 | `index [--rebuild]` | arma el índice local y muestra su tamaño |
 | `repo add\|list\|fetch` | repos del proyecto; de otros repos se traen solo sus documentos |
+| `map [--check]` | mapa de interfaces del producto: endpoints y tópicos que cada módulo expone y consume |
+| `impact <cambio>` | a quién afecta un endpoint, un tópico, un diff o un texto, en todos los repos del producto |
+| `extract [repo]` | propone `README.coyote.md` y `CONTEXT.coyote.md` de cada repo desde su código |
+| `run --agent A "tarea"` | corre un paso de un agente con Claude Code, con topes, gate y costo en el ledger |
+| `router [--init]` | modelo y topes que el router da a cada agente |
+| `close <W>` | resumen de consumo de un workstream desde el ledger |
 | `push` / `pull` | publica y trae con autoría, estándar y ritmo humano revisados |
 | `auth login\|status\|logout` | token de GitHub desde el entorno, `gh` o el llavero; nunca en archivos |
 | `web` | costos por proyecto, persona, modelo y agente en `127.0.0.1` |
@@ -101,7 +134,9 @@ coyote/
   standards/rules.yaml    estándar del proyecto (extends)
   ledger/AAAA/MM/         eventos en CCF, un archivo por día y persona
   decisions/              ADRs
-  workstreams/            planes y cierres con su costo
+  workstreams/            planes, corridas (runs/) y cierres con su costo
+  router.yaml             modelo por agente, pisos por riesgo y topes (opcional)
+  map/, repos/            en un producto: mapa de interfaces y documentos propuestos por repo
   approvals/              aprobaciones humanas, firmadas
   agents/, skills/        agentes y skills propios (opcional)
 .claude/, .cursor/        generados por coyote install
@@ -110,11 +145,11 @@ coyote/
 
 ## Autonomía
 
-`coyote/project.yaml` define el modo: `manual` (toda acción con efectos espera aprobación), `supervised` o `autonomous`. En modo autónomo el trabajo corre dentro de sus topes y la persona que lo autorizó responde por el resultado final. Desde v0.3 el gate aplica `manual`; `supervised` y `autonomous` se aceptan, pero el gate no es más laxo hasta que v0.4 traiga su motor. Lo que hace un agente queda en el ledger con el nombre que reporta el IDE.
+`coyote/project.yaml` define el modo: `manual` (toda acción con efectos espera aprobación), `supervised` o `autonomous`. En modo autónomo el trabajo corre dentro de sus topes y la persona que lo autorizó responde por el resultado final. Desde v0.3 el gate aplica `manual`; `supervised` y `autonomous` se aceptan, pero el gate no es más laxo hasta que v0.5 traiga su motor, después de medir corridas reales con `coyote run`. Lo que hace un agente queda en el ledger con el nombre que reporta el IDE.
 
 ## Documentación
 
-- Especificaciones: [CCF v1](docs/specs/ccf-v1.md) (ledger), [CCF-doc v1](docs/specs/ccf-doc-v1.md) (documentos), [estándar v1](docs/specs/standards-v1.md), [atribución v1](docs/specs/attribution-v1.md), [contexto v1](docs/specs/context-v1.md), [remoto v1](docs/specs/remote-v1.md), [gate v1](docs/specs/gate-v1.md), [instalación v1](docs/specs/install-v1.md).
+- Especificaciones: [CCF v1](docs/specs/ccf-v1.md) (ledger), [CCF-doc v1](docs/specs/ccf-doc-v1.md) (documentos), [estándar v1](docs/specs/standards-v1.md), [atribución v1](docs/specs/attribution-v1.md), [contexto v1](docs/specs/context-v1.md), [remoto v1](docs/specs/remote-v1.md), [gate v1](docs/specs/gate-v1.md), [instalación v1](docs/specs/install-v1.md), [producto v1](docs/specs/product-v1.md), [corridas v1](docs/specs/run-v1.md).
 - Estándar default: [standards/default/STANDARD.md](standards/default/STANDARD.md). Agentes y skills: [agents/](agents/), [skills/](skills/).
 - Decisiones: [coyote/decisions/](coyote/decisions/).
 - Plan y releases: [docs/plan/EXECUTION_PLAN.md](docs/plan/EXECUTION_PLAN.md), [docs/releases/](docs/releases/).

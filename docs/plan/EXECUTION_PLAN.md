@@ -1,6 +1,6 @@
 # Plan de ejecución — Coyote
 
-Estado: v0.3.0 aprobada en G3 (P-0003) · v0.4 en construcción · actualizado 2026-09-28
+Estado: v0.3.0 aprobada en G3 (P-0003) · v0.4.0 lista para G4 · actualizado 2026-09-28
 
 Este plan ejecuta la propuesta aprobada ("Plan de construcción — Framework Coyote"). Cada release se razona con la plantilla de cinco partes que usarán los agentes de Coyote (problema, restricciones, opciones, decisión, riesgos) y cierra con un gate humano: nada se etiqueta, se publica ni toca otros proyectos sin autorización explícita.
 
@@ -195,12 +195,23 @@ G3 autorizó (P-0003): etiquetar v0.3.0, conservar la historia con las firmas de
 | ID | Tarea | Razonamiento | Aceptación | Estado |
 | --- | --- | --- | --- | --- |
 | T25 | Plan y ADR-0011, ADR-0012 | El producto multi-repo cambia la unidad de trabajo; se razona antes del código | Esta sección, los ADRs y W-0004 | Hecho |
-| T26 | Producto y extracción | Sin contexto por repo no hay mapa ni agentes útiles | `type: product`, `repo add --path` de solo lectura, `coyote extract` para Spring/Gradle, Flutter/Melos y Nx/npm con propuestas en `coyote/repos/<repo>/` | Pendiente |
-| T27 | Mapa e impacto | Es lo que pediste: ver cada cambio contra los tres repos | `coyote map` (HTTP y eventos, con `repo@sha:ruta#L`) y `coyote impact` (diff, endpoint, tópico o texto), directo e indirecto; el mapa entra a `get context` | Pendiente |
-| T28 | `coyote run` | Correr agentes desde coyote, con el gate y el costo a la vista | Claude Code headless con agente, contexto, topes y gate; evento `run` con tokens, costo y modelo; pruebas con un `claude` simulado | Pendiente |
-| T29 | Router v1 y `coyote close` | Gasto predecible y cierres con consumo real | `router.yaml`, pisos por riesgo, degradación por presupuesto; `close.md` desde el ledger | Pendiente |
-| T30 | Piloto en seco | Evidencia sobre los tres repos reales antes de gastar en modelos | Extracción, mapa e impacto de un cambio real, en solo lectura y en un proyecto aparte; tú revisas cada propuesta | Pendiente |
-| T31 | Verificación y G4 | Evidencia antes de autorizar presupuesto | Pruebas, revisión adversarial y `docs/releases/v0.4.0.md` | Pendiente |
+| T26 | Producto y extracción | Sin contexto por repo no hay mapa ni agentes útiles | `type: product`, `repo add --path` de solo lectura, `coyote extract` para Spring/Gradle, Flutter/Melos y Nx/npm con propuestas en `coyote/repos/<repo>/` | Hecho |
+| T27 | Mapa e impacto | Es lo que pediste: ver cada cambio contra los tres repos | `coyote map` (HTTP y eventos, con `repo@sha:ruta#L`) y `coyote impact` (diff, endpoint, tópico o texto), directo e indirecto; el mapa entra a `get context` | Hecho |
+| T28 | `coyote run` | Correr agentes desde coyote, con el gate y el costo a la vista | Claude Code headless con agente, contexto, topes y gate; evento `run` con tokens, costo y modelo; pruebas con un `claude` simulado | Hecho |
+| T29 | Router v1 y `coyote close` | Gasto predecible y cierres con consumo real | `router.yaml`, pisos por riesgo, degradación por presupuesto; `close.md` desde el ledger | Hecho |
+| T30 | Piloto en seco | Evidencia sobre los tres repos reales antes de gastar en modelos | Extracción, mapa e impacto de un cambio real, en solo lectura y en un proyecto aparte; tú revisas cada propuesta | Hecho: `~/Documents/fintech-producto`; revisión en G4 |
+| T31 | Verificación y G4 | Evidencia antes de autorizar presupuesto | Pruebas, revisión adversarial y `docs/releases/v0.4.0.md` | Hecho; espera G4 |
+
+**Lo que cambió al construir.** El piloto sobre los tres repos reales mostró patrones que el diseño no cubría, y cada uno quedó con su prueba:
+
+- Constantes de tópicos con el mismo nombre en varias clases.
+- Tópicos en `application.yml` y en clases `@ConfigurationProperties`.
+- Métodos propios que publican (`send(TOPIC, …)`).
+- Rutas concatenadas y verbos en envoltorios `get(…)`/`post(…)`.
+- Clientes en paquetes `adapter/out`.
+- Dos BFF con la misma ruta, resueltos por afinidad.
+
+La revisión adversarial encontró que leer un repo podía correr sus filtros de git o traer objetos de un clon parcial, y que un temporal plantado desviaba escrituras; se cerró antes del gate. El detalle está en `docs/releases/v0.4.0.md`.
 
 G4 autoriza: el presupuesto para correr agentes con `coyote run` en tu Mac, llevar las propuestas del piloto a cada repo por PR y arrancar v0.5.
 
