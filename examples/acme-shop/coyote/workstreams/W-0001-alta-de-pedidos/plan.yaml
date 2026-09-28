@@ -1,0 +1,32 @@
+# Workstream de ejemplo. Formato preliminar: v0.1 solo lo guarda como referencia;
+# el motor que ejecuta steps con gates llega en v0.3 y v0.4.
+id: W-0001
+title: Alta y confirmación de pedidos
+owner: "@ana"
+autonomy: manual            # cada step con efectos espera aprobación (A1)
+budget: { usd: 3.00, tokens: 400k }
+risk: R1
+steps:                      # dominio primero (R16): modelo, contrato, código, revisión
+  - id: S1
+    agent: coyote-analyst
+    does: modelo de dominio, estados e invariantes
+    output: docs/domain.md
+    gate: human
+  - id: S2
+    agent: coyote-architect
+    does: contrato OpenAPI desde el dominio
+    output: contracts/openapi.yaml
+    needs: [S1]
+    gate: human
+  - id: S3
+    agent: coyote-dev
+    does: agregado Pedido, servicio y pruebas
+    output: [src/orders/, test/orders.test.ts]
+    needs: [S2]
+    gate: human
+  - id: S4
+    agent: coyote-reviewer
+    does: revisión contra invariantes, contrato y estándar
+    needs: [S3]
+    gate: human
+close: { summary: close.md }  # tokens, modelos y costo del workstream (A3)

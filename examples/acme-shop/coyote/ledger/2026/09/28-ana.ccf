@@ -1,0 +1,17 @@
+# ts|actor|project|repo|type|scope|what|refs|tokens in/cache/out|cost in+out|status
+2026-09-28T01:05Z|@ana|-|acme-shop|init|coyote|proyecto inicializado con coyote|-|-|-|ok
+2026-09-28T01:07Z|@ana|W-0001|acme-shop|note|orders|inv: un pedido se confirma solo con un pago capturado por el…|doc:CONTEXT.coyote.md|-|-|ok
+2026-09-28T01:07Z|@ana|W-0001|acme-shop|note|orders|inv: los montos van en centavos enteros; nunca se calcula con decimales|doc:CONTEXT.coyote.md|-|-|ok
+2026-09-28T01:07Z|@ana|W-0001|acme-shop|note|payments|dec: pedidos habla con pagos solo por PaymentsGateway|doc:CONTEXT.coyote.md|-|-|ok
+2026-09-28T01:07Z|@ana|W-0001|acme-shop|note|payments|gap: el sandbox del proveedor de pagos responde 200 aun con tarjeta…|doc:CONTEXT.coyote.md|-|-|ok
+2026-09-28T01:07Z|@ana|W-0001|acme-shop|note|dominio|term: SKU es la unidad vendible; un producto agrupa SKUs|doc:CONTEXT.coyote.md|-|-|ok
+2026-09-28T01:07Z|@ana|W-0001|acme-shop|note|payments|risk: los reembolsos de pedidos confirmados aún no tienen contrato con el…|doc:CONTEXT.coyote.md|-|-|ok
+2026-09-28T01:08Z|@ana|W-0001|acme-shop|plan|orders|alta y confirmación de pedidos, dominio primero|doc:coyote/workstreams/W-0001-alta-de-pedidos/plan.yaml|-|-|ok
+2026-09-28T01:09Z|@ana/coyote-analyst|W-0001|acme-shop|run|orders|modelo de dominio, estados e invariantes|model:sonnet-5 doc:docs/domain.md|18.2k/12k/2.4k|$0.0148+$0.024|ok
+2026-09-28T01:10Z|@ana|W-0001|acme-shop|apr|orders|S1 dominio aprobado|doc:docs/domain.md|-|-|ok
+2026-09-28T01:11Z|@ana/coyote-architect|W-0001|acme-shop|run|orders|contrato OpenAPI desde el dominio|model:opus-5.5 doc:contracts/openapi.yaml|24.6k/16k/3.1k|$0.0408+$0.062|ok
+2026-09-28T01:12Z|@ana|W-0001|acme-shop|apr|orders|S2 contrato aprobado|doc:contracts/openapi.yaml|-|-|ok
+2026-09-28T01:13Z|@ana/coyote-dev|W-0001|acme-shop|run|orders|agregado Pedido, servicio y pruebas|model:sonnet-5|61.3k/48.9k/7.8k|$0.0346+$0.078|ok
+2026-09-28T01:14Z|@ana/coyote-reviewer|W-0001|acme-shop|rev|orders|revisión contra invariantes, contrato y estándar|model:haiku-4.5|30.4k/22.1k/1.6k|$0.0105+$0.008|ok
+2026-09-28T01:15Z|@ana|W-0001|acme-shop|apr|orders|S3 y S4 aprobados|-|-|-|ok
+2026-09-28T01:16Z|@ana|W-0001|acme-shop|close|orders|W-0001 cerrado: 4 steps, 3 modelos|doc:coyote/workstreams/W-0001-alta-de-pedidos/close.md|134.5k/99k/14.9k|$0.1007+$0.172|ok

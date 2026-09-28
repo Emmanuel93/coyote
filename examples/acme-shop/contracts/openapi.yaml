@@ -1,0 +1,56 @@
+openapi: 3.1.0
+info:
+  title: acme-shop orders
+  version: 0.1.0
+  description: Contrato del contexto de pedidos (proyecto sintético).
+paths:
+  /orders:
+    post:
+      operationId: createOrder
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/NewOrder" }
+      responses:
+        "201":
+          description: Pedido en borrador
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Order" }
+        "422": { description: Viola una invariante del dominio }
+  /orders/{id}/confirm:
+    post:
+      operationId: confirmOrder
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Pedido confirmado con pago capturado
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Order" }
+        "402": { description: El pago no se capturó }
+        "409": { description: El pedido no está en borrador }
+components:
+  schemas:
+    Line:
+      type: object
+      required: [sku, quantity, unitPriceCents]
+      properties:
+        sku: { type: string }
+        quantity: { type: integer, minimum: 1 }
+        unitPriceCents: { type: integer, minimum: 0 }
+    NewOrder:
+      type: object
+      required: [lines]
+      properties:
+        lines: { type: array, minItems: 1, items: { $ref: "#/components/schemas/Line" } }
+    Order:
+      type: object
+      required: [id, lines, totalCents, status]
+      properties:
+        id: { type: string }
+        lines: { type: array, items: { $ref: "#/components/schemas/Line" } }
+        totalCents: { type: integer }
+        status: { type: string, enum: [draft, confirmed, shipped, cancelled] }

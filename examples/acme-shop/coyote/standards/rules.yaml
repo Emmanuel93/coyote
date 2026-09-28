@@ -1,0 +1,17 @@
+# Estándar del proyecto acme-shop (sintético): el default de coyote más una regla propia.
+version: 1
+extends: coyote:default
+rules:
+  - id: P1
+    title: Pedidos habla con pagos solo por PaymentsGateway
+    level: MUST
+    scope: pr
+    why: Un solo punto de integración con el proveedor de pagos facilita conciliar y cambiar de proveedor.
+    check: { type: regex_absent, paths: ["src/orders/**"], pattern: '\bfetch\(|https?://' }
+    fix: Inyecta un PaymentsGateway en OrdersService
+
+  - id: R3.ci
+    override: { level: MAY, until: 2026-12-31, reason: "ejemplo dentro del repo de la herramienta; usa la CI de ese repo", adr: ADR-0001 }
+
+  - id: R9
+    override: { level: MAY, until: 2026-12-31, reason: "ejemplo dentro del repo de la herramienta; usa la CI de ese repo", adr: ADR-0001 }

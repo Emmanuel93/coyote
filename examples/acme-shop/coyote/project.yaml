@@ -1,0 +1,14 @@
+# Proyecto Coyote. Se versiona con el código; la especificación está en la herramienta.
+version: 1
+name: acme-shop
+type: backend
+hub: ""        # URL o ruta del hub de la organización; vacío si no hay
+language: { docs: es, code: en }
+autonomy: manual                 # manual | supervised | autonomous (A1, A4)
+budgets:
+  monthly_usd: 0                 # 0 = sin tope definido
+pace:
+  profile: human                 # ritmo de escrituras en GitHub o GitLab (v0.2)
+  writes_per_minute: 6
+  min_gap_seconds: 3
+  reserve_for_interactive: 0.2
