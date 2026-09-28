@@ -29,3 +29,6 @@
 2026-09-28T04:52Z|@eramirezhdez/coyote-scribe|W-0001|coyote|doc|release|segunda revisión y aprobación de G1 para v0.1.0|-|-|-|ok
 2026-09-28T04:53Z|@eramirezhdez|-|coyote|rel|release|v0.1.0 etiquetada con binarios de macOS y Linux|sha:7a25791 doc:docs/releases/v0.1.0.md|-|-|ok
 2026-09-28T04:53Z|@eramirezhdez/coyote-scribe|-|coyote|chore|release|registra el release v0.1.0 en el ledger|-|-|-|ok
+2026-09-28T05:23Z|@eramirezhdez/coyote-sr-solution-architect|W-0002|coyote|plan|plan|plan razonado de v0.2: índice, contexto, ritmo humano, credenciales y web|doc:docs/plan/EXECUTION_PLAN.md|-|-|ok
+2026-09-28T05:23Z|@eramirezhdez/coyote-sr-solution-architect|W-0002|coyote|adr|arquitectura|ADR-0007 índice sin SQLite en v0.2; ADR-0008 credenciales en capas|adr:ADR-0007 adr:ADR-0008|-|-|ok
+2026-09-28T05:23Z|@eramirezhdez/coyote-sr-solution-architect|W-0002|coyote|doc|plan|razonamiento de v0.2 y ADR-0007, ADR-0008|-|-|-|ok

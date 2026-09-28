@@ -1,6 +1,6 @@
 # Plan de ejecución — Coyote
 
-Estado: v0.1.0 aprobada en G1 (P-0001) · v0.2 en planeación · actualizado 2026-09-28
+Estado: v0.1.0 aprobada en G1 (P-0001) · v0.2 en construcción · actualizado 2026-09-28
 
 Este plan ejecuta la propuesta aprobada ("Plan de construcción — Framework Coyote"). Cada release se razona con la plantilla de cinco partes que usarán los agentes de Coyote (problema, restricciones, opciones, decisión, riesgos) y cierra con un gate humano: nada se etiqueta, se publica ni toca otros proyectos sin autorización explícita.
 
@@ -54,17 +54,47 @@ Este plan ejecuta la propuesta aprobada ("Plan de construcción — Framework Co
 | T10 | Verificación | Evidencia antes de pedir autorización | vet, pruebas, demo de punta a punta y revisión independiente | Hecho: dos revisiones adversariales, 13 + 9 hallazgos corregidos (ver docs/releases/v0.1.0.md) |
 | T11 | Entrega y gate G1 | Pedir autorización con evidencia, no con promesas | Repo en `~/Documents/coyote` con historia y autoría tuya; reporte en `docs/releases/v0.1.0.md` | Hecho: G1 aprobado (P-0001) |
 
-## v0.2 remote + context — razonamiento (borrador para G2)
+## v0.2 remote + context — razonamiento
 
-**Problema.** Coyote todavía no colabora: el contexto no viaja entre personas y los agentes no pueden pedir un paquete de contexto acotado.
+**Problema.** Coyote ya registra y valida, pero no colabora. El contexto no viaja entre repos ni entre personas. Un agente no puede pedir "lo que necesito saber para tocar pagos" sin leer todo. Nadie ve el costo por proyecto o por persona. Y no hay manera segura de publicar en GitHub al ritmo de una persona.
 
-**Restricciones.** Toda escritura remota con la identidad de quien pone sus credenciales; cuotas de GitHub administradas al ritmo de una persona; nada de código fuera de GitHub si no se necesita; costo de indexado bajo aprobación.
+**Restricciones.**
+- Toda escritura remota va con la identidad y las credenciales de la persona: git del sistema para push y pull, y un token suyo para la API.
+- Las cuotas de GitHub se consumen a ritmo humano (80 escrituras por minuto y 500 por hora como techo; perfil `human` muy por debajo), respetando `Retry-After` y los límites secundarios.
+- El código de otros repos no se baja si no hace falta: del repo remoto solo se leen sus documentos coyote.
+- El entorno de construcción no llega al proxy de módulos de Go ni a la API de GitHub. No se pueden agregar dependencias y las llamadas reales solo se prueban contra servidores locales.
+- Ningún secreto en disco dentro del proyecto. Ningún servicio escucha fuera de `127.0.0.1`.
 
-**Opciones.** Servidor propio desde el inicio; o GitHub como backend, índice local en SQLite y publicación de shards por CI.
+**Opciones para el índice local.**
+- A. SQLite con `modernc.org/sqlite`: puro Go, pero decenas de módulos que no se pueden traer aquí y un repo mucho más pesado.
+- B. SQLite con `mattn/go-sqlite3`: requiere cgo y rompe los binarios cruzados (`CGO_ENABLED=0`).
+- C. Índice en memoria reconstruido desde los archivos (que ya son la fuente de verdad en git), con caché en `.coyote/` y una interfaz de almacenamiento para poner SQLite después.
 
-**Decisión propuesta.** GitHub como backend y SQLite local (propuesta aprobada, D2 y D18 diferida); OAuth device flow con el token en el llavero; módulo de cuotas con perfil `human`.
+**Opciones para credenciales.** Pedir un token personal a mano; reutilizar `gh auth token` y el llavero del sistema; OAuth device flow propio.
 
-**Riesgos.** Límites secundarios de GitHub en escrituras; tamaño del índice en laptops; filtración de datos al embeddear (embeddings locales por defecto).
+**Decisión.**
+- Índice: **C** (ADR-0007). Con el volumen de un proyecto (miles de eventos y cientos de entradas de contexto) reconstruir cuesta milisegundos, git sigue siendo la fuente de verdad y no se agrega ninguna dependencia. SQLite entra cuando la medición lo pida y el entorno tenga el proxy de módulos; se decide en G3 o G4.
+- Credenciales, en capas (ADR-0008): variable de entorno, luego `gh auth token`, luego el llavero del sistema vía su binario (`security` en macOS, `secret-tool` en Linux), y device flow cuando haya un client ID de OAuth App registrado. Git no necesita token: usa tu SSH o tu credential helper.
+- Búsqueda: BM25 local sobre entradas, ADRs y documentos. Sin embeddings ni LLM en v0.2: costo cero y nada sale de la máquina.
+- Web: `net/http` y `html/template` embebidos, solo lectura, solo `127.0.0.1` y con verificación de `Host` contra DNS rebinding.
+
+**Riesgos.**
+- Que el índice en memoria no escale (mitigación: interfaz de almacenamiento y medición en la demo).
+- Que las llamadas reales a GitHub difieran de los servidores de prueba (mitigación: G2 autoriza una prueba real de solo lectura con tu token).
+- Que `gh` o el llavero no estén (mitigación: mensajes claros y variable de entorno).
+
+### Tareas de v0.2
+
+| ID | Tarea | Razonamiento | Aceptación | Estado |
+| --- | --- | --- | --- | --- |
+| T12 | Plan y ADR-0007, ADR-0008 | Dos decisiones cambian supuestos de la propuesta; quedan razonadas antes del código | Esta sección y los ADRs | Hecho |
+| T13 | Índice, `get context` y `ask` | Es lo que más ahorra tokens: un agente recibe un paquete acotado en vez de leer todo | Paquete con presupuesto de tokens y referencias; búsqueda con fuentes; pruebas | Pendiente |
+| T14 | Ritmo humano y credenciales | Evitar que GitHub trate la cuenta como bot y no dejar secretos en disco | Token bucket persistido, `auth login/status/logout`, cliente con `Retry-After`; pruebas con servidor local | Pendiente |
+| T15 | Repos del proyecto, `push` y `pull` | Colaborar como con git, con los gates antes de publicar | `repo add/list`, contexto remoto sin bajar código, push con lint y atribución, pull con resumen | Pendiente |
+| T16 | Web FinOps v0 | Ver consumo y costo por proyecto y por persona | `coyote web` con vistas proyecto>usuario y usuario>proyecto, modelos y tokens | Pendiente |
+| T17 | Verificación y G2 | Evidencia antes de autorizar el uso del token | Pruebas, demo, revisión adversarial, `docs/releases/v0.2.0.md` | Pendiente |
+
+G2 autoriza: usar tu token contra GitHub (primero solo lectura), registrar o no una OAuth App para el device flow, e indexar en solo lectura los repos de la organización que elijas.
 
 ## v0.3 a v1.0
 
@@ -75,12 +105,13 @@ Siguen el orden de la propuesta. Cada una recibirá su razonamiento completo al 
 | Decisión | Supuesto usado en la ejecución | Por qué | Se confirma en |
 | --- | --- | --- | --- |
 | D2 nube | Sin servidores; GitHub como backend | Menor costo y nada que operar para el MVP | G2 |
-| D4 embeddings | Locales por defecto | No sacar código a terceros sin autorización | G2 |
+| D18 índice local | En memoria con caché en `.coyote/`; SQLite después (ADR-0007) | Sin dependencias nuevas; git es la fuente de verdad | G2 |
+| D4 embeddings | Ninguno en v0.2 (BM25 local); locales cuando lleguen | No sacar código a terceros sin autorización | G2 |
 | D6 aprobación R2–R3 | Pull request de GitHub | Deja rastro con identidad y revisión | G3 |
 | D10 visibilidad de costos | Cada persona ve lo suyo, admins todo | Menor exposición por defecto | G4 |
 | D12 hub | `kredius`, sin crearlo hasta G5 | Aislamiento | G5 |
 | D13 nombres de archivo | `README.coyote.md` y `CONTEXT.coyote.md` | Coherente con `README.md` y `AGENTS.md` | Confirmado en G1 |
 | D14 alcance de R15 | Commits, PRs, comentarios, docs, releases y autoría del commit | Es lo que pediste | Confirmado en G1 |
-| D15 web | Plantillas Go con HTMX embebidas | Un solo binario | G2 |
-| D16 tokens | Llavero del sistema | No dejar secretos en disco | G2 |
+| D15 web | Plantillas Go embebidas, solo lectura y solo en 127.0.0.1 | Un solo binario, sin superficie de red | G2 |
+| D16 tokens | Entorno, `gh auth token` o llavero del sistema; device flow con OAuth App (ADR-0008) | No dejar secretos en disco | G2 |
 | D19 autonomía por defecto | `manual` | Nada con efectos sin aprobación mientras no haya evidencia | G3 |
