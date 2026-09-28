@@ -62,11 +62,12 @@ func tsCalls(text, repo, mod, file string) []Entry {
 			}
 		}
 		if method == "" {
-			end := loc[1] + 240
-			if end > len(text) {
-				end = len(text)
+			// El método va en las opciones de esta misma llamada, nunca en la siguiente.
+			args := ""
+			if open := strings.LastIndex(text[:loc[4]], "("); open >= loc[0] {
+				args = jsArgs(text, open)
 			}
-			if m := tsMethodRe.FindStringSubmatch(text[loc[1]:end]); m != nil {
+			if m := tsMethodRe.FindStringSubmatch(args); m != nil {
 				method = strings.ToUpper(m[1])
 			} else if fn == "fetch" || fn == "request" {
 				method = "GET" // sin method: fetch hace GET
@@ -75,4 +76,33 @@ func tsCalls(text, repo, mod, file string) []Entry {
 		out = append(out, Entry{Repo: repo, Module: mod, Role: Calls, Method: method, Path: norm, Raw: raw, File: file, Line: lineOf(text, loc[0])})
 	}
 	return out
+}
+
+// jsArgs devuelve el texto entre el paréntesis que abre en open y el que lo
+// cierra, saltando cadenas ('…', "…" y `…`) y anidamientos; acota la
+// búsqueda a 4 KB.
+func jsArgs(text string, open int) string {
+	depth := 0
+	limit := open + 4096
+	if limit > len(text) {
+		limit = len(text)
+	}
+	for i := open; i < limit; i++ {
+		switch c := text[i]; c {
+		case '\'', '"', '`':
+			for i++; i < limit && text[i] != c; i++ {
+				if text[i] == '\\' {
+					i++
+				}
+			}
+		case '(', '[', '{':
+			depth++
+		case ')', ']', '}':
+			depth--
+			if depth == 0 {
+				return text[open+1 : i]
+			}
+		}
+	}
+	return text[open+1 : limit]
 }

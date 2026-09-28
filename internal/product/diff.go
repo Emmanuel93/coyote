@@ -404,6 +404,7 @@ func (m *Map) contractChanges(dir, repo string, ch *fileChanges, left, right str
 		files = append(files, f)
 	}
 	sort.Strings(files)
+	ctxs := map[string]*moduleCtx{}
 	for _, f := range files {
 		if !codeExt[strings.ToLower(filepath.Ext(f))] || isTestPath(f) {
 			continue
@@ -421,7 +422,12 @@ func (m *Map) contractChanges(dir, repo string, ch *fileChanges, left, right str
 				rt, _ = fileText(dir, right, f)
 			}
 		}
-		before, after := extractText(repo, mod, f, lt), extractText(repo, mod, f, rt)
+		mc := ctxs[mod]
+		if mc == nil && (strings.HasSuffix(f, ".java") || strings.HasSuffix(f, ".kt")) {
+			mc = loadModuleCtx(dir, mod)
+			ctxs[mod] = mc
+		}
+		before, after := extractText(repo, mod, f, lt, mc), extractText(repo, mod, f, rt, mc)
 		count := map[string]int{}
 		for _, e := range before {
 			count[contractID(e)]++

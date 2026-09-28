@@ -197,7 +197,7 @@ func Decode(text string) (repo, sha string, entries []Entry, err error) {
 	}
 	repo, sha = h[1], h[2]
 	for n, l := range lines[1:] {
-		if strings.TrimSpace(l) == "" {
+		if strings.TrimSpace(l) == "" || strings.HasPrefix(l, "#") {
 			continue
 		}
 		f := strings.Split(l, "|")

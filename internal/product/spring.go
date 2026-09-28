@@ -1,6 +1,7 @@
 package product
 
 import (
+	"fmt"
 	"path"
 	"regexp"
 	"strings"
@@ -242,10 +243,137 @@ func joinPath(prefix, p string) string {
 	return strings.TrimRight(prefix, "/") + "/" + strings.TrimLeft(p, "/")
 }
 
+// javaCtx es lo que un archivo Java o Kotlin necesita para resolver nombres:
+// las constantes y las propiedades de Spring de su módulo.
+type javaCtx struct {
+	resolve func(string) (string, bool)
+	props   map[string]string
+	cfg     map[string]cfgClass // clases @ConfigurationProperties del repo, por nombre
+}
+
+// cfgClass es una clase @ConfigurationProperties: su prefijo y los valores
+// por defecto de sus campos de texto.
+type cfgClass struct {
+	prefix   string
+	defaults map[string]string
+}
+
+var (
+	cfgPropsRe    = regexp.MustCompile(`@ConfigurationProperties\(\s*(?:(?:prefix|value)\s*=\s*)?"([^"]+)"`)
+	cfgDefaultRe  = regexp.MustCompile(`\bString\s+(\w+)\s*=\s*"([^"]*)"`)
+	getterCallRe  = regexp.MustCompile(`^(?:get)?([A-Za-z]\w*)$`)
+	camelBoundary = regexp.MustCompile(`([a-z0-9])([A-Z])`)
+)
+
+// configClass lee una clase @ConfigurationProperties, si el archivo la declara.
+func configClass(text string) (cfgClass, bool) {
+	m := cfgPropsRe.FindStringSubmatch(text)
+	if m == nil {
+		return cfgClass{}, false
+	}
+	c := cfgClass{prefix: m[1], defaults: map[string]string{}}
+	for _, d := range cfgDefaultRe.FindAllStringSubmatch(text, -1) {
+		if _, ok := c.defaults[d[1]]; !ok {
+			c.defaults[d[1]] = d[2]
+		}
+	}
+	return c, true
+}
+
+func kebab(s string) string { return strings.ToLower(camelBoundary.ReplaceAllString(s, "$1-$2")) }
+
+// configTopics busca, en un archivo que publica, las lecturas de una clase
+// @ConfigurationProperties (topics.getCompleted()) y las resuelve con el
+// application.yml del módulo o el valor por defecto del campo.
+func configTopics(text string, cx javaCtx, publish func(line int, topic, raw string, unresolved bool)) {
+	for class, c := range cx.cfg {
+		if !strings.Contains(text, class) {
+			continue
+		}
+		vars := regexp.MustCompile(`\b`+regexp.QuoteMeta(class)+`\s+(\w+)\s*[;,)=]`).FindAllStringSubmatch(text, -1)
+		seen := map[string]bool{}
+		for _, v := range vars {
+			if seen[v[1]] {
+				continue
+			}
+			seen[v[1]] = true
+			calls := regexp.MustCompile(`\b`+regexp.QuoteMeta(v[1])+`\s*\.\s*(\w+)\(\s*\)`).FindAllStringSubmatchIndex(text, -1)
+			for _, m := range calls {
+				g := getterCallRe.FindStringSubmatch(text[m[2]:m[3]])
+				if g == nil {
+					continue
+				}
+				field := strings.ToLower(g[1][:1]) + g[1][1:]
+				val, ok := "", false
+				for _, key := range []string{c.prefix + "." + kebab(field), c.prefix + "." + field} {
+					if raw, has := cx.props[key]; has {
+						val, ok = cx.property(raw)
+						break
+					}
+				}
+				if !ok {
+					val, ok = c.defaults[field]
+				}
+				if ok && topicLike.MatchString(val) {
+					publish(lineOf(text, m[0]), val, v[1]+"."+text[m[2]:m[3]]+"()", false)
+				}
+			}
+		}
+	}
+}
+
+var placeholderRe = regexp.MustCompile(`^\$\{([^}:]+)(:([^}]*))?\}$`)
+
+// property resuelve ${clave} o ${clave:valor} con application.yml o
+// application.properties del módulo, o con el valor por defecto.
+func (c javaCtx) property(raw string) (string, bool) {
+	for depth := 0; depth < 3; depth++ {
+		m := placeholderRe.FindStringSubmatch(strings.TrimSpace(raw))
+		if m == nil {
+			return raw, !strings.Contains(raw, "${")
+		}
+		if v, ok := c.props[m[1]]; ok {
+			raw = v
+			continue
+		}
+		if m[2] != "" && m[3] != "" {
+			raw = m[3]
+			continue
+		}
+		return "", false
+	}
+	return "", false
+}
+
+var (
+	// @Value("${clave:valor}") String campo, en Java o Kotlin.
+	valueFieldRe = regexp.MustCompile(`@Value\(\s*"\\?(\$\{[^"]+\})"\s*\)\s*(?:(?:private|protected|public|final|internal)\s+)*(?:String\s+(\w+)|(?:val|var)\s+(\w+))`)
+	// productores: cualquier objeto.send( en un archivo que usa KafkaTemplate.
+	anySendRe = regexp.MustCompile(`\b\w+\s*\.\s*send\(\s*("([^"]+)"|([A-Za-z_][A-Za-z0-9_.]*))`)
+	// un método propio que publica (send, doSend, publish…) o un ProducerRecord con una constante.
+	constCallRe = regexp.MustCompile(`(?:\b(?:do)?(?:[Ss]end|[Pp]ublish|[Ee]mit|[Pp]roduce|[Dd]ispatch)\w*|new\s+ProducerRecord(?:<[^>]*>)?)\(\s*((?:[A-Z]\w*\.)?[A-Z_][A-Z0-9_]{2,})\s*[,)]`)
+)
+
+// valueFields lee los campos y parámetros con @Value que resuelven a un texto.
+func valueFields(text string, cx javaCtx) map[string]string {
+	out := map[string]string{}
+	for _, m := range valueFieldRe.FindAllStringSubmatch(text, -1) {
+		name := m[2]
+		if name == "" {
+			name = m[3]
+		}
+		if v, ok := cx.property(m[1]); ok {
+			out[name] = v
+		}
+	}
+	return out
+}
+
 // springEntries saca de un archivo Java o Kotlin las rutas que expone (o que
 // llama, si es un cliente Feign), las llamadas de WebClient y RestTemplate y
 // los tópicos de Kafka que publica o escucha.
-func springEntries(text, repo, mod, file string, resolve func(string) (string, bool)) []Entry {
+func springEntries(text, repo, mod, file string, cx javaCtx) []Entry {
+	resolve := cx.resolve
 	var out []Entry
 	feign := feignRe.MatchString(text)
 	role := Exposes
@@ -321,7 +449,7 @@ func springEntries(text, repo, mod, file string, resolve func(string) (string, b
 		method := map[string]string{"getForObject": "GET", "getForEntity": "GET", "postForObject": "POST", "postForEntity": "POST",
 			"postForLocation": "POST", "put": "PUT", "delete": "DELETE", "patchForObject": "PATCH"}[text[loc[2]:loc[3]]]
 		if method == "" {
-			method = verbAfter(text, loc[1])
+			method = verbIn(text, loc[3]) // exchange: el HttpMethod de sus propios argumentos
 		}
 		out = append(out, Entry{Repo: repo, Module: mod, Role: Calls, Method: method, Path: norm, Raw: raw, File: file, Line: lineOf(text, loc[0])})
 	}
@@ -329,7 +457,7 @@ func springEntries(text, repo, mod, file string, resolve func(string) (string, b
 	for _, loc := range listenerRe.FindAllStringIndex(text, -1) {
 		args, _ := balanced(text, loc[1])
 		line := lineOf(text, loc[0])
-		topics, unresolved := listenerTopics(args, resolve)
+		topics, unresolved := listenerTopics(args, cx)
 		for _, t := range topics {
 			out = append(out, Entry{Repo: repo, Module: mod, Role: Listens, Path: t, Raw: t, File: file, Line: line})
 		}
@@ -337,28 +465,63 @@ func springEntries(text, repo, mod, file string, resolve func(string) (string, b
 			out = append(out, Entry{Repo: repo, Module: mod, Role: Listens, Path: u, Raw: u, File: file, Line: line, Unresolved: true})
 		}
 	}
-	for _, m := range sendRe.FindAllStringSubmatchIndex(text, -1) {
+	// Productores. En un archivo que usa KafkaTemplate cuenta cualquier
+	// objeto.send(…) y los métodos propios que reciben el tópico como constante.
+	producer := strings.Contains(text, "KafkaTemplate") || strings.Contains(text, "kafkaTemplate")
+	fields := valueFields(text, cx)
+	seen := map[string]bool{}
+	publish := func(line int, topic, raw string, unresolved bool) {
+		k := fmt.Sprintf("%d|%s", line, topic)
+		if seen[k] {
+			return
+		}
+		seen[k] = true
+		out = append(out, Entry{Repo: repo, Module: mod, Role: Publishes, Path: topic, Raw: raw, File: file, Line: line, Unresolved: unresolved})
+	}
+	re := sendRe
+	if producer {
+		re = anySendRe
+	}
+	for _, m := range re.FindAllStringSubmatchIndex(text, -1) {
 		line := lineOf(text, m[0])
 		switch {
 		case m[4] >= 0:
 			t := text[m[4]:m[5]]
-			out = append(out, Entry{Repo: repo, Module: mod, Role: Publishes, Path: t, Raw: t, File: file, Line: line, Unresolved: !topicLike.MatchString(t)})
+			if strings.Contains(t, "${") {
+				if v, ok := cx.property(t); ok {
+					publish(line, v, t, !topicLike.MatchString(v))
+					continue
+				}
+			}
+			publish(line, t, t, !topicLike.MatchString(t))
 		case m[6] >= 0:
 			name := text[m[6]:m[7]]
 			short := name[strings.LastIndex(name, ".")+1:]
 			if v, ok := resolve(name); ok {
-				out = append(out, Entry{Repo: repo, Module: mod, Role: Publishes, Path: v, Raw: name, File: file, Line: line})
+				publish(line, v, name, false)
+			} else if v, ok := fields[short]; ok {
+				publish(line, v, name, !topicLike.MatchString(v))
 			} else if strings.ToUpper(short) == short {
-				out = append(out, Entry{Repo: repo, Module: mod, Role: Publishes, Path: name, Raw: name, File: file, Line: line, Unresolved: true})
+				publish(line, name, name, true)
 			}
 		}
+	}
+	if producer {
+		for _, m := range constCallRe.FindAllStringSubmatchIndex(text, -1) {
+			name := text[m[2]:m[3]]
+			if v, ok := resolve(name); ok && topicLike.MatchString(v) {
+				publish(lineOf(text, m[0]), v, name, false)
+			}
+		}
+		configTopics(text, cx, publish)
 	}
 	return out
 }
 
-// listenerTopics lee topics = "a" | {"a","b"} | CONSTANTE; lo que viene de
-// propiedades (${...}) queda sin resolver.
-func listenerTopics(args string, resolve func(string) (string, bool)) (topics, unresolved []string) {
+// listenerTopics lee topics = "a" | {"a","b"} | CONSTANTE | "${propiedad}";
+// lo que no se puede resolver queda sin resolver.
+func listenerTopics(args string, cx javaCtx) (topics, unresolved []string) {
+	resolve := cx.resolve
 	i := strings.Index(args, "topics")
 	if i < 0 {
 		if strings.Contains(args, "topicPattern") {
@@ -376,10 +539,16 @@ func listenerTopics(args string, resolve func(string) (string, bool)) (topics, u
 		rest = rest[:j]
 	}
 	for _, m := range stringLit.FindAllStringSubmatch(rest, -1) {
-		if strings.Contains(m[1], "${") || !topicLike.MatchString(m[1]) {
+		t := m[1]
+		if strings.Contains(t, "${") {
+			if v, ok := cx.property(t); ok {
+				t = v
+			}
+		}
+		if strings.Contains(t, "${") || !topicLike.MatchString(t) {
 			unresolved = append(unresolved, m[1])
 		} else {
-			topics = append(topics, m[1])
+			topics = append(topics, t)
 		}
 	}
 	for _, id := range constRefRe.FindAllStringSubmatch(stringLit.ReplaceAllString(rest, `""`), -1) {
@@ -392,11 +561,15 @@ func listenerTopics(args string, resolve func(string) (string, bool)) (topics, u
 	return topics, unresolved
 }
 
-// verbBefore busca el verbo HTTP de una llamada de WebClient antes de .uri.
+// verbBefore busca el verbo HTTP de una llamada de WebClient antes de .uri,
+// dentro de la misma sentencia.
 func verbBefore(text string, i int) string {
-	start := i - 240
+	start := i - 400
 	if start < 0 {
 		start = 0
+	}
+	if j := strings.LastIndexAny(text[start:i], ";{}"); j >= 0 {
+		start += j + 1
 	}
 	ms := verbRe.FindAllStringSubmatch(text[start:i], -1)
 	if len(ms) == 0 {
@@ -411,12 +584,11 @@ func verbBefore(text string, i int) string {
 	return ""
 }
 
-func verbAfter(text string, i int) string {
-	end := i + 200
-	if end > len(text) {
-		end = len(text)
-	}
-	if m := httpMethodAny.FindStringSubmatch(text[i:end]); m != nil {
+// verbIn busca el HttpMethod en los argumentos de la llamada cuyo nombre
+// termina en i (el paréntesis que sigue).
+func verbIn(text string, i int) string {
+	args, _ := balanced(text, i)
+	if m := httpMethodAny.FindStringSubmatch(args); m != nil {
 		return m[1]
 	}
 	return ""

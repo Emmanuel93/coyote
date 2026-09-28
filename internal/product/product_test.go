@@ -678,3 +678,163 @@ class Escucha {
 		}
 	}
 }
+
+func TestVerboDeCadaLlamada(t *testing.T) {
+	ts := "export const cfg = () => request('/cobranza/config');\n" +
+		"export const alta = (id: string, body: unknown) =>\n  request(`/cobranza/casos/${id}/promesas`, { method: 'POST', body });\n" +
+		"export const lista = () => fetch(`${API}/cobranza/casos`, { headers: { 'x-a': '1' } });\n"
+	got := map[string]string{}
+	for _, e := range tsCalls(ts, "bo", ".", "api.ts") {
+		got[e.Path] = e.Method
+	}
+	want := map[string]string{"/cobranza/config": "GET", "/cobranza/casos/{}/promesas": "POST", "/cobranza/casos": "GET"}
+	for p, m := range want {
+		if got[p] != m {
+			t.Errorf("%s: %q, se esperaba %q (%v)", p, got[p], m, got)
+		}
+	}
+	java := `class C {
+    Object a() { return rest.exchange("/x/uno", HttpMethod.GET, null, Object.class); }
+    Object b() { return rest.exchange("/x/dos", HttpMethod.DELETE, null, Object.class); }
+    Object c() { return web.post().uri("/x/tres").retrieve(); }
+    Object d() { return web.method(HttpMethod.PUT).uri("/x/cuatro").retrieve(); }
+}`
+	got = map[string]string{}
+	for _, e := range springEntries(java, "svc", ".", "C.java", javaCtx{resolve: resolver("C.java", java)}) {
+		got[e.Path] = e.Method
+	}
+	want = map[string]string{"/x/uno": "GET", "/x/dos": "DELETE", "/x/tres": "POST", "/x/cuatro": "PUT"}
+	for p, m := range want {
+		if got[p] != m {
+			t.Errorf("%s: %q, se esperaba %q (%v)", p, got[p], m, got)
+		}
+	}
+}
+
+func TestProductoresYPropiedades(t *testing.T) {
+	dir := t.TempDir()
+	put(t, dir, "build.gradle.kts", "plugins { id(\"org.springframework.boot\") }\n")
+	put(t, dir, "services/pagos/build.gradle.kts", "dependencies {}\n")
+	put(t, dir, "services/pagos/src/main/resources/application.yml", "app:\n  topics:\n    devoluciones: pagos.devolucion-hecha\n---\napp:\n  topics:\n    devoluciones: otro.perfil\n")
+	put(t, dir, "services/pagos/src/main/java/demo/Publicador.java", `package demo;
+class Publicador {
+    static final String TOPIC_APLICADO = "pagos.pago-aplicado";
+    private final KafkaTemplate<String, Object> kafka;
+    private final String activado;
+    Publicador(KafkaTemplate<String, Object> kafka,
+               @Value("${kafka.topics.activado:pagos.producto-activado}") String activado) {
+        this.kafka = kafka;
+        this.activado = activado;
+    }
+    void aplicado(Object p) { send(TOPIC_APLICADO, p); }
+    void activo(Object p) { kafka.send(activado, p); }
+    private void send(String topic, Object p) {
+        log.info("publicando {}", TOPIC_APLICADO);
+        kafka.send(topic, p);
+    }
+}
+`)
+	put(t, dir, "services/pagos/src/main/java/demo/Escucha.java", `package demo;
+class Escucha {
+    @KafkaListener(topics = "${app.topics.devoluciones}")
+    void alDevolver(String m) {}
+    @KafkaListener(topics = "${app.topics.nadie}")
+    void sinPropiedad(String m) {}
+}
+`)
+	sc, err := Extract(Source{Name: "svc", Dir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, e := range sc.Entries {
+		s := e.Role + " " + e.Path
+		if e.Unresolved {
+			s += " ?"
+		}
+		got = append(got, s)
+	}
+	joined := strings.Join(got, "; ")
+	for _, want := range []string{"publica pagos.pago-aplicado", "publica pagos.producto-activado", "escucha pagos.devolucion-hecha", "escucha ${app.topics.nadie} ?"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("falta %q en %s", want, joined)
+		}
+	}
+	if strings.Count(joined, "publica pagos.pago-aplicado") != 1 {
+		t.Errorf("el log que menciona el tópico no es una publicación: %s", joined)
+	}
+}
+
+func TestTopicosPorConfigurationProperties(t *testing.T) {
+	dir := t.TempDir()
+	put(t, dir, "build.gradle.kts", "plugins { id(\"org.springframework.boot\") }\n")
+	put(t, dir, "services/desembolso/build.gradle.kts", "dependencies {}\n")
+	put(t, dir, "services/desembolso/src/main/resources/application.yml", "demo:\n  topics:\n    completed: ${TOPIC_COMPLETED:desembolso.completado}\n")
+	put(t, dir, "services/desembolso/src/main/java/demo/TopicProperties.java", `package demo;
+@ConfigurationProperties(prefix = "demo.topics")
+public class TopicProperties {
+    private String completed = "no.este";
+    private String failed = "desembolso.fallido";
+    public String getCompleted() { return completed; }
+    public String getFailed() { return failed; }
+}
+`)
+	put(t, dir, "services/desembolso/src/main/java/demo/Publisher.java", `package demo;
+class Publisher {
+    private final KafkaTemplate<String, Object> kafkaTemplate;
+    private final TopicProperties topics;
+    Publisher(KafkaTemplate<String, Object> kafkaTemplate, TopicProperties topics) {
+        this.kafkaTemplate = kafkaTemplate;
+        this.topics = topics;
+    }
+    void completo(Object p) { send(topics.getCompleted(), p); }
+    void fallo(Object p) { send(topics.getFailed(), p); }
+    private void send(String topic, Object p) { kafkaTemplate.send(topic, p); }
+}
+`)
+	sc, err := Extract(Source{Name: "svc", Dir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, e := range sc.Entries {
+		if e.Role == Publishes {
+			got = append(got, e.Path)
+		}
+	}
+	if strings.Join(got, ",") != "desembolso.completado,desembolso.fallido" {
+		t.Errorf("tópicos por @ConfigurationProperties: %v", got)
+	}
+}
+
+func TestArbolDeTrabajo(t *testing.T) {
+	dir := t.TempDir()
+	put(t, dir, ".gitignore", "generado/\n")
+	put(t, dir, "build.gradle.kts", "plugins { id(\"org.springframework.boot\") }\n")
+	put(t, dir, "src/main/java/demo/A.java", "@RestController\nclass A {\n  @GetMapping(\"/a\")\n  Object a() { return null; }\n}\n")
+	gitRepo(t, dir)
+	// Código nuevo sin commit: cuenta. Lo ignorado por git: no.
+	put(t, dir, "src/main/java/demo/B.java", "@RestController\nclass B {\n  @GetMapping(\"/b\")\n  Object b() { return null; }\n}\n")
+	put(t, dir, "generado/C.java", "@RestController\nclass C {\n  @GetMapping(\"/c\")\n  Object c() { return null; }\n}\n")
+	sc, err := Extract(Source{Name: "svc", Dir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	paths := map[string]bool{}
+	for _, e := range sc.Entries {
+		paths[e.Path] = true
+	}
+	if !paths["/a"] || !paths["/b"] || paths["/c"] {
+		t.Errorf("el mapa es del árbol de trabajo sin lo ignorado: %v", paths)
+	}
+	if sc.Dirty != 1 {
+		t.Errorf("un archivo de código sin commit: %d", sc.Dirty)
+	}
+	text := sc.EncodeMap()
+	if !strings.Contains(text, "# árbol de trabajo: 1 archivos") {
+		t.Errorf("el mapa avisa del trabajo sin commit:\n%s", text)
+	}
+	if _, _, entries, err := Decode(text); err != nil || len(entries) != 2 {
+		t.Errorf("la nota no rompe la lectura: %v %d", err, len(entries))
+	}
+}

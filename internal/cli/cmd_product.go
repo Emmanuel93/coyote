@@ -91,7 +91,11 @@ func (a *app) scanAll(sources []product.Source) ([]*product.Scan, error) {
 		if sha == "" {
 			sha = "sin git"
 		}
-		fmt.Fprintf(a.stderr, "%s@%s: %d archivos de código, %d interfaces (%s)\n", s.Name, sha, scans[i].Files, len(scans[i].Entries), took[i].Round(10*time.Millisecond))
+		wip := ""
+		if n := scans[i].Dirty; n > 0 {
+			wip = fmt.Sprintf("; %d con cambios sin commit", n)
+		}
+		fmt.Fprintf(a.stderr, "%s@%s: %d archivos de código%s, %d interfaces (%s)\n", s.Name, sha, scans[i].Files, wip, len(scans[i].Entries), took[i].Round(10*time.Millisecond))
 	}
 	return scans, nil
 }
@@ -220,7 +224,7 @@ func cmdMap(a *app, args []string) error {
 	status := map[string]string{}
 	changed := false
 	for _, sc := range scans {
-		st, err := writeProductFile(root, mapDir+"/"+sc.Repo+".map", product.Encode(sc.Repo, sc.SHA, sc.Entries))
+		st, err := writeProductFile(root, mapDir+"/"+sc.Repo+".map", sc.EncodeMap())
 		if err != nil {
 			return err
 		}
@@ -229,10 +233,13 @@ func cmdMap(a *app, args []string) error {
 	}
 	stats := m.Summary()
 	unlinked := unlinkedGroups(m, *top)
-	cross := 0
+	cross, ambiguous := 0, 0
 	for _, l := range m.Links {
 		if m.Entries[l.From].Repo != m.Entries[l.To].Repo {
 			cross++
+		}
+		if l.Ambiguous {
+			ambiguous++
 		}
 	}
 	if changed {
@@ -255,7 +262,7 @@ func cmdMap(a *app, args []string) error {
 			}
 			repos = append(repos, r)
 		}
-		return writeJSON(a, map[string]any{"repos": repos, "links": len(m.Links), "cross_repo_links": cross,
+		return writeJSON(a, map[string]any{"repos": repos, "links": len(m.Links), "cross_repo_links": cross, "ambiguous_links": ambiguous,
 			"unlinked": unlinked, "notes": notes})
 	}
 	tw := table(a.stdout)
@@ -271,7 +278,11 @@ func cmdMap(a *app, args []string) error {
 	if err := tw.Flush(); err != nil {
 		return err
 	}
-	fmt.Fprintf(a.stdout, "\n%d interfaces · %d enlaces entre módulos, %d entre repos\n", len(m.Entries), len(m.Links), cross)
+	fmt.Fprintf(a.stdout, "\n%d interfaces · %d enlaces entre módulos, %d entre repos", len(m.Entries), len(m.Links), cross)
+	if ambiguous > 0 {
+		fmt.Fprintf(a.stdout, " · %d ambiguos (la llamada coincide igual con más de un servicio)", ambiguous)
+	}
+	fmt.Fprintln(a.stdout)
 	if len(unlinked) > 0 {
 		fmt.Fprintln(a.stdout, "\nLlamadas sin proveedor en el producto (servicios externos o huecos del extractor):")
 		tw = table(a.stdout)

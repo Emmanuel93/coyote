@@ -66,3 +66,4 @@
 2026-09-28T17:33Z|@eramirezhdez/coyote-sr-solution-architect|W-0004|coyote|plan|plan|plan razonado de v0.4: producto multi-repo, mapa, impacto y run|doc:docs/plan/EXECUTION_PLAN.md|-|-|ok
 2026-09-28T17:33Z|@eramirezhdez/coyote-sr-solution-architect|W-0004|coyote|doc|plan|razonamiento de v0.4 y ADR-0011, ADR-0012|-|-|-|ok
 2026-09-28T18:06Z|@eramirezhdez/coyote-dev|W-0004|coyote|feat|product|mapa de interfaces, impacto entre repos y propuestas de documentos|-|-|-|ok
+2026-09-28T18:15Z|@eramirezhdez/coyote-dev|W-0004|coyote|fix|product|constantes por clase, propiedades de Spring, productores de Kafka y árbol de…|-|-|-|ok
