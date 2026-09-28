@@ -1,6 +1,6 @@
 # Plan de ejecución — Coyote
 
-Estado: v0.1.0 aprobada en G1 (P-0001) · v0.2 en construcción · actualizado 2026-09-28
+Estado: v0.1.0 aprobada en G1 (P-0001) · v0.2 construida y verificada, esperando el gate G2 · actualizado 2026-09-28
 
 Este plan ejecuta la propuesta aprobada ("Plan de construcción — Framework Coyote"). Cada release se razona con la plantilla de cinco partes que usarán los agentes de Coyote (problema, restricciones, opciones, decisión, riesgos) y cierra con un gate humano: nada se etiqueta, se publica ni toca otros proyectos sin autorización explícita.
 
@@ -88,11 +88,11 @@ Este plan ejecuta la propuesta aprobada ("Plan de construcción — Framework Co
 | ID | Tarea | Razonamiento | Aceptación | Estado |
 | --- | --- | --- | --- | --- |
 | T12 | Plan y ADR-0007, ADR-0008 | Dos decisiones cambian supuestos de la propuesta; quedan razonadas antes del código | Esta sección y los ADRs | Hecho |
-| T13 | Índice, `get context` y `ask` | Es lo que más ahorra tokens: un agente recibe un paquete acotado en vez de leer todo | Paquete con presupuesto de tokens y referencias; búsqueda con fuentes; pruebas | Pendiente |
-| T14 | Ritmo humano y credenciales | Evitar que GitHub trate la cuenta como bot y no dejar secretos en disco | Token bucket persistido, `auth login/status/logout`, cliente con `Retry-After`; pruebas con servidor local | Pendiente |
-| T15 | Repos del proyecto, `push` y `pull` | Colaborar como con git, con los gates antes de publicar | `repo add/list`, contexto remoto sin bajar código, push con lint y atribución, pull con resumen | Pendiente |
-| T16 | Web FinOps v0 | Ver consumo y costo por proyecto y por persona | `coyote web` con vistas proyecto>usuario y usuario>proyecto, modelos y tokens | Pendiente |
-| T17 | Verificación y G2 | Evidencia antes de autorizar el uso del token | Pruebas, demo, revisión adversarial, `docs/releases/v0.2.0.md` | Pendiente |
+| T13 | Índice, `get context` y `ask` | Es lo que más ahorra tokens: un agente recibe un paquete acotado en vez de leer todo | Paquete con presupuesto de tokens y referencias; búsqueda con fuentes; pruebas | Hecho |
+| T14 | Ritmo humano y credenciales | Evitar que GitHub trate la cuenta como bot y no dejar secretos en disco | Token bucket persistido, `auth login/status/logout`, cliente con `Retry-After`; pruebas con servidor local | Hecho |
+| T15 | Repos del proyecto, `push` y `pull` | Colaborar como con git, con los gates antes de publicar | `repo add/list`, contexto remoto sin bajar código, push con lint y atribución, pull con resumen | Hecho |
+| T16 | Web FinOps v0 | Ver consumo y costo por proyecto y por persona | `coyote web` con vistas proyecto>usuario y usuario>proyecto, modelos y tokens | Hecho |
+| T17 | Verificación y G2 | Evidencia antes de autorizar el uso del token | Pruebas, demo, revisión adversarial, `docs/releases/v0.2.0.md` | En gate G2: 14 hallazgos corregidos |
 
 G2 autoriza: usar tu token contra GitHub (primero solo lectura), registrar o no una OAuth App para el device flow, e indexar en solo lectura los repos de la organización que elijas.
 

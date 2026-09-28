@@ -41,3 +41,4 @@
 2026-09-28T05:40Z|@eramirezhdez/coyote-scribe|W-0002|coyote|doc|specs|contexto v1 y remoto v1; README con los comandos de v0.2|-|-|-|ok
 2026-09-28T06:08Z|@eramirezhdez/coyote-reviewer|W-0002|coyote|rev|seguridad|revisión adversarial de v0.2: 14 hallazgos, todos corregidos con pruebas|doc:docs/releases/v0.2.0.md|-|-|ok
 2026-09-28T06:08Z|@eramirezhdez/coyote-dev|W-0002|coyote|fix|remote|cierra los hallazgos de la revisión de v0.2|-|-|-|ok
+2026-09-28T06:09Z|@eramirezhdez/coyote-scribe|W-0002|coyote|doc|release|reporte de v0.2.0 para el gate G2|-|-|-|ok
