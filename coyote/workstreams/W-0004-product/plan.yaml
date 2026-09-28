@@ -1,0 +1,18 @@
+# Formato preliminar de workstream (el motor que lo ejecuta llega con coyote run).
+id: W-0004
+title: v0.4 producto multi-repo y run
+owner: "@eramirezhdez"
+autonomy: manual
+risk: R2
+reasoning: docs/plan/EXECUTION_PLAN.md#v04-run--razonamiento
+authorized_by: coyote/approvals/P-0003.json
+gate: G4                    # presupuesto para correr agentes y propuestas del piloto a cada repo
+steps:
+  - { id: T25, does: plan razonado y ADR-0011, ADR-0012, agent: coyote-sr-solution-architect, output: [docs/plan/EXECUTION_PLAN.md, coyote/decisions/] }
+  - { id: T26, does: producto multi-repo y extracción, agent: coyote-dev, output: [internal/product, internal/extract] }
+  - { id: T27, does: mapa e impacto, agent: coyote-architect, output: [internal/extract, internal/impact] }
+  - { id: T28, does: coyote run, agent: coyote-dev, output: internal/run }
+  - { id: T29, does: router v1 y coyote close, agent: coyote-dev, output: [internal/router, internal/cli] }
+  - { id: T30, does: piloto en seco sobre los tres repos, agent: coyote-sr-solution-architect, output: proyecto aparte, gate: human }
+  - { id: T31, does: verificación y reporte de G4, agent: coyote-reviewer, output: docs/releases/v0.4.0.md, gate: human }
+close: { summary: close.md }

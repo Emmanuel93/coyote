@@ -63,3 +63,5 @@
 2026-09-28T17:23Z|@eramirezhdez/coyote-scribe|W-0003|coyote|chore|release|registra la aprobación de G3 en el ledger|-|-|-|ok
 2026-09-28T17:24Z|@eramirezhdez/coyote-scribe|-|coyote|rel|release|v0.3.0 etiquetada con binarios de macOS y Linux|sha:1b7a09e doc:docs/releases/v0.3.0.md|-|-|ok
 2026-09-28T17:24Z|@eramirezhdez/coyote-scribe|-|coyote|chore|release|registra el release v0.3.0 en el ledger|-|-|-|ok
+2026-09-28T17:33Z|@eramirezhdez/coyote-sr-solution-architect|W-0004|coyote|plan|plan|plan razonado de v0.4: producto multi-repo, mapa, impacto y run|doc:docs/plan/EXECUTION_PLAN.md|-|-|ok
+2026-09-28T17:33Z|@eramirezhdez/coyote-sr-solution-architect|W-0004|coyote|doc|plan|razonamiento de v0.4 y ADR-0011, ADR-0012|-|-|-|ok

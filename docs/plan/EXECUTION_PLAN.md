@@ -1,6 +1,6 @@
 # Plan de ejecución — Coyote
 
-Estado: v0.3.0 aprobada en G3 (P-0003) · v0.4 en planeación · actualizado 2026-09-28
+Estado: v0.3.0 aprobada en G3 (P-0003) · v0.4 en construcción · actualizado 2026-09-28
 
 Este plan ejecuta la propuesta aprobada ("Plan de construcción — Framework Coyote"). Cada release se razona con la plantilla de cinco partes que usarán los agentes de Coyote (problema, restricciones, opciones, decisión, riesgos) y cierra con un gate humano: nada se etiqueta, se publica ni toca otros proyectos sin autorización explícita.
 
@@ -19,8 +19,8 @@ Este plan ejecuta la propuesta aprobada ("Plan de construcción — Framework Co
 | v0.1 init (local) | Formatos CCF, ledger, estándar por capas, filtro de atribución, CLI local, CI | G1 | Etiquetar v0.1.0, publicar el repo en GitHub, arrancar v0.2 |
 | v0.2 remote + context | Remotos git con autoría humana y cuotas; índice local; `get context`; `ask`; web v0 | G2 | Uso del token de GitHub; costo del primer job de indexado |
 | v0.3 gate | Aprobaciones por hash, hooks de IDE, agentes y skills, `install` para Claude Code y Cursor | G3 | Piloto en seco sobre un dominio real, en solo lectura |
-| v0.4 run | Router de modelos, workflows desde el dominio, autonomía, cierres con costo, web v1 | G4 | Presupuesto de API y features piloto |
-| v0.5 team | Colaboración, IaC, DevSecOps, SRE, resto de IDEs | G5 | Aplicar Coyote a los repos de la organización |
+| v0.4 run | Producto multi-repo: extracción de contexto, mapa entre repos e impacto de un cambio; `coyote run`, router v1 y cierres con costo | G4 | Presupuesto para correr agentes y llevar las propuestas del piloto a cada repo |
+| v0.5 team | Autonomía `supervised` y `autonomous`, colaboración, IaC, DevSecOps, SRE, resto de IDEs, web v1 | G5 | Aplicar Coyote a los repos de la organización |
 | v1.0 | Endurecimiento, auditoría, documentación | G6 | Release 1.0 |
 
 ## v0.1 init — razonamiento
@@ -144,7 +144,67 @@ G2 autorizó (P-0002): etiquetar v0.2.0, validar tu token con una sola lectura a
 
 G3 autorizó (P-0003): etiquetar v0.3.0, conservar la historia con las firmas del entorno, confirmar D6, D11, D19, D20, D21 y D22, y arrancar v0.4. El piloto en seco abarca los tres repos del producto juntos (servicios, app y backoffice), en solo lectura, porque un cambio en uno afecta a los otros. Activar el gate en tus proyectos lo haces tú con `coyote install`.
 
-## v0.4 a v1.0
+## v0.4 run — razonamiento
+
+**Problema.** El producto no es un repo. Servicios (con sus dos BFF), la app móvil y el backoffice web viven en tres repos, y un cambio en uno puede romper a los otros sin que nadie lo vea antes del merge; así lo pediste en G3. Hoy coyote trata cada repo por separado, los agentes no se pueden correr desde coyote, ningún cierre sabe cuánto costó y el router de modelos no existe.
+
+**Lo que mostró la lectura de los tres repos (solo lectura).**
+- Servicios: 29 servicios Spring. Las rutas se declaran con anotaciones (`@RequestMapping` en la clase y `@GetMapping`, `@PostMapping`… en los métodos). Dos BFF exponen lo que consumen la app y el backoffice, y llaman a los servicios internos con WebClient (`.uri("/api/v1/...")`). Unos 40 tópicos Kafka aparecen como literales `dominio.evento`. Solo un servicio tiene OpenAPI.
+- App: Flutter con Melos, 11 paquetes. Llama al BFF móvil con Dio: `.post('/credit/applications/$id/offer')`.
+- Backoffice: Nx con 10 micro-frontends y una librería de cliente. Llama al BFF de backoffice con `request(`/staff/${id}`)`.
+- Conclusión: los contratos reales viven en el código, no en archivos OpenAPI. El mapa entre repos se puede sacar de ahí sin modelo: cuesta cero y se puede repetir.
+
+**Restricciones.**
+- Los repos del producto se leen, no se modifican. Lo que coyote propone vive en un proyecto aparte y se revisa antes de llevarse a cada repo.
+- C1: la herramienta no nombra a la organización. Los extractores son por stack (Spring, Dart, TypeScript), no por repo, y sus pruebas usan código sintético.
+- Sin dependencias nuevas ni red desde el entorno de construcción. `coyote run` usa el Claude Code de la persona en su máquina, y su costo se autoriza en G4.
+- El gate de v0.3 aplica a todo lo que corra `coyote run`: los hooks también corren en modo headless.
+- Costo predecible: toda corrida lleva tope de turnos y de dólares, y el cierre suma lo gastado.
+
+**Opciones para ver un cambio de manera holística.**
+- A. Un agente que lea los tres repos por cada cambio. Es caro (millones de tokens), lento y no se puede repetir.
+- B. Exigir contratos OpenAPI y AsyncAPI en cada repo antes de analizar. Es lo correcto a largo plazo (R11), pero hoy casi no existen y bloquearía el piloto.
+- C. Un mapa del producto sacado del código por extractores deterministas: rutas que expone cada servicio, llamadas que hace cada cliente y tópicos que se publican y se consumen, con su archivo y línea. Encima, un análisis de impacto que cruza un cambio contra ese mapa, y agentes que reciben el mapa y el impacto como contexto acotado en lugar de leerlo todo.
+
+**Opciones para correr agentes.**
+- A. Un runner propio sobre el Agent SDK. Es una dependencia nueva y otro runtime que mantener.
+- B. Claude Code en modo headless (`claude -p --output-format json` con `--agent`, `--max-turns` y `--max-budget-usd`). Ya aplica los hooks (el gate) y reporta tokens, caché, costo y modelo.
+
+**Decisión.**
+- **Producto multi-repo: C** (ADR-0011). Un proyecto coyote de tipo `product` registra sus repos por ruta local (solo lectura) o por URL.
+  - `coyote extract` saca de cada repo su identidad (stack, comandos, módulos, documentos) y propone su README.coyote.md y su CONTEXT.coyote.md en `coyote/repos/<repo>/`.
+  - `coyote map` arma el mapa de interfaces (qué expone y qué consume cada módulo) con referencias `repo@sha:ruta#L`.
+  - `coyote impact` cruza un cambio contra el mapa y dice qué se afecta en cada repo, directo y a través del BFF. El cambio puede ser el diff de un repo, un endpoint, un tópico o un texto.
+- **`coyote run`: B** (ADR-0012). Corre un paso de un agente en la máquina de la persona:
+  - recibe como entrada el paquete de contexto y el impacto;
+  - usa el modelo que decide el router, con topes de turnos y de dólares, y el gate activo;
+  - guarda el artefacto en el workstream y registra un evento `run` con tokens, costo y modelo.
+- **Router v1**: `coyote/router.yaml` define el modelo por agente, un piso por riesgo y la degradación por presupuesto: al 80 % del presupuesto mensual avisa y baja un nivel (salvo R3); al 100 % no corre.
+- **`coyote close`**: suma tokens y costo por modelo y por agente, más aprobaciones y artefactos. Llena `close.md` y el evento `close`: los cierres dejan de decir "sin medir".
+- **Autonomía**: `supervised` y `autonomous` pasan a v0.5, con el trabajo en equipo. Primero hay que medir corridas reales (G4) antes de dejar que un plan corra solo. Hasta entonces, el gate sigue aplicando `manual`.
+
+**Riesgos.**
+- Los extractores por patrones fallan con código atípico (rutas armadas en variables, clientes generados). Mitigación: cada entrada del mapa cita su archivo y línea, lo que no se resuelve se reporta como "sin resolver" en lugar de callarse, y el piloto mide la cobertura contra conteos crudos.
+- Rutas genéricas (`/health`, `/{id}`) dan coincidencias falsas. Mitigación: se compara por segmentos, pesan más los literales y se descartan las rutas triviales.
+- Costo de `coyote run`. Mitigación: topes obligatorios, `--max-budget-usd` y un presupuesto autorizado en G4.
+- Que Claude Code cambie su salida JSON. Mitigación: pruebas con salidas grabadas y el runner detrás de una interfaz.
+- Datos de la organización en el repo de la herramienta. Mitigación: fixtures sintéticos (C1); el piloto vive en un proyecto aparte, fuera de este repo.
+
+### Tareas de v0.4
+
+| ID | Tarea | Razonamiento | Aceptación | Estado |
+| --- | --- | --- | --- | --- |
+| T25 | Plan y ADR-0011, ADR-0012 | El producto multi-repo cambia la unidad de trabajo; se razona antes del código | Esta sección, los ADRs y W-0004 | Hecho |
+| T26 | Producto y extracción | Sin contexto por repo no hay mapa ni agentes útiles | `type: product`, `repo add --path` de solo lectura, `coyote extract` para Spring/Gradle, Flutter/Melos y Nx/npm con propuestas en `coyote/repos/<repo>/` | Pendiente |
+| T27 | Mapa e impacto | Es lo que pediste: ver cada cambio contra los tres repos | `coyote map` (HTTP y eventos, con `repo@sha:ruta#L`) y `coyote impact` (diff, endpoint, tópico o texto), directo e indirecto; el mapa entra a `get context` | Pendiente |
+| T28 | `coyote run` | Correr agentes desde coyote, con el gate y el costo a la vista | Claude Code headless con agente, contexto, topes y gate; evento `run` con tokens, costo y modelo; pruebas con un `claude` simulado | Pendiente |
+| T29 | Router v1 y `coyote close` | Gasto predecible y cierres con consumo real | `router.yaml`, pisos por riesgo, degradación por presupuesto; `close.md` desde el ledger | Pendiente |
+| T30 | Piloto en seco | Evidencia sobre los tres repos reales antes de gastar en modelos | Extracción, mapa e impacto de un cambio real, en solo lectura y en un proyecto aparte; tú revisas cada propuesta | Pendiente |
+| T31 | Verificación y G4 | Evidencia antes de autorizar presupuesto | Pruebas, revisión adversarial y `docs/releases/v0.4.0.md` | Pendiente |
+
+G4 autoriza: el presupuesto para correr agentes con `coyote run` en tu Mac, llevar las propuestas del piloto a cada repo por PR y arrancar v0.5.
+
+## v0.5 a v1.0
 
 Siguen el orden de la propuesta. Cada una recibirá su razonamiento completo al cerrar la anterior, con lo aprendido en su gate; así el plan no fija hoy lo que conviene decidir con evidencia.
 
@@ -164,6 +224,9 @@ Siguen el orden de la propuesta. Cada una recibirá su razonamiento completo al 
 | D15 web | Plantillas Go embebidas, solo lectura y solo en 127.0.0.1 | Un solo binario, sin superficie de red || Confirmado en G2 |
 | D16 tokens | Entorno, `gh auth token` o llavero del sistema; device flow con OAuth App (ADR-0008) | No dejar secretos en disco || Confirmado en G2 |
 | D19 autonomía por defecto | `manual` | Nada con efectos sin aprobación mientras no haya evidencia | Confirmado en G3 |
+| D3 runner de `coyote run` | Claude Code headless en la máquina de la persona (ADR-0012) | Aplica el gate y reporta tokens y costo sin runtime nuevo | G4 |
+| D5 carriles de gasto | Tope mensual por proyecto en `project.yaml` y tope por corrida; la suscripción o la API key son de la persona | Gasto predecible y visible en el ledger | G4 |
+| D23 unidad de trabajo | Producto multi-repo: servicios, app y backoffice juntos, en un proyecto aparte que lee los tres (ADR-0011) | Un cambio en uno afecta a los otros (G3) | G4 |
 | D20 lectura sin aprobación | Lista cerrada de comandos de solo lectura en la herramienta; sin patrones propios del proyecto | Leer no tiene efectos y evita la fatiga | Confirmado en G3 |
 | D21 validez de una aprobación | Solo en la máquina donde se dio (firma con clave local), 24 h como máximo | Un registro copiado o fabricado no sirve | Confirmado en G3 |
 | D22 gate sin coyote | Falla cerrado: el IDE no ejecuta herramientas en un proyecto con gate | Un gate que se apaga solo no es gate | Confirmado en G3 |
