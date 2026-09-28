@@ -54,15 +54,6 @@ func cmdRun(a *app, args []string) error {
 		fs.Usage()
 		return fail(2, "")
 	}
-	if *maxUSD < 0 || *maxUSD != *maxUSD || *maxUSD > 1000 {
-		return fail(2, "--max-usd inválido: entre 0 y 1000 dólares")
-	}
-	if *maxTurns < 0 || *maxTurns > 500 {
-		return fail(2, "--max-turns inválido: entre 1 y 500")
-	}
-	if *risk != "R1" && *risk != "R2" && *risk != "R3" {
-		return fail(2, "--risk %q inválido: R1, R2 o R3", *risk)
-	}
 	if *ws != "" && !wsRe.MatchString(*ws) {
 		return fail(2, "--ws %q inválido: usa W-0001", *ws)
 	}
@@ -70,38 +61,102 @@ func cmdRun(a *app, args []string) error {
 	if err != nil {
 		return err
 	}
+	_, err = a.execRun(root, cfg, runSpec{agent: *agentName, task: task, ws: *ws, risk: *risk, scope: *scope, ctxBudget: *ctxBudget,
+		diffs: diffs, model: *model, maxTurns: *maxTurns, maxUSD: *maxUSD, timeout: *timeout, dry: *dry})
+	return err
+}
+
+// runSpec es una corrida: la de coyote run o la de un paso de un workstream.
+type runSpec struct {
+	agent, task, ws, step, risk, scope, model string
+	ctxBudget                                 int
+	diffs                                     []string
+	maxTurns                                  int
+	maxUSD                                    float64
+	capUSD                                    float64 // lo que queda del plan; 0 es sin tope de plan
+	timeout                                   time.Duration
+	dry                                       bool
+	inputs                                    string // entradas del paso (artefactos y archivos)
+	output                                    string // salida esperada del paso (A2)
+}
+
+// runOutcome es cómo terminó una corrida.
+type runOutcome struct {
+	status   string // ok, pend, fail o skip
+	res      *runner.Result
+	artifact string
+	costUSD  float64
+	queued   int
+}
+
+// execRun decide con el router, arma la entrada, corre Claude Code, guarda el
+// artefacto y registra el evento run. Es el núcleo de coyote run y del motor
+// de workstreams.
+func (a *app) execRun(root string, cfg *project.Config, sp runSpec) (*runOutcome, error) {
+	if sp.maxUSD < 0 || sp.maxUSD != sp.maxUSD || sp.maxUSD > 1000 {
+		return nil, fail(2, "--max-usd inválido: entre 0 y 1000 dólares")
+	}
+	if sp.maxTurns < 0 || sp.maxTurns > 500 {
+		return nil, fail(2, "--max-turns inválido: entre 1 y 500")
+	}
+	if sp.risk == "" {
+		sp.risk = "R1"
+	}
+	if sp.risk != "R1" && sp.risk != "R2" && sp.risk != "R3" {
+		return nil, fail(2, "riesgo %q inválido: R1, R2 o R3", sp.risk)
+	}
+	if sp.timeout <= 0 {
+		sp.timeout = 30 * time.Minute
+	}
+	if sp.ctxBudget <= 0 {
+		sp.ctxBudget = 3000
+	}
 	// En modo manual la persona lanza cada corrida: un agente no lanza otro
 	// ni gasta presupuesto por su cuenta.
-	if s := sessionIDE(); s != "" && !*dry {
-		return fail(1, "coyote run no corre dentro de una sesión de agente (%s): en modo %s la persona lanza cada corrida desde su terminal", s, cfg.Autonomy)
+	if s := sessionIDE(); s != "" && !sp.dry {
+		return nil, fail(1, "coyote run no corre dentro de una sesión de agente (%s): la persona lanza cada corrida desde su terminal", s)
 	}
 	set, err := agents.Load(root)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	ag, ok := set.Get(*agentName)
+	ag, ok := set.Get(sp.agent)
 	if !ok {
-		return fail(2, "agente desconocido %q: usa uno de %s", *agentName, strings.Join(sortedNames(set), ", "))
+		return nil, fail(2, "agente desconocido %q: usa uno de %s", sp.agent, strings.Join(sortedNames(set), ", "))
 	}
 	rc, err := router.Load(root)
 	if err != nil {
-		return fail(1, "%v", err)
+		return nil, fail(1, "%v", err)
 	}
 	spent, err := monthSpend(root, a.now())
 	if err != nil {
-		return err
+		return nil, err
 	}
-	d := rc.Decide(router.Input{Agent: ag.Name, AgentModel: ag.Model, AgentTurns: ag.MaxTurns, Risk: *risk, Model: *model,
-		MaxTurns: *maxTurns, MaxUSD: *maxUSD, MonthlyUSD: cfg.Budgets.MonthlyUSD, SpentUSD: spent})
-	wsDir, err := workstreamDir(root, *ws)
+	maxUSD := sp.maxUSD
+	if sp.capUSD > 0 && (maxUSD <= 0 || sp.capUSD < maxUSD) {
+		maxUSD = sp.capUSD
+	}
+	if maxUSD <= 0 {
+		maxUSD = rc.Limits.MaxUSD
+	}
+	d := rc.Decide(router.Input{Agent: ag.Name, AgentModel: ag.Model, AgentTurns: ag.MaxTurns, Risk: sp.risk, Model: sp.model,
+		MaxTurns: sp.maxTurns, MaxUSD: maxUSD, MonthlyUSD: cfg.Budgets.MonthlyUSD, SpentUSD: spent})
+	if sp.capUSD > 0 && d.MaxUSD > sp.capUSD {
+		d.MaxUSD = sp.capUSD
+	}
+	wsDir, err := workstreamDir(root, sp.ws)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	start := a.now()
-	artifact := runArtifactPath(wsDir, ag.Name, start)
-	prompt, err := a.runPrompt(root, cfg, task, *scope, *ctxBudget, diffs, artifact)
+	name := ag.Name
+	if sp.step != "" {
+		name = sp.step + "-" + ag.Name
+	}
+	artifact := runArtifactPath(wsDir, name, start)
+	prompt, err := a.runPrompt(root, cfg, sp, artifact)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	var addDirs []string
 	if sources, _, err := productSources(root, cfg, nil); err == nil {
@@ -116,9 +171,10 @@ func cmdRun(a *app, args []string) error {
 		}
 	}
 	req := runner.Request{Bin: claudeBin(), Dir: root, Agent: ag.Name, Model: d.Model, MaxTurns: d.MaxTurns, MaxUSD: d.MaxUSD,
-		AddDirs: addDirs, Tools: tools, Prompt: prompt, Timeout: *timeout,
-		Env: []string{"COYOTE_IDE=claude-code", "COYOTE_WS=" + orDash(*ws)}}
-	if *dry {
+		AddDirs: addDirs, Tools: tools, Prompt: prompt, Timeout: sp.timeout,
+		Env: []string{"COYOTE_IDE=claude-code", "COYOTE_WS=" + orDash(sp.ws)}}
+	ev := runEvent{agent: ag.Name, ws: sp.ws, step: sp.step, scope: sp.scope, task: sp.task}
+	if sp.dry {
 		fmt.Fprintf(a.stdout, "Router: %s, hasta %d turnos y $%.2f\n", d.Model, d.MaxTurns, d.MaxUSD)
 		for _, n := range d.Notes {
 			fmt.Fprintln(a.stdout, "  - "+n)
@@ -131,75 +187,77 @@ func cmdRun(a *app, args []string) error {
 		}
 		fmt.Fprintf(a.stdout, "Claude Code: %s %s\nArtefacto: %s\nEntrada: ~%d tokens\n\n%s", req.Bin, strings.Join(runner.Args(req), " "),
 			rel(root, artifact), tokens.Estimate(prompt), prompt)
-		return nil
+		return &runOutcome{status: "skip"}, nil
+	}
+	skip := func(why, msg string) (*runOutcome, error) {
+		ev.status, ev.why = "skip", why
+		_ = a.recordRun(root, cfg, ev)
+		return &runOutcome{status: "skip"}, fail(1, "%s", msg)
 	}
 	if d.Refused != "" {
-		_ = a.recordRun(root, cfg, runEvent{agent: ag.Name, ws: *ws, scope: *scope, task: task, status: "skip", why: "presupuesto"})
-		return fail(1, "%s", d.Refused)
+		return skip("presupuesto", d.Refused)
 	}
 	if !contains(gateInstalled(root), "claude-code") {
-		_ = a.recordRun(root, cfg, runEvent{agent: ag.Name, ws: *ws, scope: *scope, task: task, status: "skip", why: "sin gate"})
-		return fail(1, "el gate no está instalado para Claude Code: sin él, un agente podría correr comandos sin aprobación; corre coyote install --ide claude-code")
+		return skip("sin gate", "el gate no está instalado para Claude Code: sin él, un agente podría correr comandos sin aprobación; corre coyote install --ide claude-code")
 	}
 	if _, err := os.Stat(filepath.Join(root, ".claude", "agents", ag.Name+".md")); err != nil {
-		_ = a.recordRun(root, cfg, runEvent{agent: ag.Name, ws: *ws, scope: *scope, task: task, status: "skip", why: "agente sin instalar"})
-		return fail(1, "Claude Code no tiene el agente %s: corre coyote install --ide claude-code", ag.Name)
+		return skip("agente sin instalar", fmt.Sprintf("Claude Code no tiene el agente %s: corre coyote install --ide claude-code", ag.Name))
 	}
 	fmt.Fprintf(a.stderr, "corriendo %s con %s, hasta %d turnos y $%.2f…\n", ag.Name, d.Model, d.MaxTurns, d.MaxUSD)
 	res, runErr := runner.Run(context.Background(), req)
 	if res == nil {
-		_ = a.recordRun(root, cfg, runEvent{agent: ag.Name, ws: *ws, scope: *scope, task: task, status: "fail", why: "no corrió"})
-		return fail(1, "%v", runErr)
+		ev.status, ev.why = "fail", "no corrió"
+		_ = a.recordRun(root, cfg, ev)
+		return &runOutcome{status: "fail"}, fail(1, "%v", runErr)
 	}
-	queued := 0
+	out := &runOutcome{res: res, costUSD: res.CostUSD}
 	if q, err := (&approval.Store{Root: root, Now: a.now}).Queue(); err == nil {
 		for _, p := range q {
 			if p.Status == "pending" && !p.Last.Before(start) {
-				queued++
+				out.queued++
 			}
 		}
 	}
-	status := "ok"
+	out.status = "ok"
 	switch {
 	case runErr != nil || !res.OK():
-		status = "fail"
-	case queued > 0:
-		status = "pend"
+		out.status = "fail"
+	case out.queued > 0:
+		out.status = "pend"
 	}
-	wrote := ""
 	if strings.TrimSpace(res.Text) != "" {
-		if err := writeRunArtifact(root, artifact, ag.Name, d.Model, task, res, a.now()); err != nil {
+		if err := writeRunArtifact(root, artifact, ag.Name, d.Model, sp.task, res, a.now()); err != nil {
 			fmt.Fprintf(a.stderr, "aviso: no pude guardar el artefacto: %v\n", err)
 		} else {
-			wrote = rel(root, artifact)
+			out.artifact = rel(root, artifact)
 		}
 	}
-	ev := runEvent{agent: ag.Name, ws: *ws, scope: *scope, task: task, status: status, res: res, doc: wrote, rc: rc}
+	ev.status, ev.res, ev.doc, ev.rc = out.status, res, out.artifact, rc
 	if err := a.recordRun(root, cfg, ev); err != nil {
-		return err
+		return out, err
 	}
 	fmt.Fprintf(a.stdout, "%s %s con %s en %d turnos · %s tokens (entrada/caché/salida) · $%.4f estimado por Claude Code\n",
 		ag.Name, res.Status(), orDash(res.MainModel()), res.Turns, ev.tokens().String(), res.CostUSD)
-	if wrote != "" {
-		fmt.Fprintf(a.stdout, "artefacto: %s\n", wrote)
+	if out.artifact != "" {
+		fmt.Fprintf(a.stdout, "artefacto: %s\n", out.artifact)
 	}
-	if queued > 0 {
-		fmt.Fprintf(a.stdout, "la corrida dejó %d %s en la cola: revísalas con coyote approvals\n", queued, pluralWord(queued, "acción", "acciones"))
+	if out.queued > 0 {
+		fmt.Fprintf(a.stdout, "la corrida dejó %d %s en la cola: revísalas con coyote approvals\n", out.queued, pluralWord(out.queued, "acción", "acciones"))
 	}
 	if res.Denials > 0 {
 		fmt.Fprintf(a.stdout, "Claude Code negó %d %s por permisos (los agentes proponen, no editan)\n", res.Denials, pluralWord(res.Denials, "acción", "acciones"))
 	}
 	if runErr != nil {
-		return fail(1, "%v", runErr)
+		return out, fail(1, "%v", runErr)
 	}
-	if status == "fail" {
+	if out.status == "fail" {
 		msg := res.Status()
 		if res.Stderr != "" {
 			msg += ": " + firstLines(res.Stderr, 2)
 		}
-		return fail(1, "%s", msg)
+		return out, fail(1, "%s", msg)
 	}
-	return nil
+	return out, nil
 }
 
 func contains(list []string, s string) bool {
@@ -265,18 +323,19 @@ func runArtifactPath(dir, agent string, ts time.Time) string {
 }
 
 // runPrompt arma la entrada del agente: la tarea, el paquete de contexto, el
-// impacto del cambio (en un producto) y cómo entregar.
-func (a *app) runPrompt(root string, cfg *project.Config, task, scope string, budget int, diffs []string, artifact string) (string, error) {
+// impacto del cambio (en un producto), las entradas y la salida del paso, y
+// cómo entregar.
+func (a *app) runPrompt(root string, cfg *project.Config, sp runSpec, artifact string) (string, error) {
 	var b strings.Builder
-	b.WriteString("# Tarea\n\n" + task + "\n\n")
+	b.WriteString("# Tarea\n\n" + sp.task + "\n\n")
 	ix, err := index.Build(root)
 	if err != nil {
 		return "", err
 	}
-	pack := ix.Pack(cfg.Name, index.PackOptions{Scope: scope, Query: task, Budget: budget, Now: a.now()})
+	pack := ix.Pack(cfg.Name, index.PackOptions{Scope: sp.scope, Query: sp.task, Budget: sp.ctxBudget, Now: a.now()})
 	b.WriteString(pack.Markdown() + "\n")
-	if len(diffs) > 0 {
-		q, err := impactQuery("", "", "", diffs, nil)
+	if len(sp.diffs) > 0 {
+		q, err := impactQuery("", "", "", sp.diffs, nil)
 		if err != nil {
 			return "", err
 		}
@@ -285,6 +344,12 @@ func (a *app) runPrompt(root string, cfg *project.Config, task, scope string, bu
 			return "", err
 		}
 		b.WriteString(impactMarkdown(im, m, len(m.SHAs)) + "\n")
+	}
+	if strings.TrimSpace(sp.inputs) != "" {
+		b.WriteString("# Entradas del paso\n\n" + strings.TrimSpace(sp.inputs) + "\n\n")
+	}
+	if strings.TrimSpace(sp.output) != "" {
+		b.WriteString("# Salida esperada\n\n" + strings.TrimSpace(sp.output) + "\n\n")
 	}
 	fmt.Fprintf(&b, "# Cómo entregar\n\n- Tu respuesta final es el entregable: coyote la guarda en %s y registra la corrida en el ledger.\n", rel(root, artifact))
 	b.WriteString("- Cita la fuente de lo que afirmes: ruta#Llínea, el ADR o el reporte de impacto.\n")
@@ -318,9 +383,9 @@ func writeRunArtifact(root, path, agent, model, task string, res *runner.Result,
 
 // runEvent es el evento run del ledger.
 type runEvent struct {
-	agent, ws, scope, task, status, why, doc string
-	res                                      *runner.Result
-	rc                                       *router.Config
+	agent, ws, step, scope, task, status, why, doc string
+	res                                            *runner.Result
+	rc                                             *router.Config
 }
 
 func (e runEvent) tokens() ccf.Tokens {
@@ -384,6 +449,9 @@ func (a *app) recordRun(root string, cfg *project.Config, e runEvent) error {
 		if !split {
 			line.Refs = append(line.Refs, "split:no")
 		}
+	}
+	if e.step != "" {
+		line.Refs = append(line.Refs, "step:"+safeRef(e.step))
 	}
 	if e.doc != "" {
 		line.Refs = append(line.Refs, "doc:"+safeRef(e.doc))

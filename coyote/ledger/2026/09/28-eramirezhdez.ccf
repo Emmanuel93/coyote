@@ -90,3 +90,4 @@
 2026-09-28T20:19Z|@eramirezhdez/coyote-sr-solution-architect|W-0005|coyote|doc|plan|razonamiento de v0.5 y ADR-0013, ADR-0014|-|-|-|ok
 2026-09-28T20:22Z|@eramirezhdez/coyote-dev|W-0005|coyote|feat|ci|coyote ci impact reporta el impacto de un PR en el resumen…|-|-|-|ok
 2026-09-28T20:24Z|@eramirezhdez/coyote-devsecops|W-0005|coyote|feat|ci|coyote install --ci github genera el pipeline de impacto de cada repo|-|-|-|ok
+2026-09-28T20:33Z|@eramirezhdez/coyote-dev|W-0005|coyote|refactor|run|núcleo reutilizable de coyote run para el motor de workstreams|-|-|-|ok
