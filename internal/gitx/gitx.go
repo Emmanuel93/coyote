@@ -126,35 +126,33 @@ func Dirty(dir string) int {
 	return len(strings.Split(out, "\n"))
 }
 
-const (
-	recSep   = "\x1e"
-	fieldSep = "\x1f"
-)
-
 // Log devuelve hasta n commits de las revisiones dadas, con el mensaje
-// completo (%B). Con merges=false omite los merges.
+// completo (%B). Con merges=false omite los merges. Usa separadores NUL
+// (-z, %x00): un mensaje de commit no puede contener NUL, así que un texto
+// malicioso no puede desalinear los campos.
 func Log(dir string, n int, merges bool, revs ...string) ([]Commit, error) {
 	if !HasCommits(dir) {
 		return nil, nil
 	}
-	args := []string{"log", "-n", strconv.Itoa(n),
-		"--format=%H" + fieldSep + "%P" + fieldSep + "%an" + fieldSep + "%ae" + fieldSep + "%cn" + fieldSep + "%ce" + fieldSep + "%B" + recSep}
+	const fields = 7
+	args := []string{"log", "-z", "-n", strconv.Itoa(n), "--format=%H%x00%P%x00%an%x00%ae%x00%cn%x00%ce%x00%B"}
 	if !merges {
 		args = append(args, "--no-merges")
 	}
 	args = append(args, revs...)
-	out, err := Run(dir, args...)
-	if err != nil {
-		return nil, err
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	var out, errb bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &errb
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("git log: %s", firstLine(errb.String(), err))
 	}
+	parts := strings.Split(out.String(), "\x00")
 	var commits []Commit
-	for _, rec := range strings.Split(out, recSep) {
-		rec = strings.Trim(rec, "\n")
-		if rec == "" {
-			continue
-		}
-		f := strings.SplitN(rec, fieldSep, 7)
-		if len(f) < 7 {
+	// Cada commit ocupa 7 campos; -z agrega un NUL entre commits, que deja un campo vacío.
+	for i := 0; i+fields <= len(parts); {
+		f := parts[i : i+fields]
+		if len(f[0]) != 40 && len(f[0]) != 64 { // SHA-1 o SHA-256; si no, es el separador entre commits
+			i++
 			continue
 		}
 		msg := strings.TrimSpace(f[6])
@@ -162,6 +160,7 @@ func Log(dir string, n int, merges bool, revs ...string) ([]Commit, error) {
 		commits = append(commits, Commit{SHA: f[0], Merge: len(strings.Fields(f[1])) > 1,
 			AuthorName: f[2], AuthorEmail: f[3], CommitterName: f[4], CommitterEmail: f[5],
 			Subject: strings.TrimSpace(subject), Body: strings.TrimSpace(body)})
+		i += fields
 	}
 	return commits, nil
 }

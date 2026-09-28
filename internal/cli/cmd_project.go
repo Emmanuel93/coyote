@@ -12,6 +12,7 @@ import (
 	"github.com/Emmanuel93/coyote/internal/agentsmd"
 	"github.com/Emmanuel93/coyote/internal/ccf"
 	"github.com/Emmanuel93/coyote/internal/ccfdoc"
+	"github.com/Emmanuel93/coyote/internal/fsx"
 	"github.com/Emmanuel93/coyote/internal/gitx"
 	"github.com/Emmanuel93/coyote/internal/identity"
 	"github.com/Emmanuel93/coyote/internal/ledger"
@@ -200,6 +201,9 @@ func cmdNote(a *app, args []string) error {
 	entry, err := ccfdoc.FormatEntry(*typ, *scope, text, *ref)
 	if err != nil {
 		return err
+	}
+	if err := fsx.NoSymlinks(root, *file); err != nil {
+		return fail(1, "%v", err)
 	}
 	p := filepath.Join(root, *file)
 	data, err := os.ReadFile(p)

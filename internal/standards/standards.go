@@ -11,8 +11,10 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"time"
+	"unicode"
 
 	"go.yaml.in/yaml/v3"
 
@@ -61,6 +63,7 @@ type Rule struct {
 	Check    *Check    `yaml:"check,omitempty"`
 	Checks   []Check   `yaml:"checks,omitempty"`
 	Override *Override `yaml:"override,omitempty"`
+	Reason   string    `yaml:"reason,omitempty"` // obligatorio si una redefinición cambia checks o perfiles de una MUST
 
 	Source   string `yaml:"-"` // capa que la definió
 	Origin   string `yaml:"-"` // nivel antes de los ajustes
@@ -116,6 +119,30 @@ type Standard struct {
 	// DetachReason es el motivo declarado. Sin motivo, el lint falla (S0).
 	Detached     bool
 	DetachReason string
+	// Unjustified son reglas MUST que una capa intentó redefinir con otros checks
+	// o perfiles sin reason; se mantiene la definición anterior y el lint falla (S1).
+	Unjustified []string
+}
+
+// placeholders son motivos de relleno que no cuentan como motivo.
+var placeholders = map[string]bool{"todo": true, "tbd": true, "xxx": true, "n/a": true, "na": true, "none": true,
+	"ninguno": true, "ninguna": true, "pendiente": true, "test": true, "prueba": true, "wip": true, "fixme": true,
+	"asdf": true, "sin motivo": true, "por definir": true, "temporal": true, "temp": true, "nada": true, "motivo": true, "reason": true}
+
+// Meaningful informa si un motivo dice algo: al menos tres letras o dígitos y
+// no es un marcador de relleno como TODO, xxx o n/a.
+func Meaningful(reason string) bool {
+	t := strings.ToLower(strings.Trim(strings.TrimSpace(reason), ".-_:;!¡?¿*#()[]{}\"'`"))
+	if placeholders[t] {
+		return false
+	}
+	n := 0
+	for _, r := range t {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			n++
+		}
+	}
+	return n >= 3
 }
 
 // Find devuelve la regla con ese id o nil.
@@ -164,7 +191,7 @@ func Load(root string, now time.Time) (*Standard, error) {
 	if len(chain) == 0 || chain[0].name != DefaultRef {
 		st.Detached = true
 		for _, l := range chain {
-			if strings.TrimSpace(l.file.Extends) == "none" {
+			if strings.TrimSpace(l.file.Extends) == "none" && Meaningful(l.file.Reason) {
 				st.DetachReason = strings.TrimSpace(l.file.Reason)
 			}
 		}
@@ -244,6 +271,9 @@ func resolve(root string) ([]layer, []string, error) {
 		case next == "hub":
 			if hub := hubRules(root); hub != "" {
 				cur, name = hub, "hub"
+				if inside(root, hub) {
+					name = "hub dentro del repo" // lo controla el propio proyecto: no tiene la exención del hub
+				}
 			} else {
 				warnings = append(warnings, "extends: hub sin hub local; se usa coyote:default (el hub remoto llega en v0.2)")
 				cur = DefaultRef
@@ -256,6 +286,12 @@ func resolve(root string) ([]layer, []string, error) {
 		}
 	}
 	return nil, warnings, fmt.Errorf("cadena extends demasiado larga")
+}
+
+// inside informa si path queda dentro de root.
+func inside(root, path string) bool {
+	r, err := filepath.Rel(filepath.Clean(root), filepath.Clean(path))
+	return err == nil && r != ".." && !strings.HasPrefix(r, ".."+string(filepath.Separator))
 }
 
 // hubRules devuelve el rules.yaml del hub si project.yaml apunta a un hub local.
@@ -355,8 +391,21 @@ func (s *Standard) apply(l layer, now time.Time) {
 		if len(r.AllChecks()) == 0 {
 			r.Check, r.Checks = existing.Check, existing.Checks
 		}
+		// Cambiar los checks o los perfiles de una MUST puede vaciarla (un check
+		// trivial, profiles: [nadie]); eso es relajarla y exige un motivo real. El
+		// hub de la organización queda exento solo si vive fuera del repo.
+		weakens := existing.Level == "MUST" &&
+			(!reflect.DeepEqual(r.AllChecks(), existing.AllChecks()) || !reflect.DeepEqual(r.Profiles, existing.Profiles))
+		if weakens && l.name != "hub" && !Meaningful(r.Reason) {
+			s.Unjustified = append(s.Unjustified, r.ID)
+			s.warn("%s: redefine %s (MUST de %s) con otros checks o perfiles sin reason; rige la definición anterior", l.name, r.ID, existing.Source)
+			continue
+		}
 		r.Source, r.Origin = l.name, existing.Origin
 		r.Note = fmt.Sprintf("redefinida en %s sobre %s", l.name, existing.Source)
+		if Meaningful(r.Reason) {
+			r.Note += "; motivo: " + strings.TrimSpace(r.Reason)
+		}
 		if existing.Level == "MUST" && l.name != "hub" {
 			s.warn("%s: redefine %s (MUST de %s); revísalo con coyote standards diff", l.name, r.ID, existing.Source)
 		}
@@ -384,8 +433,8 @@ func (s *Standard) override(r *Rule, o *Override, layer string, now time.Time) {
 		}
 	}
 	relax := o.Disabled || len(o.Except) > 0 || (level != "" && levelRank[level] < levelRank[r.Level])
-	if relax && strings.TrimSpace(o.Reason) == "" {
-		s.warn("%s: %s se relaja sin reason; el ajuste no se aplica", layer, r.ID)
+	if relax && !Meaningful(o.Reason) {
+		s.warn("%s: %s se relaja sin un reason real; el ajuste no se aplica", layer, r.ID)
 		return
 	}
 	before := r.Level

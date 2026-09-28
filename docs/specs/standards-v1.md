@@ -47,8 +47,10 @@ Una regla sin `check` es de proceso: no la verifica el lint, la aplican los gate
 | Mecanismo | Dónde | Efecto | Salvaguarda |
 |-----------|-------|--------|-------------|
 | `override` | rules.yaml de una capa posterior | cambia el nivel, desactiva (`disabled: true`) o excluye rutas de sus checks (`except: [...]`) | relajar exige `reason`; `until` lo hace vencer; queda anotado |
-| redefinición | misma `id` sin `override` | reemplaza lo que declara y hereda el resto, incluidos los checks | no puede bajar de nivel; queda anotada; si una capa que no es el hub redefine una MUST, avisa |
-| dispensa (`waive`) | frontmatter de README.coyote.md | el hallazgo se muestra como dispensado | en reglas MUST exige un `reason` de texto con al menos tres letras o dígitos; sin eso no se aplica |
+| redefinición | misma `id` sin `override` | reemplaza lo que declara y hereda el resto, incluidos los checks | no puede bajar de nivel; queda anotada; si cambia los checks o los perfiles de una MUST exige `reason:` (si no, rige la definición anterior y el lint falla con **S1**) |
+| dispensa (`waive`) | frontmatter de README.coyote.md | el hallazgo se muestra como dispensado | en reglas MUST exige un motivo real; sin eso no se aplica |
+
+Un motivo real tiene al menos tres letras o dígitos y no es un relleno como `TODO`, `xxx`, `n/a`, `-` o `pendiente`. Vale para `override`, redefiniciones, dispensas y `extends: none`. La exención de avisos del hub solo aplica a un hub que vive fuera del repo; un "hub" dentro del proyecto cuenta como el proyecto.
 
 Las claves desconocidas en rules.yaml son un error: `Override:` o `disabled:` fuera de `override` no pueden desactivar una regla sin que se note.
 
@@ -78,7 +80,7 @@ Los globs admiten `**`, `*`, `?` y `{a,b}`, también anidadas; un patrón sin `/
 
 Los checks `script` ejecutan comandos escritos en rules.yaml, que puede venir de un hub o de un repo ajeno. Por eso solo corren con `coyote standards lint --scripts`; `status` y `doctor` nunca los corren.
 
-"Desde que se adoptó coyote" significa desde el commit que agregó `coyote/project.yaml`: el historial previo no se juzga.
+"Desde que se adoptó coyote" significa desde el primer commit que agregó `coyote/project.yaml`: el historial previo no se juzga, y borrar y volver a agregar el archivo no cambia ese punto.
 
 ## Comandos
 

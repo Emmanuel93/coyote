@@ -328,7 +328,7 @@ func attributionCheck(a *app, attr *attribution.Config, args []string) error {
 func attributionScrub(a *app, attr *attribution.Config, args []string) error {
 	fs := a.flags("attribution scrub", "[archivo] [--in-place] [--commit-msg]")
 	inPlace := fs.Bool("in-place", false, "reescribe el archivo")
-	commitMsg := fs.Bool("commit-msg", false, "respeta los comentarios de git (líneas con #)")
+	commitMsg := fs.Bool("commit-msg", false, "modo hook commit-msg: respeta comentarios y tijeras de git, detiene el commit ante frases o autoría de herramientas")
 	pos, err := parseArgs(fs, args)
 	if err != nil {
 		return err
@@ -342,41 +342,72 @@ func attributionScrub(a *app, attr *attribution.Config, args []string) error {
 	if err != nil {
 		return err
 	}
-	var out string
-	var found []attribution.Finding
-	if *commitMsg {
-		// En un mensaje de commit se quitan las líneas de atribución; una frase dentro
-		// del texto no se reescribe: el commit se detiene para que la persona lo corrija.
-		out, found = attr.ScrubLines(string(data), true)
-		if ph := attr.Phrases(out, true); len(ph) > 0 {
-			return fail(1, "coyote: R15: el mensaje dice que lo hizo una herramienta de IA (%s, línea %d: %q); reescríbelo", ph[0].PatternID, ph[0].Line, shortText(ph[0].Text, 80))
-		}
-	} else {
-		out, found = attr.Scrub(string(data), false)
-	}
+	out, found := attr.ScrubLines(string(data), *commitMsg)
 	for _, f := range found {
 		fmt.Fprintf(a.stderr, "coyote: se quitó atribución a IA (%s): %s\n", f.PatternID, shortText(f.Text, 80))
 	}
-	if *commitMsg && attribution.EmptyMessage(out) {
-		return fail(1, "coyote: el mensaje quedó vacío al quitar la atribución a herramientas de IA")
+	phrases := attr.Phrases(out, *commitMsg)
+	if *commitMsg {
+		// Modo hook: las líneas se quitan; una frase o una identidad de herramienta
+		// detienen el commit para que la persona lo corrija.
+		if len(phrases) > 0 {
+			return fail(1, "coyote: R15: el mensaje dice que lo hizo una herramienta de IA (%s, línea %d: %q); reescríbelo", phrases[0].PatternID, phrases[0].Line, shortText(phrases[0].Text, 80))
+		}
+		if wd, err := a.workdir(); err == nil && gitx.IsRepo(wd) {
+			for _, who := range []string{"author", "committer"} {
+				if name, email, err := gitx.Ident(wd, who); err == nil {
+					if f, ok := attr.AIIdentity(name, email); ok {
+						return fail(1, "coyote: R15: el %s del commit sería una herramienta de IA (%s); usa la identidad de una persona", who, f.Text)
+					}
+				}
+			}
+		}
+		if attribution.EmptyMessage(out) {
+			return fail(1, "coyote: el mensaje quedó vacío al quitar la atribución a herramientas de IA")
+		}
 	}
 	if *inPlace && len(pos) > 0 {
-		if len(found) == 0 {
-			return nil
+		if len(found) > 0 {
+			if err := os.WriteFile(pos[0], []byte(out), 0o644); err != nil {
+				return err
+			}
 		}
-		return os.WriteFile(pos[0], []byte(out), 0o644)
+	} else if _, err := io.WriteString(a.stdout, out); err != nil {
+		return err
 	}
-	_, err = io.WriteString(a.stdout, out)
-	return err
+	if len(phrases) > 0 {
+		// En archivos las frases no se reescriben solas: el sentido de un texto es de la persona.
+		for _, p := range phrases {
+			fmt.Fprintf(a.stderr, "coyote: reescribe a mano (%s) línea %d: %s\n", p.PatternID, p.Line, shortText(p.Text, 100))
+		}
+		return fail(1, "")
+	}
+	return nil
 }
 
 var (
-	// gitWriteRe reconoce comandos que publican un mensaje: commits, tags, merges, PRs.
-	gitWriteRe = regexp.MustCompile(`(?i)\bgit\b[^\n;&|]*\b(commit|tag|notes|merge|revert|cherry-pick)\b|\bgh\s+(pr|release|issue)\s+(create|edit|comment|review|merge)\b|\bgh\s+api\b|\bglab\s+(mr|release|issue)\s+(create|update|note|merge)\b`)
-	// toolNameRe reconoce herramientas (MCP u otras) que escriben commits, PRs, issues o comentarios.
-	toolNameRe = regexp.MustCompile(`(?i)(pull_?request|merge_?request|create_pr|commit|push_files|create_or_update_file|release|comment|review|issue|merge)`)
-	// fileArgRe encuentra mensajes que vienen de un archivo: git commit -F f, gh pr create --body-file f.
-	fileArgRe = regexp.MustCompile(`(?:^|\s)(?:-F|--file|--body-file|--notes-file)(?:\s+|=)("[^"]+"|'[^']+'|[^\s;&|]+)`)
+	// gitWriteRe reconoce comandos que publican un mensaje: commits, tags, merges,
+	// PRs, issues y escrituras con gh api (solo con método o campos de escritura).
+	gitWriteRe = regexp.MustCompile(`(?i)\bgit(?:\s+(?:-[Cc]\s+\S+|--(?:git-dir|work-tree|namespace)(?:=|\s+)\S+|-\S+))*\s+(commit|tag|notes\s+(?:add|append|edit|copy)|merge|revert|cherry-pick)\b` +
+		`|\bgit\b[^\n;&|]*\bpush\b[^\n;&|]*-o\s*merge_request\.(description|title)` +
+		`|\bgh\s+(pr|release|issue)\s+(create|edit|comment|review|merge)\b` +
+		`|\bgh\s+api\b[^\n;&|]*(\s-X\s*|\s--method[=\s]\s*)(POST|PATCH|PUT)\b` +
+		`|\bgh\s+api\b[^\n;&|]*\s(-f|-F|--field|--raw-field|--input)[\s=]` +
+		`|\bglab\s+(mr|release|issue)\s+(create|update|note|merge)\b`)
+	// writeToolRe y readToolRe separan herramientas (MCP u otras) que publican
+	// texto de las que solo leen: list_commits o search_issues no se revisan.
+	writeToolRe = regexp.MustCompile(`(?i)(pull_?request|merge_?request|create_pr|commit|push_files|create_or_update_file|release|comment|review|issue|merge|note)`)
+	readToolRe  = regexp.MustCompile(`(?i)(^|[_\-.])(list|get|search|read|fetch|view|download|show)[_\-]`)
+	// fileArgRe encuentra mensajes que vienen de un archivo: git commit -F f,
+	// -Ff, --file=f, gh pr create --body-file f.
+	fileArgRe = regexp.MustCompile(`(?:^|\s)(?:-F|--file|--body-file|--notes-file)(?:=|\s+)?("[^"]+"|'[^']+'|[^\s;&|'"]+)`)
+	// cdRe encuentra cambios de directorio previos al comando (cd sub && git commit -F m).
+	cdRe = regexp.MustCompile(`(?:^|[;&|(]\s*)cd\s+("[^"]+"|'[^']+'|[^\s;&|)]+)`)
+	// identArgRe encuentra identidades puestas en el comando: --author, variables
+	// GIT_AUTHOR_* o GIT_COMMITTER_* y -c user.name/user.email.
+	identArgRe = regexp.MustCompile(`(?i)--author[=\s]\s*("[^"]*"|'[^']*'|\S+)` +
+		`|\bGIT_(?:AUTHOR|COMMITTER)_(NAME|EMAIL)=("[^"]*"|'[^']*'|\S+)` +
+		`|-c\s+user\.(name|email)=("[^"]*"|'[^']*'|\S+)`)
 )
 
 func cmdGate(a *app, args []string) error {
@@ -387,13 +418,18 @@ func cmdGate(a *app, args []string) error {
 	if err != nil {
 		return err
 	}
-	text := hookText(data)
-	if text == "" {
+	text, idents := hookText(data)
+	if text == "" && len(idents) == 0 {
 		return nil
 	}
 	attr, err := attribution.Default()
 	if err != nil {
 		return err
+	}
+	for _, id := range idents {
+		if f, ok := attr.AIIdentity(id[0], id[1]); ok {
+			return fail(2, "coyote: bloqueado por R15: la autoría del commit sería una herramienta de IA (%s). Usa la identidad de una persona.", f.Text)
+		}
 	}
 	if found := attr.Check(text, true); len(found) > 0 {
 		return fail(2, "coyote: bloqueado por R15: el mensaje lleva atribución a herramientas de IA (%s: %q). Quita esa línea y vuelve a intentar.",
@@ -402,17 +438,15 @@ func cmdGate(a *app, args []string) error {
 	return nil
 }
 
-// hookText extrae de la entrada de un hook el texto que hay que revisar. Acepta
-// las formas de Claude Code y Codex (tool_name, tool_input), Cursor (command),
-// Copilot (toolName, toolArgs como objeto o como JSON en texto) y texto plano.
-func hookText(data []byte) string {
+// hookText extrae de la entrada de un hook el texto que hay que revisar y las
+// identidades que el comando fija. Acepta las formas de Claude Code y Codex
+// (tool_name, tool_input), Cursor (command), Copilot (toolName, toolArgs como
+// objeto o como JSON en texto) y texto plano.
+func hookText(data []byte) (string, [][2]string) {
 	var m map[string]any
 	if json.Unmarshal(data, &m) != nil {
 		// Entrada que no es JSON: se revisa tal cual si parece un commit, tag o PR.
-		if raw := joinContinuations(string(data)); gitWriteRe.MatchString(raw) {
-			return raw + fileContents(raw, "")
-		}
-		return ""
+		return shellText(string(data), "")
 	}
 	cwd, _ := m["cwd"].(string)
 	input := firstOf(m, "tool_input", "toolArgs", "toolInput", "input", "arguments")
@@ -422,25 +456,69 @@ func hookText(data []byte) string {
 			input = inner
 		}
 	}
+	var b strings.Builder
+	var idents [][2]string
+	// Una herramienta que publica texto se revisa completa, traiga o no un "command"
+	// (Cursor incluye el comando del servidor MCP en la entrada).
+	name, _ := firstOf(m, "tool_name", "toolName", "tool").(string)
+	if name != "" && writeToolRe.MatchString(name) && !readToolRe.MatchString(name) {
+		collectStrings(input, &b)
+	}
 	cmd := commandOf(input)
 	if cmd == "" {
 		cmd = commandOf(m)
 	}
 	if cmd != "" {
-		cmd = joinContinuations(cmd)
-		if gitWriteRe.MatchString(cmd) {
-			return cmd + fileContents(cmd, cwd)
-		}
-		return ""
+		t, ids := shellText(cmd, cwd)
+		b.WriteString(t)
+		idents = ids
 	}
-	name, _ := firstOf(m, "tool_name", "toolName", "tool").(string)
-	if name != "" && toolNameRe.MatchString(name) {
-		var b strings.Builder
-		collectStrings(input, &b)
-		return b.String()
-	}
-	return ""
+	return b.String(), idents
 }
+
+// shellText devuelve el texto de un comando de shell que publica un mensaje, con
+// sus archivos de mensaje, y las identidades que fija; "" si no publica nada.
+func shellText(cmd, cwd string) (string, [][2]string) {
+	cmd = joinContinuations(cmd)
+	if !gitWriteRe.MatchString(cmd) {
+		return "", nil
+	}
+	var idents [][2]string
+	var name, email string
+	for _, m := range identArgRe.FindAllStringSubmatch(cmd, -1) {
+		switch {
+		case m[1] != "": // --author "Nombre <correo>"
+			n, e := splitAuthor(unquote(m[1]))
+			idents = append(idents, [2]string{n, e})
+		case m[2] != "":
+			if strings.EqualFold(m[2], "name") {
+				name = unquote(m[3])
+			} else {
+				email = unquote(m[3])
+			}
+		case m[4] != "":
+			if strings.EqualFold(m[4], "name") {
+				name = unquote(m[5])
+			} else {
+				email = unquote(m[5])
+			}
+		}
+	}
+	if name != "" || email != "" {
+		idents = append(idents, [2]string{name, email})
+	}
+	return cmd + fileContents(cmd, cwd), idents
+}
+
+func splitAuthor(s string) (string, string) {
+	lt := strings.Index(s, "<")
+	if lt < 0 {
+		return strings.TrimSpace(s), ""
+	}
+	return strings.TrimSpace(s[:lt]), strings.Trim(strings.TrimSpace(s[lt:]), "<>")
+}
+
+func unquote(s string) string { return strings.Trim(s, `"'`) }
 
 func firstOf(m map[string]any, keys ...string) any {
 	for _, k := range keys {
@@ -472,30 +550,43 @@ func commandOf(v any) string {
 	return ""
 }
 
-// joinContinuations une las líneas terminadas en barra invertida, como hace el shell.
+// joinContinuations une las líneas terminadas en barra invertida como lo hace
+// el shell: la barra y el salto desaparecen, sin agregar espacio.
 func joinContinuations(s string) string {
-	return strings.NewReplacer("\\\r\n", " ", "\\\n", " ").Replace(s)
+	return strings.NewReplacer("\\\r\n", "", "\\\n", "").Replace(s)
 }
 
-// fileContents agrega el contenido de los archivos de mensaje (-F, --body-file).
+// fileContents agrega el contenido de los archivos de mensaje (-F, --body-file),
+// buscados en el cwd del hook y en los directorios de los cd del comando.
 func fileContents(cmd, cwd string) string {
+	bases := []string{cwd}
+	for _, m := range cdRe.FindAllStringSubmatch(cmd, 8) {
+		d := unquote(m[1])
+		if !filepath.IsAbs(d) && cwd != "" {
+			d = filepath.Join(cwd, d)
+		}
+		bases = append(bases, d)
+	}
 	var b strings.Builder
 	for _, m := range fileArgRe.FindAllStringSubmatch(cmd, 8) {
-		p := strings.Trim(m[1], `"'`)
+		p := unquote(m[1])
 		if p == "" || p == "-" {
 			continue // "-" es la entrada estándar: el heredoc ya está en el comando
 		}
-		if !filepath.IsAbs(p) && cwd != "" {
-			p = filepath.Join(cwd, p)
+		for _, base := range bases {
+			full := p
+			if !filepath.IsAbs(p) && base != "" {
+				full = filepath.Join(base, p)
+			}
+			f, err := os.Open(full)
+			if err != nil {
+				continue
+			}
+			data, _ := io.ReadAll(io.LimitReader(f, 1<<20))
+			f.Close()
+			b.WriteString("\n")
+			b.Write(data)
 		}
-		f, err := os.Open(p)
-		if err != nil {
-			continue
-		}
-		data, _ := io.ReadAll(io.LimitReader(f, 1<<20))
-		f.Close()
-		b.WriteString("\n")
-		b.Write(data)
 	}
 	return b.String()
 }

@@ -12,7 +12,6 @@ import (
 	"strings"
 	"text/tabwriter"
 	"time"
-	"unicode"
 
 	"github.com/Emmanuel93/coyote/internal/agentsmd"
 	"github.com/Emmanuel93/coyote/internal/ccfdoc"
@@ -214,7 +213,7 @@ func profileAndWaivers(root string, cfg *project.Config) (string, map[string]str
 		}
 		for _, w := range ds.doc.Waivers() {
 			reason := strings.TrimSpace(w.Reason)
-			if !meaningful(reason) {
+			if !standards.Meaningful(reason) {
 				reason = "" // un motivo de relleno cuenta como ninguno
 			}
 			if reason != "" && w.ADR != "" {
@@ -224,17 +223,6 @@ func profileAndWaivers(root string, cfg *project.Config) (string, map[string]str
 		}
 	}
 	return profile, waivers
-}
-
-// meaningful exige al menos tres letras o dígitos en un motivo.
-func meaningful(s string) bool {
-	n := 0
-	for _, r := range s {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) {
-			n++
-		}
-	}
-	return n >= 3
 }
 
 func (a *app) lint(root string, cfg *project.Config, scripts bool) (*standards.Standard, *standards.Result, error) {

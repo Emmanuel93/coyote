@@ -20,6 +20,7 @@ import (
 	"github.com/Emmanuel93/coyote/internal/agentsmd"
 	"github.com/Emmanuel93/coyote/internal/ccf"
 	"github.com/Emmanuel93/coyote/internal/ccfdoc"
+	"github.com/Emmanuel93/coyote/internal/fsx"
 	"github.com/Emmanuel93/coyote/internal/gitx"
 	"github.com/Emmanuel93/coyote/internal/identity"
 	"github.com/Emmanuel93/coyote/internal/ledger"
@@ -211,6 +212,10 @@ func Init(o InitOptions) (*InitResult, error) {
 		res.Actions = append(res.Actions, Action{f.dst, status})
 	}
 	for _, keep := range []string{"coyote/decisions", "coyote/workstreams", "coyote/approvals", "coyote/runbooks"} {
+		if err := fsx.NoSymlinks(dir, keep+"/.gitkeep"); err != nil {
+			res.Warnings = append(res.Warnings, err.Error())
+			continue
+		}
 		p := filepath.Join(dir, filepath.FromSlash(keep))
 		if entries, err := os.ReadDir(p); err == nil && len(entries) > 0 {
 			continue
@@ -274,6 +279,9 @@ func writeTemplate(dir, tmpl, dst string, data map[string]string) (string, error
 	target := filepath.Join(dir, filepath.FromSlash(dst))
 	if _, err := os.Lstat(target); err == nil {
 		return "existe", nil // también un symlink, aunque apunte a nada: no se escribe a través de él
+	}
+	if err := fsx.NoSymlinks(dir, dst); err != nil {
+		return "omitido: " + err.Error(), nil
 	}
 	raw, err := fs.ReadFile(coyote.Templates, "templates/project/"+tmpl)
 	if err != nil {
@@ -346,6 +354,10 @@ func InstallHook(dir string, force, onlyCreate bool) (string, string, error) {
 			return p, "omitido", fmt.Errorf("ya hay un hook commit-msg ajeno en %s; agrégale la línea coyote attribution scrub --in-place --commit-msg \"$1\" o usa coyote hooks install --force", p)
 		case onlyCreate:
 			return p, "existe", nil
+		default:
+			// Un hook de coyote distinto de la plantilla es de otra versión o tiene
+			// cambios de la persona: no se pisa sin --force.
+			return p, "omitido", fmt.Errorf("el hook commit-msg de %s tiene cambios o es de otra versión; revísalo y usa coyote hooks install --force para reemplazarlo", p)
 		}
 		status = "actualizado"
 	}
@@ -358,13 +370,36 @@ func InstallHook(dir string, force, onlyCreate bool) (string, string, error) {
 	return p, status, os.Chmod(p, 0o755)
 }
 
+// HookCurrent informa si el hook commit-msg es exactamente el de esta versión de coyote.
+func HookCurrent(dir string) bool {
+	hooks, _, err := gitx.HooksDir(dir)
+	if err != nil {
+		return false
+	}
+	have, err := os.ReadFile(filepath.Join(hooks, "commit-msg"))
+	if err != nil {
+		return false
+	}
+	want, err := fs.ReadFile(coyote.Templates, "templates/project/commit-msg")
+	return err == nil && bytes.Equal(have, want)
+}
+
 // HookInstalled informa si el hook commit-msg limpia la atribución: el de
-// coyote o uno propio que llama a coyote attribution scrub.
+// coyote o uno propio que ejecuta coyote attribution scrub.
 func HookInstalled(dir string) bool {
 	hooks, _, err := gitx.HooksDir(dir)
 	if err != nil {
 		return false
 	}
 	data, err := os.ReadFile(filepath.Join(hooks, "commit-msg"))
-	return err == nil && (strings.Contains(string(data), HookMarker) || strings.Contains(string(data), "coyote attribution scrub"))
+	if err != nil {
+		return false
+	}
+	// Cuenta una línea que ejecuta la limpieza, no un comentario que la menciona.
+	for _, line := range strings.Split(string(data), "\n") {
+		if t := strings.TrimSpace(line); t != "" && !strings.HasPrefix(t, "#") && strings.Contains(t, "attribution scrub") {
+			return true
+		}
+	}
+	return false
 }

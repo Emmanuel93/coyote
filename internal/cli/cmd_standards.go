@@ -274,9 +274,12 @@ func cmdDoctor(a *app, args []string) error {
 		default:
 			add("autoría", "ok", fmt.Sprintf("%s <%s> · ledger @%s", name, email, person.Slug))
 		}
-		if project.HookInstalled(root) {
+		switch {
+		case project.HookCurrent(root):
 			add("hook commit-msg", "ok", "quita atribución de IA en cada commit")
-		} else {
+		case project.HookInstalled(root):
+			add("hook commit-msg", "warn", "instalado, pero de otra versión o con cambios; revísalo y corre coyote hooks install --force")
+		default:
 			add("hook commit-msg", "warn", "no instalado; corre coyote hooks install")
 		}
 	} else {
@@ -287,8 +290,8 @@ func cmdDoctor(a *app, args []string) error {
 		add("filtro de atribución", "fail", err.Error())
 	} else {
 		sample := "feat: x\n\nCo-Authored-By: " + "Cla" + "ude <noreply@" + "anthropic.com>\n"
-		if out, found := attr.Scrub(sample, true); len(found) == 1 && strings.TrimSpace(out) == "feat: x" {
-			add("filtro de atribución", "ok", fmt.Sprintf("%d patrones de línea, %d de frase", len(attr.LinePatterns), len(attr.PhrasePatterns)))
+		if out, found := attr.ScrubLines(sample, true); len(found) == 1 && strings.TrimSpace(out) == "feat: x" {
+			add("filtro de atribución", "ok", fmt.Sprintf("identidades de bot, %d patrones de línea y %d de frase", len(attr.LinePatterns), len(attr.PhrasePatterns)))
 		} else {
 			add("filtro de atribución", "fail", "no quitó un trailer de prueba")
 		}

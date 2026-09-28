@@ -53,8 +53,11 @@ func TestFooters(t *testing.T) {
 		"Este PR fue generado con Copilot",
 		"Co-authored-by: Copilot <175728472+Copilot@users.noreply.github.com>",
 		"Co-authored-by: Cursor Agent <cursoragent@cursor.com>",
+		"Co-authored-by: claude[bot] <209825114+claude[bot]@users.noreply.github.com>",
+		"Co-authored-by: cursor[bot] <206951365+cursor[bot]@users.noreply.github.com>",
 		"Co-authored-by: google-labs-jules[bot] <161369871+google-labs-jules[bot]@users.noreply.github.com>",
 		"Co-authored-by: Amp <amp@ampcode.com>",
+		"Co-authored-by : Claude <noreply@anthropic.com>",
 		"Amp-Thread-ID: https://ampcode.com/threads/T-123",
 		"https://chatgpt.com/codex/tasks/task_e_123",
 		"Link to Devin run: https://app.devin.ai/sessions/abc",
@@ -67,35 +70,27 @@ func TestFooters(t *testing.T) {
 	}
 }
 
-func TestPhrasesInFiles(t *testing.T) {
+func TestPhrasesAreReportedNotRewritten(t *testing.T) {
 	c := cfg(t)
-	cases := map[string]string{
-		"feat(api): endpoint de envíos generado con Claude":                        "feat(api): endpoint de envíos",
-		"docs: guía de despliegue (escrita con ayuda de ChatGPT)":                  "docs: guía de despliegue",
-		"Refactor the parser (written with Claude Code).":                          "Refactor the parser.",
-		"Migración de esquema generada con Claude Code; revisada en QA.":           "Migración de esquema; revisada en QA.",
-		"Tests (written with [Claude Code](https://claude.com/claude-code)) pass.": "Tests pass.",
+	phrases := []string{
+		"feat(api): endpoint de envíos generado con Claude",
+		"docs: guía de despliegue (escrita con ayuda de ChatGPT)",
+		"Refactor the parser (written with Claude Code).",
+		"Migración de esquema generada con Claude Code; revisada en QA.",
+		"Tests (written with [Claude Code](https://claude.com/claude-code)) pass.",
+		"Docs generated with [Claude Code](https://claude.com) for the API.",
+		"parser, written with Claude Code, and tests.",
+		"Steps (partly written with Claude Code):",
+		"| parser | generado con Claude Code |",
+		"aider: fix parser",
 	}
-	for in, want := range cases {
-		got, found := c.Scrub(in, false)
-		if strings.TrimSpace(got) != want || len(found) != 1 {
-			t.Errorf("Scrub(%q) = %q (%d hallazgos), se esperaba %q", in, got, len(found), want)
+	for _, in := range phrases {
+		if p := c.Phrases(in, false); len(p) != 1 {
+			t.Errorf("Phrases(%q) debería reportar una frase: %+v", in, p)
 		}
-	}
-}
-
-func TestPhrasesNotRewrittenInCommits(t *testing.T) {
-	c := cfg(t)
-	msg := "feat(api): endpoint generado con Claude Code\n\nCuerpo.\n"
-	out, found := c.ScrubLines(msg, true)
-	if len(found) != 0 || out != msg {
-		t.Fatalf("ScrubLines no debe reescribir frases: %+v %q", found, out)
-	}
-	if p := c.Phrases(msg, true); len(p) != 1 || p[0].Line != 1 {
-		t.Fatalf("Phrases debe reportar la frase del asunto: %+v", p)
-	}
-	if p := c.Phrases("aider: fix bug\n", true); len(p) != 1 {
-		t.Fatalf("el prefijo aider: es atribución: %+v", p)
+		if out, found := c.ScrubLines(in, false); len(found) != 0 || strings.TrimSpace(out) != in {
+			t.Errorf("ScrubLines no debe reescribir %q: %q", in, out)
+		}
 	}
 }
 
@@ -112,11 +107,21 @@ func TestNoFalsePositives(t *testing.T) {
 		"Co-authored-by: Sam Lee <sam@openai.com>",
 		"Co-authored-by: Ana Ruiz <ana@anthropic.com>",
 		"Co-authored-by: Jules Verne <jules@example.com>",
+		"Co-authored-by: Bo Chen <bo@ampcode.com>",
+		"Co-authored-by: Kim Park <kim@windsurf.com>",
+		"Co-authored-by: dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>",
 		"fix: reporte creado por el equipo de pagos",
 		"fix: reject images made with AI in avatar uploads",
 		"feat(moderación): detectar imágenes generadas con IA",
 		"docs: add painting made by Claude Monet",
+		"Made by Claude Monet in 1872.",
+		"Written by Claude Dupont and Ana Ruiz.",
+		"Hecho por Claude Dupont",
+		"Built with Copilot in mind, not by it.",
 		"feat: robot 🤖 dance for the landing page",
+		"🤖 Move the cursor to the left",
+		"🤖 fish &amp; chips",
+		"ramp-run: yes",
 		"Made by Devin Smith and the payments team",
 		"La IA propone y la persona aprueba.",
 	}
@@ -125,12 +130,18 @@ func TestNoFalsePositives(t *testing.T) {
 			t.Errorf("falso positivo en %q: %+v", s, f)
 		}
 	}
+	for _, s := range []string{`git commit -m "docs: add painting made by Claude Monet"`, "git commit -m 'ci: ramp-run: yes'"} {
+		if f := c.Check(s, true); len(f) != 0 {
+			t.Errorf("falso positivo en el comando %q: %+v", s, f)
+		}
+	}
 }
 
 func TestLooseForCommands(t *testing.T) {
 	c := cfg(t)
 	for _, cmd := range []string{
 		`git commit -m "feat: x" -m "Co-Authored-By: Claude <noreply@anthropic.com>"`,
+		`git commit -m "feat: x" -m "Co-authored-by: claude[bot] <209825114+claude[bot]@users.noreply.github.com>"`,
 		`git commit -m "feat: x" -m "Generated with [Claude Code](https://claude.com/claude-code)"`,
 		`gh pr create --title x --body "Tests pass (written with Claude Code)"`,
 	} {
@@ -149,17 +160,44 @@ func TestAIIdentity(t *testing.T) {
 		{"Claude", "noreply@anthropic.com"},
 		{"Cursor Agent", "cursoragent@cursor.com"},
 		{"Copilot", "175728472+Copilot@users.noreply.github.com"},
+		{"claude[bot]", "209825114+claude[bot]@users.noreply.github.com"},
+		{"cursor[bot]", "206951365+cursor[bot]@users.noreply.github.com"},
 		{"devin-ai-integration[bot]", "158243242+devin-ai-integration[bot]@users.noreply.github.com"},
+		{"Amp", "amp@ampcode.com"},
 	}
 	for _, b := range bots {
 		if _, ok := c.AIIdentity(b[0], b[1]); !ok {
 			t.Errorf("%s <%s> es una identidad de IA", b[0], b[1])
 		}
 	}
-	for _, h := range [][2]string{{"Claude Dupont", "claude@example.fr"}, {"Ana Pérez", "ana@example.com"}, {"Haider Ali", "haider@example.com"}} {
+	humans := [][2]string{
+		{"Claude Dupont", "claude@example.fr"}, {"Ana Pérez", "ana@example.com"}, {"Haider Ali", "haider@example.com"},
+		{"Bo Chen", "bo@ampcode.com"}, {"Kim Park", "kim@windsurf.com"}, {"Sam Lee", "sam@openai.com"},
+		{"dependabot[bot]", "49699333+dependabot[bot]@users.noreply.github.com"},
+	}
+	for _, h := range humans {
 		if f, ok := c.AIIdentity(h[0], h[1]); ok {
-			t.Errorf("%s es una persona: %+v", h[0], f)
+			t.Errorf("%s no es una herramienta de IA: %+v", h[0], f)
 		}
+	}
+}
+
+func TestScissors(t *testing.T) {
+	c := cfg(t)
+	msg := "docs: limpia la guía\n\n# Please enter the commit message.\n" +
+		"# ------------------------ >8 ------------------------\n" +
+		"# Do not modify or remove the line above.\n" +
+		"diff --git a/g.md b/g.md\n-Esta guía fue escrita con Claude Code.\n+Esta guía.\n" +
+		"-Co-Authored-By: Claude <noreply@anthropic.com>\n"
+	if p := c.Phrases(msg, true); len(p) != 0 {
+		t.Fatalf("el diff de git commit -v no se revisa: %+v", p)
+	}
+	out, found := c.ScrubLines(msg, true)
+	if len(found) != 0 || !strings.Contains(out, "-Co-Authored-By") {
+		t.Fatalf("lo que va después de las tijeras no se toca: %+v\n%s", found, out)
+	}
+	if EmptyMessage("# ------------------------ >8 ------------------------\nfeat: x\n") != true {
+		t.Fatal("el texto después de las tijeras no cuenta como mensaje")
 	}
 }
 

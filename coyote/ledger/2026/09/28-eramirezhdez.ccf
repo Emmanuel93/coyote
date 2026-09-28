@@ -22,3 +22,5 @@
 2026-09-28T01:47Z|@eramirezhdez/coyote-dev|W-0001|coyote|doc|examples|proyecto sintético acme-shop desde el dominio|-|-|-|ok
 2026-09-28T01:47Z|@eramirezhdez/coyote-devsecops|W-0001|coyote|ci|-|vet, pruebas, lint del estándar y atribución en cada cambio|-|-|-|ok
 2026-09-28T01:47Z|@eramirezhdez/coyote-scribe|W-0001|coyote|doc|release|README y reporte de v0.1.0 para el gate G1|-|-|-|ok
+2026-09-28T04:52Z|@eramirezhdez/coyote-reviewer|W-0001|coyote|rev|seguridad|segunda revisión adversarial: 9 hallazgos, todos corregidos con pruebas|doc:docs/releases/v0.1.0.md|-|-|ok
+2026-09-28T04:52Z|@eramirezhdez/coyote-dev|W-0001|coyote|fix|core|cierra los hallazgos de la segunda revisión adversarial|-|-|-|ok

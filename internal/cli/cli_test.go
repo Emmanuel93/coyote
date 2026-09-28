@@ -235,6 +235,19 @@ func TestGate(t *testing.T) {
 		{"MCP que crea un issue", `{"tool_name":"mcp__github__create_issue","tool_input":{"title":"x","body":"` + aiFooter + `"}}`, 2},
 		{"Copilot con toolArgs en texto", `{"toolName":"bash","toolArgs":"{\"command\":\"git commit -m \\\"feat: x\\\" -m \\\"` + strings.ReplaceAll(quoted, `\"`, `\\\"`) + `\\\"\"}"}`, 2},
 		{"comando como lista", `{"tool_name":"shell","tool_input":{"command":["git","commit","-m","` + quoted + `"]}}`, 2},
+		{"--author de una herramienta", `{"tool_name":"Bash","tool_input":{"command":"git commit --author=\"Cursor Agent <cursoragent@` + `cursor.com>\" -m \"feat: x\""}}`, 2},
+		{"-c user.email de una herramienta", `{"tool_name":"Bash","tool_input":{"command":"git -c user.name=Copilot -c user.email=1+Copilot@users.noreply.github.com commit -m \"feat: x\""}}`, 2},
+		{"variables de autor", `{"tool_name":"Bash","tool_input":{"command":"GIT_AUTHOR_NAME=x GIT_AUTHOR_EMAIL=cursoragent@` + `cursor.com git commit -m \"feat: x\""}}`, 2},
+		{"gh api de lectura", `{"tool_name":"Bash","tool_input":{"command":"gh api repos/a/b/commits | grep -c noreply@` + `anthropic.com"}}`, 0},
+		{"gh api que escribe", `{"tool_name":"Bash","tool_input":{"command":"gh api -X POST repos/a/b/issues -f body='` + aiFooter + `'"}}`, 2},
+		{"MCP de lectura", `{"tool_name":"mcp__github__list_commits","tool_input":{"author":"noreply@` + `anthropic.com"}}`, 0},
+		{"MCP de PR con command", `{"tool_name":"mcp__github__create_pull_request","tool_input":{"command":"npx server","body":"` + aiFooter + `"}}`, 2},
+		{"continuación dentro de una palabra", `{"tool_name":"Bash","tool_input":{"command":"git com\\\nmit -m \"feat: x\" -m \"Co-Authored-By: Cla\\\nude <noreply@anthr\\\nopic.com>\""}}`, 2},
+		{"push con descripción de MR", `{"tool_name":"Bash","tool_input":{"command":"git push -o merge_request.description='` + aiFooter + `' origin rama"}}`, 2},
+		{"git log de lectura", `{"tool_name":"Bash","tool_input":{"command":"git log --grep=merge --author=noreply@` + `anthropic.com"}}`, 0},
+		{"git notes show", `{"tool_name":"Bash","tool_input":{"command":"git notes show HEAD | grep noreply@` + `anthropic.com"}}`, 0},
+		{"git con opciones globales", `{"tool_name":"Bash","tool_input":{"command":"git --no-pager -C repo -c core.editor=true commit -m \"feat: x\" -m \"` + quoted + `\""}}`, 2},
+		{"persona llamada Claude Monet", `{"tool_name":"Bash","tool_input":{"command":"git commit -m \"docs: add painting made by Claude Monet\""}}`, 0},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -291,6 +304,21 @@ func TestGateArchivoDeMensaje(t *testing.T) {
 	in = `{"cwd":"` + dir + `","tool_name":"Bash","tool_input":{"command":"git commit -F body.md"}}`
 	if r := run(t, dir, in, "gate", "attribution"); r.code != 2 {
 		t.Fatalf("git commit -F con pie de IA debe bloquearse: %d %s", r.code, r.stderr)
+	}
+	in = `{"cwd":"` + dir + `","tool_name":"Bash","tool_input":{"command":"git commit -Fbody.md"}}`
+	if r := run(t, dir, in, "gate", "attribution"); r.code != 2 {
+		t.Fatalf("git commit -Ffile con pie de IA debe bloquearse: %d %s", r.code, r.stderr)
+	}
+	sub := filepath.Join(dir, "sub")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sub, "m.txt"), []byte("feat: x\n\n"+aiTrailer+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	in = `{"cwd":"` + dir + `","tool_name":"Bash","tool_input":{"command":"cd sub && git commit -F m.txt"}}`
+	if r := run(t, dir, in, "gate", "attribution"); r.code != 2 {
+		t.Fatalf("cd sub && git commit -F m.txt debe bloquearse: %d %s", r.code, r.stderr)
 	}
 }
 
@@ -372,5 +400,98 @@ func TestInitNoSigueSymlinks(t *testing.T) {
 	must(t, run(t, base, "", "init", "s", "--purpose", "prueba de symlinks"), 0, "init")
 	if _, err := os.Stat(outside); err == nil {
 		t.Fatal("init escribió a través de un symlink")
+	}
+}
+
+func TestHistorialNoSeReinicia(t *testing.T) {
+	base := setup(t)
+	root := filepath.Join(base, "r")
+	must(t, run(t, base, "", "init", "r", "--type", "library", "--purpose", "prueba de historial"), 0, "init")
+	git(t, root, "add", "-A")
+	must(t, run(t, root, "", "commit", "-m", "chore: adopta coyote"), 0, "primer commit")
+	// Commits con atribución que saltan los hooks, uno con un separador en el asunto.
+	if err := os.WriteFile(filepath.Join(root, "a.txt"), []byte("a\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, root, "add", "a.txt")
+	git(t, root, "commit", "-q", "--no-verify", "-m", "feat: z\x1e", "-m", aiTrailer)
+	must(t, run(t, root, "", "attribution", "check", "--commits", "20"), 1, "trailer con separador en el asunto")
+	// Borrar y volver a agregar coyote/project.yaml no reinicia el historial revisado.
+	cfgPath := filepath.Join(root, "coyote", "project.yaml")
+	saved := readFile(t, cfgPath)
+	git(t, root, "rm", "-q", "coyote/project.yaml")
+	git(t, root, "commit", "-q", "--no-verify", "-m", "chore: quita project")
+	if err := os.WriteFile(cfgPath, []byte(saved), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, root, "add", "coyote/project.yaml")
+	git(t, root, "commit", "-q", "--no-verify", "-m", "chore: vuelve project")
+	must(t, run(t, root, "", "attribution", "check", "--commits", "20"), 1, "historial tras borrar y agregar project.yaml")
+}
+
+func TestHookModoIdentidadYTijeras(t *testing.T) {
+	base := setup(t)
+	root := filepath.Join(base, "k")
+	must(t, run(t, base, "", "init", "k", "--type", "library", "--purpose", "prueba del modo hook"), 0, "init")
+	msg := filepath.Join(root, ".git", "COMMIT_EDITMSG")
+	body := "feat: x\n\n# ------------------------ >8 ------------------------\n-Esta guía fue escrita con " + "Cla" + "ude Code.\n"
+	if err := os.WriteFile(msg, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	must(t, run(t, root, "", "attribution", "scrub", "--in-place", "--commit-msg", msg), 0, "el diff de commit -v no se revisa")
+	t.Setenv("GIT_AUTHOR_NAME", "claude[bot]")
+	t.Setenv("GIT_AUTHOR_EMAIL", "209825114+claude[bot]@users.noreply.github.com")
+	must(t, run(t, root, "", "attribution", "scrub", "--in-place", "--commit-msg", msg), 1, "autor de IA en modo hook")
+}
+
+func TestHookEditadoNoSePisa(t *testing.T) {
+	base := setup(t)
+	root := filepath.Join(base, "e")
+	must(t, run(t, base, "", "init", "e", "--type", "library", "--purpose", "prueba de hook editado"), 0, "init")
+	hook := filepath.Join(root, ".git", "hooks", "commit-msg")
+	edited := readFile(t, hook) + "# revisión del ticket\n"
+	if err := os.WriteFile(hook, []byte(edited), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	must(t, run(t, root, "", "hooks", "install"), 1, "hook de coyote con cambios")
+	if readFile(t, hook) != edited {
+		t.Fatal("se pisó un hook con cambios de la persona")
+	}
+	must(t, run(t, root, "", "hooks", "install", "--force"), 0, "reemplazo explícito")
+	if err := os.WriteFile(hook, []byte("#!/bin/sh\n# TODO: coyote attribution scrub\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if r := run(t, root, "", "doctor"); !strings.Contains(r.stdout, "no instalado") {
+		t.Errorf("un comentario no cuenta como hook instalado:\n%s", r.stdout)
+	}
+}
+
+func TestNoEscribeFueraDelProyecto(t *testing.T) {
+	base := setup(t)
+	root := filepath.Join(base, "q")
+	outside := filepath.Join(base, "fuera")
+	for _, d := range []string{root, outside} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink(outside, filepath.Join(root, ".claude")); err != nil {
+		t.Fatal(err)
+	}
+	must(t, run(t, base, "", "init", "q", "--purpose", "prueba de symlinks"), 0, "init")
+	if _, err := os.Stat(filepath.Join(outside, "settings.json")); err == nil {
+		t.Fatal("init escribió settings.json a través de un directorio symlink")
+	}
+	must(t, run(t, root, "", "note", "algo", "--type", "dec", "--file", "../fuera/x.md"), 1, "note fuera del proyecto")
+	ledgerDir := filepath.Join(root, "coyote", "ledger")
+	if err := os.RemoveAll(ledgerDir); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, ledgerDir); err != nil {
+		t.Fatal(err)
+	}
+	must(t, run(t, root, "", "record", "note", "prueba"), 1, "ledger con symlink")
+	if entries, _ := os.ReadDir(outside); len(entries) != 0 {
+		t.Fatalf("se escribió fuera del proyecto: %v", entries)
 	}
 }

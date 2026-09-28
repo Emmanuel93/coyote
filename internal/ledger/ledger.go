@@ -12,13 +12,16 @@ import (
 	"time"
 
 	"github.com/Emmanuel93/coyote/internal/ccf"
+	"github.com/Emmanuel93/coyote/internal/fsx"
 )
 
 // Ledger es el ledger de un proyecto.
-type Ledger struct{ Dir string }
+type Ledger struct{ Root, Dir string }
 
 // Open devuelve el ledger del proyecto en root.
-func Open(root string) Ledger { return Ledger{Dir: filepath.Join(root, "coyote", "ledger")} }
+func Open(root string) Ledger {
+	return Ledger{Root: root, Dir: filepath.Join(root, "coyote", "ledger")}
+}
 
 // PathFor devuelve el archivo del día y del usuario.
 func (l Ledger) PathFor(ts time.Time, user string) string {
@@ -37,6 +40,13 @@ func (l Ledger) Append(line ccf.Line, user string) (string, error) {
 		return "", err
 	}
 	p := l.PathFor(line.TS, user)
+	if l.Root != "" {
+		if rel, err := filepath.Rel(l.Root, p); err == nil {
+			if err := fsx.NoSymlinks(l.Root, rel); err != nil {
+				return "", err
+			}
+		}
+	}
 	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 		return "", err
 	}

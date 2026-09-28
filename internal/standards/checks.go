@@ -139,6 +139,11 @@ func Lint(ctx *Context, st *Standard) *Result {
 				Fix: "usa extends: coyote:default o declara reason: con el motivo"})
 		}
 	}
+	for _, id := range st.Unjustified {
+		res.Findings = append(res.Findings, Finding{RuleID: "S1", Level: "MUST", Title: "Una redefinición que relaja una MUST declara reason",
+			Path: "coyote/standards/rules.yaml", Msg: id + " se redefine con otros checks o perfiles sin reason; rige la definición anterior",
+			Fix: "agrega reason: con el motivo, o usa override con reason"})
+	}
 	for _, r := range st.Rules {
 		if r.Disabled {
 			res.Skipped = append(res.Skipped, r.ID+" desactivada")
@@ -248,11 +253,15 @@ func AdoptedCommits(root string, n int, merges bool) ([]gitx.Commit, error) {
 	if !gitx.IsRepo(root) || !gitx.HasCommits(root) {
 		return nil, nil
 	}
-	base, err := gitx.Run(root, "log", "--diff-filter=A", "--format=%H", "-1", "--", "coyote/project.yaml")
-	base = strings.TrimSpace(base)
-	if err != nil || base == "" {
+	// La base es el commit más antiguo que agregó coyote/project.yaml: borrarlo y
+	// volver a agregarlo no reinicia el historial que se revisa.
+	adds, err := gitx.Run(root, "log", "--diff-filter=A", "--format=%H", "--", "coyote/project.yaml")
+	adds = strings.TrimSpace(adds)
+	if err != nil || adds == "" {
 		return nil, nil
 	}
+	lines := strings.Split(adds, "\n")
+	base := strings.TrimSpace(lines[len(lines)-1])
 	commits, err := gitx.Log(root, n, merges, base+"..HEAD")
 	if err != nil {
 		return nil, err

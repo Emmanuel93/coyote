@@ -79,7 +79,7 @@ rules:
 		t.Fatalf("un ajuste vencido no debe aplicarse: %s", r.Level)
 	}
 	joined := strings.Join(st.Warnings, "\n")
-	for _, want := range []string{"R9 se relaja sin reason", "venció"} {
+	for _, want := range []string{"R9 se relaja sin un reason real", "venció"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("falta advertencia %q en:\n%s", want, joined)
 		}
@@ -175,16 +175,71 @@ func TestScriptsSoloConPermiso(t *testing.T) {
 
 func TestRedefinicionVisible(t *testing.T) {
 	root := t.TempDir()
-	write(t, root, "coyote/standards/rules.yaml", "version: 1\nrules:\n  - id: R15\n    title: atribución solo en docs/\n    level: MUST\n    check: { type: attribution, paths: [\"docs/**\"] }\n")
+	rules := "version: 1\nrules:\n  - id: R15\n    title: atribución solo en docs/\n    level: MUST\n    check: { type: attribution, paths: [\"docs/**\"] }\n"
+	write(t, root, "coyote/standards/rules.yaml", rules)
 	st, err := Load(root, now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := st.Find("R15")
-	if r == nil || r.Source != "proyecto" || !strings.Contains(r.Note, "redefinida en proyecto") {
-		t.Fatalf("la redefinición de R15 debe quedar anotada: %+v", r)
+	// Sin reason, cambiar los checks de una MUST no se aplica y el lint falla con S1.
+	if r := st.Find("R15"); r == nil || r.Source != DefaultRef || len(st.Unjustified) != 1 {
+		t.Fatalf("sin reason rige la definición anterior: %+v %v", r, st.Unjustified)
 	}
-	if len(st.Warnings) == 0 || !strings.Contains(strings.Join(st.Warnings, " "), "R15") {
+	ctx, err := NewContext(root, st, "", nil, "manual", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res := Lint(ctx, st); res.Failing(false) == 0 {
+		t.Fatal("una redefinición sin reason debe hacer fallar el lint (S1)")
+	}
+	for _, trivial := range []string{"    profiles: [nadie]\n", "    reason: TODO\n"} {
+		write(t, root, "coyote/standards/rules.yaml", "version: 1\nrules:\n  - id: R15\n    level: MUST\n"+trivial)
+		st, err := Load(root, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if trivial == "    profiles: [nadie]\n" && len(st.Unjustified) != 1 {
+			t.Errorf("profiles: [nadie] sin reason debe rechazarse: %v", st.Unjustified)
+		}
+	}
+	// Con un motivo real se aplica, queda anotada y avisa.
+	write(t, root, "coyote/standards/rules.yaml", rules+"    reason: la spec de atribución vive fuera de docs\n")
+	st, err = Load(root, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := st.Find("R15")
+	if r == nil || r.Source != "proyecto" || !strings.Contains(r.Note, "redefinida en proyecto") || len(st.Unjustified) != 0 {
+		t.Fatalf("la redefinición con reason debe aplicarse y quedar anotada: %+v", r)
+	}
+	if !strings.Contains(strings.Join(st.Warnings, " "), "R15") {
 		t.Fatalf("redefinir una MUST del default debe avisar: %v", st.Warnings)
+	}
+}
+
+func TestMeaningful(t *testing.T) {
+	for _, bad := range []string{"", "-", "TODO", "xxx", "n/a", "ok", "  todo.  ", "Pendiente"} {
+		if Meaningful(bad) {
+			t.Errorf("%q no es un motivo", bad)
+		}
+	}
+	for _, good := range []string{"README heredado", "la spec cita los patrones", "ADR-0003"} {
+		if !Meaningful(good) {
+			t.Errorf("%q es un motivo", good)
+		}
+	}
+}
+
+func TestHubDentroDelRepo(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, "coyote/project.yaml", "version: 1\nname: demo\nhub: coyote/fakehub\n")
+	write(t, root, "coyote/fakehub/coyote/standards/rules.yaml", "version: 1\nrules:\n  - id: R15\n    level: MUST\n    profiles: [nadie]\n")
+	write(t, root, "coyote/standards/rules.yaml", "version: 1\nextends: hub\nrules: []\n")
+	st, err := Load(root, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(st.Unjustified) != 1 {
+		t.Fatalf("un hub dentro del repo no tiene la exención del hub: %v %v", st.Layers, st.Unjustified)
 	}
 }
