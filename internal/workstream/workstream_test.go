@@ -279,6 +279,11 @@ func TestEstadoDesdeElLedger(t *testing.T) {
 	if n := Fold(p, ev).Next("autonomous"); n.Reason != StopDone || n.Index != -1 {
 		t.Errorf("plan completo: %+v", n)
 	}
+	// Cerrado con coyote close, el motor ya no corre aunque falten pasos.
+	st = Fold(p, append(ev[:2:2], line(t0, "close", "ok", 0)))
+	if n := st.Next("supervised"); n.Run || n.Reason != StopClosed || !st.Closed {
+		t.Errorf("cerrado: %+v", n)
+	}
 }
 
 func TestModo(t *testing.T) {

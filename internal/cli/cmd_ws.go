@@ -339,6 +339,8 @@ func (a *app) wsList(asJSON bool) error {
 			r.Next = st.Steps[nx.Index].ID + " · por correr"
 		case nx.Reason == workstream.StopDone:
 			r.Next = "completo"
+		case nx.Reason == workstream.StopClosed:
+			r.Next = "cerrado"
 		case nx.Reason == workstream.StopBudget:
 			r.Next = st.Steps[nx.Index].ID + " · tope del plan"
 		case nx.Reason == workstream.StopHuman:
@@ -409,6 +411,8 @@ func wsHint(c *wsCtx, st *workstream.State, nx workstream.Next) string {
 		return fmt.Sprintf("el plan corrió en autónomo: evalúa %s en la rama ws/%s y acéptalos con coyote ws continue %s antes del merge (A4)", strings.Join(ids, ", "), id, id)
 	case workstream.StopDone:
 		return fmt.Sprintf("el plan está completo: ciérralo con coyote close %s", id)
+	case workstream.StopClosed:
+		return fmt.Sprintf("%s está cerrado (coyote close): para seguir, abre otro workstream", id)
 	}
 	return nx.Reason
 }
@@ -535,7 +539,7 @@ func (a *app) wsLoop(c *wsCtx, f *forced, dry bool) error {
 	switch {
 	case stepErr != nil:
 		return stepErr
-	case stop.Reason == workstream.StopBudget || stop.Reason == workstream.StopFailed:
+	case stop.Reason == workstream.StopBudget || stop.Reason == workstream.StopFailed || stop.Reason == workstream.StopClosed:
 		return fail(1, "")
 	}
 	return nil
@@ -836,6 +840,9 @@ func (a *app) wsContinue(args []string) error {
 	nx := st.Next(c.mode)
 	id := c.plan.ID
 
+	if st.Closed {
+		return fail(1, "%s está cerrado (coyote close): para seguir, abre otro workstream", id)
+	}
 	if strings.TrimSpace(*redo) != "" || *retry {
 		i := nx.Index
 		if *stepID != "" {
@@ -886,6 +893,8 @@ func (a *app) wsContinue(args []string) error {
 	case workstream.StopDone:
 		fmt.Fprintf(a.stdout, "%s está completo: ciérralo con coyote close %s\n", id, id)
 		return nil
+	case workstream.StopClosed:
+		return fail(1, "%s está cerrado (coyote close): para seguir, abre otro workstream", id)
 	case workstream.StopBlocked:
 		s := st.Steps[nx.Index]
 		if n := pendingCount(c.root); n > 0 {

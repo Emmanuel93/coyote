@@ -8,10 +8,10 @@ reasoning: docs/plan/EXECUTION_PLAN.md#v02-remote--context--razonamiento
 authorized_by: coyote/approvals/P-0001.json
 gate: G2                    # uso del token contra GitHub, OAuth App, indexado de repos de la organización
 steps:
-  - { id: T12, does: plan razonado y ADR-0007, ADR-0008, agent: coyote-sr-solution-architect, output: [docs/plan/EXECUTION_PLAN.md, coyote/decisions/] }
-  - { id: T13, does: índice, get context y ask, agent: coyote-dev, output: [internal/index, internal/search] }
+  - { id: T12, does: "plan razonado y ADR-0007, ADR-0008", agent: coyote-sr-solution-architect, output: [docs/plan/EXECUTION_PLAN.md, coyote/decisions/] }
+  - { id: T13, does: "índice, get context y ask", agent: coyote-dev, output: [internal/index, internal/search] }
   - { id: T14, does: ritmo humano y credenciales, agent: coyote-devsecops, output: [internal/pace, internal/auth, internal/github] }
-  - { id: T15, does: repos del proyecto, push y pull, agent: coyote-dev, output: internal/cli }
+  - { id: T15, does: "repos del proyecto, push y pull", agent: coyote-dev, output: internal/cli }
   - { id: T16, does: web FinOps v0, agent: coyote-dev, output: internal/web }
   - { id: T17, does: verificación y reporte de G2, agent: coyote-reviewer, output: docs/releases/v0.2.0.md, gate: human }
 close: { summary: close.md }

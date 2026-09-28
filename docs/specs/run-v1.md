@@ -1,6 +1,6 @@
 # Corridas v1 — coyote run, router y cierre con costo
 
-Estado: nuevo en v0.4.0 · Implementación: `internal/runner`, `internal/router`, `coyote run`, `coyote router`, `coyote close` · Decisión: ADR-0012
+Estado: nuevo en v0.4.0; pasos de workstream en v0.5.0 · Implementación: `internal/runner`, `internal/router`, `coyote run`, `coyote router`, `coyote close` · Decisión: ADR-0012
 
 ## coyote run
 
@@ -29,6 +29,17 @@ Corre un paso de un agente con Claude Code en modo headless, en la máquina de l
    - `pend`, si la corrida dejó acciones en la cola del gate;
    - `fail`: error, tope de turnos o de dólares, o tiempo vencido;
    - `skip`: no corrió por presupuesto, sin gate o sin el agente instalado.
+
+### Pasos de un workstream
+
+El motor de workstreams (docs/specs/workstream-v1.md) usa este mismo núcleo para cada paso:
+
+- **Entrada:** la tarea lleva el paso y el plan, las entradas del paso entre cercas (artefactos de pasos anteriores, archivos e impacto) y la salida esperada.
+- **Evento `run`:** lleva `step:` y `mode:`.
+- **Esquema de salida:** si el paso declara `sections`, una entrega sin esos títulos queda en `fail` ("salida incompleta").
+- **Acciones en la cola:** un paso que las dejó se retoma con `--resume` y la sesión del artefacto, para que el agente repita las llamadas aprobadas.
+
+Dos corridas en el mismo segundo no pisan su artefacto: la segunda lleva `-2`.
 
 ### Qué no hace
 

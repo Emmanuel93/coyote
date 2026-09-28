@@ -2,7 +2,7 @@
 
 Coyote es una CLI en Go para trabajar con agentes de IA en proyectos de software sin perder el control: el contexto del proyecto vive versionado junto al código, cada acción queda registrada con su costo, el estándar del equipo se valida solo y ningún entregable sale firmado por una herramienta de IA.
 
-Estado: **v0.3.0** (aprobada en el gate G3). Funciona sin red; para GitHub usa tus propias credenciales. El router de modelos, los modos `supervised` y `autonomous` y el cierre con costo llegan en v0.4; el orden está en [docs/plan/EXECUTION_PLAN.md](docs/plan/EXECUTION_PLAN.md).
+Estado: **v0.4.0** (aprobada en el gate G4); v0.5 en construcción: pipeline de impacto y revisión en cada PR, y motor de workstreams. Funciona sin red; para GitHub usa tus propias credenciales. El orden está en [docs/plan/EXECUTION_PLAN.md](docs/plan/EXECUTION_PLAN.md).
 
 ## Qué resuelve
 
@@ -10,6 +10,7 @@ Estado: **v0.3.0** (aprobada en el gate G3). Funciona sin red; para GitHub usa t
 - **Todo queda registrado.** El ledger (`coyote/ledger/`) guarda una línea por evento: quién, qué, tokens de entrada, caché y salida, y costo. Un archivo por día y persona, así git nunca choca.
 - **Un estándar por capas.** El default de la herramienta, el de tu organización y el de cada proyecto se combinan con `extends`. Relajar una regla exige motivo y puede vencer.
 - **Nada con efectos sin tu aprobación.** Un gate en el hook de Claude Code y de Cursor deja leer libremente y detiene todo lo demás hasta que apruebas esa acción exacta. Un agente no puede aprobarse, tocar el gate ni leer tus credenciales.
+- **Un cambio se ve contra todo el producto.** El mapa de interfaces de todos los repos dice a quién afecta un cambio. En cada PR, el pipeline pide la revisión de un dueño cuando el riesgo lo amerita.
 - **Autoría humana.** Los commits llevan tu identidad de git. Las firmas y trailers que agregan los asistentes se quitan en cinco capas: configuración del IDE, gate del IDE, `coyote commit`, hook `commit-msg` y lint en la CI.
 
 ## Instalar
@@ -17,11 +18,11 @@ Estado: **v0.3.0** (aprobada en el gate G3). Funciona sin red; para GitHub usa t
 Requiere Go 1.22 o superior y git. No descarga dependencias: la única (go-yaml) viene en `third_party/`.
 
 ```sh
-make install        # instala coyote en $GOPATH/bin
+make install        # instala coyote en $GOPATH/bin; make build lo deja en bin/coyote
 coyote version
 ```
 
-Para compilar sin instalar: `make build` deja el binario en `bin/coyote`. `make dist` genera binarios de macOS y Linux con sus sumas SHA-256.
+`make dist` genera binarios de macOS y Linux con sus sumas SHA-256.
 
 ## Empezar
 
@@ -30,92 +31,74 @@ coyote init pedidos-api --type backend --purpose "API de pedidos"
 cd pedidos-api
 coyote doctor                       # identidad, hook, documentos y estándar
 coyote note "un pedido se confirma solo con pago capturado" --type inv --scope pedidos
-git add -A
-coyote commit -m "feat(pedidos): alta del proyecto"
+git add -A && coyote commit -m "feat(pedidos): alta del proyecto"
 coyote log                          # eventos con tokens y costo
-coyote standards lint               # 0 si cumple las reglas MUST
 coyote get context --scope pedidos  # lo que un agente necesita saber, acotado
 coyote ask "cuándo se confirma un pedido"
 coyote push                         # revisa autoría y estándar, y publica a ritmo humano
 coyote web                          # costos en http://127.0.0.1:7410
 ```
 
+`coyote init` nunca sobrescribe: en un repo existente solo agrega lo que falta.
+
 ## Trabajar con agentes
 
 ```sh
 coyote install --ide claude-code    # gate, 14 agentes, skills y atribución apagada (o --ide cursor, all)
 coyote doctor --ide claude-code     # prueba el gate en tu máquina
-# el agente intenta algo con efectos → queda en la cola
-coyote approvals                    # qué está esperando
+coyote approvals                    # lo que un agente dejó esperando
 coyote review P-7q3k9d              # el comando o el diff exacto
-coyote approve P-7q3k9d --uses 3    # o --all; el agente repite la llamada y pasa
-coyote approve --bash "go test ./..." --uses 20 --for 8h   # aprobar antes de que lo pida
+coyote approve P-7q3k9d --uses 3    # el agente repite la llamada y pasa
 coyote reject P-7q3k9d --reason "usa go mod tidy"          # el agente recibe el motivo
 ```
 
-Leer, buscar y pedir contexto no piden aprobación. Las aprobaciones valen para esa acción exacta, en tu máquina, por 24 horas como máximo; se dan desde tu terminal, nunca desde el IDE.
-
-`coyote init` nunca sobrescribe: en un repo existente solo agrega lo que falta.
+Leer, buscar y pedir contexto no piden aprobación. Una aprobación vale para esa acción exacta, en tu máquina, por 24 horas como máximo, y se da desde tu terminal, nunca desde el IDE.
 
 ## Un producto en varios repos
 
 ```sh
 coyote init mi-producto --type product
 coyote repo add servicios --path ../servicios    # los repos se leen, nunca se escriben
-coyote repo add app --path ../app
 coyote map                                       # qué expone y qué consume cada módulo
-coyote impact --diff servicios=main...HEAD --format md   # a quién afecta la rama, en los tres repos
+coyote impact --diff servicios=main...HEAD --format md   # a quién afecta la rama, en todos los repos
 coyote extract                                   # propone README.coyote.md y CONTEXT.coyote.md de cada repo
+coyote install --ci github --policy fail         # el pipeline de cada repo: impacto, riesgo y revisión
 ```
 
-`coyote impact` también acepta un endpoint (`"GET /api/v1/pedidos/{id}"`), un tópico (`--topic`) o varios repos a la vez (un cambio coordinado). Dice qué cambia, quién lo usa directo y quién lo usa a través de un BFF, y marca lo que se rompe.
+En cada PR, `coyote gate pr` calcula el riesgo por rutas y por impacto. Un cambio R2 o R3 espera la aprobación de un dueño, según el CODEOWNERS de la rama base.
 
-## Correr agentes con costo a la vista
+## Correr agentes y planes con costo a la vista
 
 ```sh
-coyote router                                     # modelo y topes de cada agente con el gasto del mes
+coyote router                       # modelo y topes de cada agente con el gasto del mes
 coyote run --agent coyote-architect --ws W-0005 --risk R2 "diseña el alta de convenios"
-coyote close W-0005                               # consumo real del workstream en close.md
+coyote ws check W-0007              # el contrato de cada paso del plan
+coyote ws run W-0007                # corre el plan y se detiene donde el modo lo pide
+coyote ws continue W-0007           # aceptas lo que corrió y sigue; --redo "qué cambiar" lo repite
+coyote close W-0007                 # consumo real del workstream en close.md
 ```
 
-`coyote run` corre Claude Code en modo headless con el gate activo:
-
-- Topes de turnos y de dólares por corrida.
-- Un router que baja de modelo al 80 % del presupuesto mensual y no corre al 100 %.
-- Un evento en el ledger con tokens, modelo y costo estimado.
+Cada corrida tiene topes de turnos y de dólares. El router baja de modelo al 80 % del presupuesto mensual y no corre al 100 %. Cada paso queda en el ledger con tokens, modelo y costo.
 
 ## Comandos
 
 | Comando | Para qué |
 |---------|----------|
-| `init [nombre]` | crea o adopta un proyecto: documentos, estándar, hook, `.claude/settings.json`, `AGENTS.md` |
-| `status [--json]` | estado de documentos, estándar, ledger, gate y aprobaciones |
-| `note <texto> --type T` | agrega contexto (`inv`, `dec`, `gap`, `how`, `term`, `risk`, `todo`) y regenera `AGENTS.md` |
-| `record <tipo> <qué>` | registra un evento con tokens (`12.4k/8.7k/1.1k`) y costo (`0.009+0.011`) |
-| `log` | eventos con filtros por tipo, persona, workstream y fecha, y sus totales |
-| `commit -m <mensaje>` | commit con tu autoría, formato R2, documentos válidos y sin atribución a IA |
-| `standards lint\|show\|diff\|explain` | valida y explica el estándar por capas |
-| `attribution check\|scrub` | busca o quita atribución a herramientas de IA en archivos y commits |
-| `gate check` | gate humano para los hooks previos de Claude Code, Cursor, Codex y Copilot; sale con 2 para bloquear |
-| `approvals`, `review` | la cola de propuestas y el detalle de cada una |
-| `approve`, `reject`, `revoke` | decisiones humanas sobre acciones exactas, desde tu terminal |
-| `propose --bash CMD` | encola un comando para aprobarlo |
-| `install --ide IDE` | gate, agentes, skills y atribución apagada en Claude Code o Cursor; `--check` para CI |
+| `init`, `status`, `doctor [--ide IDE]` | crea o adopta un proyecto, su estado y su diagnóstico |
+| `note`, `record`, `log` | contexto (`inv`, `dec`, `gap`, `how`, `term`, `risk`, `todo`), eventos y el ledger con sus totales |
+| `commit -m`, `hooks install` | commits con tu autoría, formato R2 y sin atribución a IA |
+| `standards lint\|show\|diff\|explain`, `attribution check\|scrub` | el estándar por capas y la atribución a IA |
 | `generate agents [--check]` | genera `AGENTS.md` o verifica que esté al día |
-| `hooks install` | instala el hook `commit-msg` |
-| `doctor [--ide IDE]` | diagnóstico completo del proyecto y, con `--ide`, del gate |
-| `get context [repo]` | paquete de contexto acotado (`--scope`, `--query`, `--budget`) con referencias |
-| `ask "pregunta"` | busca en el contexto del proyecto o de otro repo, sin llamar a ningún modelo |
-| `index [--rebuild]` | arma el índice local y muestra su tamaño |
+| `install --ide IDE \| --ci github` | el gate, los agentes y las skills en el IDE; o el pipeline de cada repo del producto |
+| `gate check`, `gate pr` | el gate de los hooks del IDE; el de los PR con la revisión de un dueño |
+| `approvals`, `review`, `approve`, `reject`, `revoke`, `propose` | la cola y las decisiones humanas sobre acciones exactas |
+| `get context`, `ask`, `index` | contexto acotado con referencias, sin llamar a ningún modelo |
 | `repo add\|list\|fetch` | repos del proyecto; de otros repos se traen solo sus documentos |
-| `map [--check]` | mapa de interfaces del producto: endpoints y tópicos que cada módulo expone y consume |
-| `impact <cambio>` | a quién afecta un endpoint, un tópico, un diff o un texto, en todos los repos del producto |
-| `extract [repo]` | propone `README.coyote.md` y `CONTEXT.coyote.md` de cada repo desde su código |
-| `run --agent A "tarea"` | corre un paso de un agente con Claude Code, con topes, gate y costo en el ledger |
-| `router [--init]` | modelo y topes que el router da a cada agente |
-| `close <W>` | resumen de consumo de un workstream desde el ledger |
-| `push` / `pull` | publica y trae con autoría, estándar y ritmo humano revisados |
-| `auth login\|status\|logout` | token de GitHub desde el entorno, `gh` o el llavero; nunca en archivos |
+| `map`, `impact`, `extract`, `ci impact` | mapa de interfaces del producto, impacto de un cambio y documentos propuestos |
+| `run --agent A "tarea"`, `router` | un paso de un agente con Claude Code, con topes, gate y costo |
+| `ws check\|status\|run\|continue` | el plan de un workstream con puntos de control |
+| `close <W>` | consumo de un workstream desde el ledger, con sus pasos |
+| `push`, `pull`, `auth` | publica y trae con autoría y ritmo humano; el token de GitHub vive en el llavero |
 | `web` | costos por proyecto, persona, modelo y agente en `127.0.0.1` |
 
 `coyote help <comando>` muestra las opciones. `-C <ruta>` corre cualquier comando sobre otro directorio.
@@ -123,36 +106,31 @@ coyote close W-0005                               # consumo real del workstream 
 ## Cómo se organiza un proyecto
 
 ```
-README.md                 para personas
-README.coyote.md          identidad del repo (CCF-doc)
-CONTEXT.coyote.md         contexto vivo (CCF-doc)
-AGENTS.md                 generado; lo leen los IDEs
-CLAUDE.md                 @AGENTS.md
+README.md, README.coyote.md, CONTEXT.coyote.md   para personas; identidad y contexto vivo (CCF-doc)
+AGENTS.md, CLAUDE.md      generados; los leen los IDEs
 .coyoteignore             exclusiones de indexado
 coyote/
-  project.yaml            nombre, tipo, hub, autonomía, presupuesto, ritmo
+  project.yaml            nombre, tipo, autonomía, presupuesto, ritmo, repos y reglas de riesgo
   standards/rules.yaml    estándar del proyecto (extends)
   ledger/AAAA/MM/         eventos en CCF, un archivo por día y persona
   decisions/              ADRs
   workstreams/            planes, corridas (runs/) y cierres con su costo
   router.yaml             modelo por agente, pisos por riesgo y topes (opcional)
-  map/, repos/            en un producto: mapa de interfaces y documentos propuestos por repo
+  map/, repos/, ci/       en un producto: mapa, documentos propuestos y workflows por repo
   approvals/              aprobaciones humanas, firmadas
-  agents/, skills/        agentes y skills propios (opcional)
 .claude/, .cursor/        generados por coyote install
-.coyote/                  índice y cola del gate; nunca se versiona
+.coyote/                  índice, cola del gate y locks; nunca se versiona
 ```
 
 ## Autonomía
 
-`coyote/project.yaml` define el modo: `manual` (toda acción con efectos espera aprobación), `supervised` o `autonomous`. En modo autónomo el trabajo corre dentro de sus topes y la persona que lo autorizó responde por el resultado final. Desde v0.3 el gate aplica `manual`; `supervised` y `autonomous` se aceptan, pero el gate no es más laxo hasta que v0.5 traiga su motor, después de medir corridas reales con `coyote run`. Lo que hace un agente queda en el ledger con el nombre que reporta el IDE.
+`coyote/project.yaml` fija el techo: `manual`, `supervised` o `autonomous`. El modo decide cuándo se detiene el motor de workstreams, nunca lo que el gate deja pasar: toda acción con efectos se aprueba en los tres modos. `autonomous` corre en una rama `ws/<W>`, dentro de los topes del plan y con tu aprobación de ese plan exacto; al final lo evalúa quien lo autorizó.
 
 ## Documentación
 
-- Especificaciones: [CCF v1](docs/specs/ccf-v1.md) (ledger), [CCF-doc v1](docs/specs/ccf-doc-v1.md) (documentos), [estándar v1](docs/specs/standards-v1.md), [atribución v1](docs/specs/attribution-v1.md), [contexto v1](docs/specs/context-v1.md), [remoto v1](docs/specs/remote-v1.md), [gate v1](docs/specs/gate-v1.md), [instalación v1](docs/specs/install-v1.md), [producto v1](docs/specs/product-v1.md), [corridas v1](docs/specs/run-v1.md).
+- Especificaciones: [CCF](docs/specs/ccf-v1.md), [CCF-doc](docs/specs/ccf-doc-v1.md), [estándar](docs/specs/standards-v1.md), [atribución](docs/specs/attribution-v1.md), [contexto](docs/specs/context-v1.md), [remoto](docs/specs/remote-v1.md), [gate](docs/specs/gate-v1.md), [instalación](docs/specs/install-v1.md), [producto](docs/specs/product-v1.md), [corridas](docs/specs/run-v1.md), [workstreams](docs/specs/workstream-v1.md), [pipeline](docs/specs/ci-v1.md).
 - Estándar default: [standards/default/STANDARD.md](standards/default/STANDARD.md). Agentes y skills: [agents/](agents/), [skills/](skills/).
-- Decisiones: [coyote/decisions/](coyote/decisions/).
-- Plan y releases: [docs/plan/EXECUTION_PLAN.md](docs/plan/EXECUTION_PLAN.md), [docs/releases/](docs/releases/).
+- Decisiones: [coyote/decisions/](coyote/decisions/). Plan y releases: [docs/plan/](docs/plan/EXECUTION_PLAN.md), [docs/releases/](docs/releases/).
 - Ejemplo completo: [examples/acme-shop](examples/acme-shop/) (proyecto sintético).
 
 ## Desarrollo

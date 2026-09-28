@@ -35,6 +35,7 @@ const (
 	StopBudget   = "budget"   // el plan llegó a su tope
 	StopEvaluate = "evaluate" // autonomous terminó: quien lo autorizó evalúa (A4)
 	StopDone     = "done"     // todos los pasos están hechos
+	StopClosed   = "closed"   // el workstream se cerró con coyote close
 )
 
 // MinRunUSD es lo mínimo que tiene que quedar del plan para lanzar un paso.
@@ -54,10 +55,11 @@ type StepState struct {
 
 // State es el plan con el estado de cada paso.
 type State struct {
-	Plan  *Plan
-	Steps []StepState
-	Spent float64 // costo estimado de todas las corridas del workstream
-	Runs  int
+	Plan   *Plan
+	Steps  []StepState
+	Spent  float64 // costo estimado de todas las corridas del workstream
+	Runs   int
+	Closed bool // coyote close lo cerró: el motor ya no corre
 }
 
 func ref(refs []string, key string) string {
@@ -92,6 +94,9 @@ func Fold(p *Plan, entries []ledger.Entry) *State {
 		if l.Type == "run" && l.Status != "skip" {
 			s.Spent += cost
 			s.Runs++
+		}
+		if l.Type == "close" {
+			s.Closed = true
 		}
 		i, ok := idx[ref(l.Refs, "step")]
 		if !ok {
@@ -148,6 +153,9 @@ type Next struct {
 
 // Next calcula el siguiente movimiento del motor.
 func (s *State) Next(mode string) Next {
+	if s.Closed {
+		return Next{Index: -1, Reason: StopClosed}
+	}
 	last := -1
 	for i, st := range s.Steps {
 		switch st.Status {

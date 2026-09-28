@@ -18,8 +18,8 @@ CLI en Go para contexto versionado, gates humanos, estándar por capas y costo t
 - Módulo remoto (`internal/pace, internal/auth, internal/github`): ritmo, token y GitHub; interfaz Limiter, Token
 - Módulo gate (`internal/gate, internal/approval`): gate por hash y aprobaciones firmadas; interfaz Evaluate, Store
 - Módulo install (`agents, skills, internal/agents, internal/install`): agentes, skills e IDEs; interfaz Plan
-- Módulo product (`internal/product`): mapa e impacto entre repos; interfaz Build, Impact
-- Módulo run (`internal/runner, internal/router`): corridas, router y cierre; interfaz Run, Decide
+- Módulo product (`internal/product, internal/ci`): mapa, impacto y gate de PR; interfaz Impact, DecideGate
+- Módulo run (`internal/runner, internal/router, internal/workstream`): corridas, router y planes; interfaz Run, Fold
 - Docs `docs/specs`: especificaciones
 - Docs `docs/plan/EXECUTION_PLAN.md`: plan razonado por release
 - Depende de go-yaml: YAML; copia en third_party
@@ -38,7 +38,7 @@ CLI en Go para contexto versionado, gates humanos, estándar por capas y costo t
 - [how] release: make dist genera binarios de macOS y Linux con la versión inyectada por ldflags (Makefile)
 - [term] ccf: Coyote Compact Format: una línea por evento, once campos separados por barra vertical (docs/specs/ccf-v1.md)
 - [risk] tokens: el estimador local de tokens puede desviarse del real; los eventos run ya traen el uso que reporta Claude Code (ADR-0006)
-- [todo] autonomy: supervised y autonomous con su motor llegan en v0.5, después de medir corridas reales (docs/plan/EXECUTION_PLAN.md)
+- [dec] ws: el motor saca el estado del ledger; el modo decide dónde se detiene y el gate aplica igual (ADR-0014)
 - [inv] index: el índice se reconstruye desde git; .coyote/ es caché y nunca se versiona (ADR-0007)
 - [inv] sync: push y pull usan el git del sistema; coyote nunca guarda credenciales de git (ADR-0008)
 - [inv] web: coyote web escucha solo en loopback, valida Host y es de solo lectura (internal/web/web.go)
@@ -51,6 +51,9 @@ CLI en Go para contexto versionado, gates humanos, estándar por capas y costo t
 - [dec] run: coyote run corre Claude Code headless con el gate, topes de turnos y dólares y evento run en el ledger (ADR-0012)
 - [gap] run: el costo de una corrida es la estimación de Claude Code, no la factura; sin precios queda todo como entrada (docs/specs/run-v1.md)
 - [gap] product: un tópico elegido por un mapa de configuración o un cliente generado quedan sin enlace en el mapa (docs/specs/product-v1.md)
+- [inv] ws: autonomous corre solo en una rama ws/, con tope de plan y la aprobación del plan exacto por su hash (docs/specs/workstream-v1.md)
+- [inv] ci: gate pr toma los dueños del CODEOWNERS de la rama base y nunca cuenta al autor del PR (docs/specs/ci-v1.md)
+- [gap] ws: retomar una sesión con --resume y --agent en headless no se probó contra Claude Code real (docs/specs/workstream-v1.md)
 
 ## Reglas obligatorias (MUST)
 

@@ -8,7 +8,7 @@ reasoning: docs/plan/EXECUTION_PLAN.md#v03-gate--razonamiento
 authorized_by: coyote/approvals/P-0002.json
 gate: G3                    # piloto en seco, gate activo en el repo de coyote y en proyectos elegidos
 steps:
-  - { id: T18, does: plan razonado y ADR-0009, ADR-0010, agent: coyote-sr-solution-architect, output: [docs/plan/EXECUTION_PLAN.md, coyote/decisions/] }
+  - { id: T18, does: "plan razonado y ADR-0009, ADR-0010", agent: coyote-sr-solution-architect, output: [docs/plan/EXECUTION_PLAN.md, coyote/decisions/] }
   - { id: T19, does: gate por hash, agent: coyote-devsecops, output: internal/gate }
   - { id: T20, does: cola y registros de aprobación, agent: coyote-dev, output: [internal/approval, internal/cli] }
   - { id: T21, does: agentes y skills, agent: coyote-architect, output: [agents/, skills/] }

@@ -8,7 +8,7 @@ reasoning: docs/plan/EXECUTION_PLAN.md#v04-run--razonamiento
 authorized_by: coyote/approvals/P-0003.json
 gate: G4                    # presupuesto para correr agentes y propuestas del piloto a cada repo
 steps:
-  - { id: T25, does: plan razonado y ADR-0011, ADR-0012, agent: coyote-sr-solution-architect, output: [docs/plan/EXECUTION_PLAN.md, coyote/decisions/] }
+  - { id: T25, does: "plan razonado y ADR-0011, ADR-0012", agent: coyote-sr-solution-architect, output: [docs/plan/EXECUTION_PLAN.md, coyote/decisions/] }
   - { id: T26, does: producto multi-repo y extracción, agent: coyote-dev, output: [internal/product, internal/extract] }
   - { id: T27, does: mapa e impacto, agent: coyote-architect, output: [internal/extract, internal/impact] }
   - { id: T28, does: coyote run, agent: coyote-dev, output: internal/run }

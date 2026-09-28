@@ -286,10 +286,10 @@ G4 autoriza: el presupuesto para correr agentes con `coyote run` en tu Mac, llev
 | ID | Tarea | Razonamiento | Aceptación | Estado |
 | --- | --- | --- | --- | --- |
 | T32 | Plan y ADR-0013, ADR-0014 | El pipeline y el motor cambian cómo se integra coyote al trabajo diario | Esta sección, los ADRs y W-0005 | Hecho |
-| T33 | `coyote ci impact` | Es el pipeline que pediste en G3: cada PR se ve contra todo el producto | Lee el evento del PR, arma el mapa con los otros repos, escribe el resumen del job, crea o actualiza un solo comentario y sale según la política; pruebas con eventos y API simulados | Pendiente |
-| T34 | `coyote install --ci github` | Instalarlo debe ser un comando, igual que el gate | Workflow por repo del producto con permisos mínimos, sin forks, y la documentación del secreto; `--check` | Pendiente |
-| T35 | Motor de workstreams | Sin motor, `supervised` y `autonomous` son palabras | `coyote ws check\|run\|continue\|status`: contrato por paso (A2), artefactos encadenados, puntos de control, tope del plan, rama `ws/` en autónomo; pruebas con un `claude` simulado | Pendiente |
-| T36 | `coyote gate pr` | La aprobación en equipo sin compartir claves | Riesgo por rutas e impacto; un R2, R3 o un cambio que rompe pide la revisión de un dueño; reporte en el PR | Pendiente |
+| T33 | `coyote ci impact` | Es el pipeline que pediste en G3: cada PR se ve contra todo el producto | Lee el evento del PR, arma el mapa con los otros repos, escribe el resumen del job, crea o actualiza un solo comentario y sale según la política; pruebas con eventos y API simulados | Hecho |
+| T34 | `coyote install --ci github` | Instalarlo debe ser un comando, igual que el gate | Workflow por repo del producto con permisos mínimos, sin forks, y la documentación del secreto; `--check` | Hecho: corre `gate pr`, con las reglas de riesgo del proyecto y un secreto aparte para leer coyote |
+| T35 | Motor de workstreams | Sin motor, `supervised` y `autonomous` son palabras | `coyote ws check\|run\|continue\|status`: contrato por paso (A2), artefactos encadenados, puntos de control, tope del plan, rama `ws/` en autónomo; pruebas con un `claude` simulado | Hecho: estado desde el ledger; `autonomous` con la aprobación del plan por hash; retoma la sesión tras la cola del gate |
+| T36 | `coyote gate pr` | La aprobación en equipo sin compartir claves | Riesgo por rutas e impacto; un R2, R3 o un cambio que rompe pide la revisión de un dueño; reporte en el PR | Hecho: CODEOWNERS de la rama base; los tres repos del piloto no tienen CODEOWNERS |
 | T37 | Corridas medidas | Evidencia antes de dejar correr planes | Tus primeras corridas en el piloto, con su costo y caché en el ledger y en el reporte de G5 | Pendiente |
 | T38 | Verificación y G5 | Evidencia antes de aplicar coyote en los repos de la organización | Pruebas, revisión adversarial y `docs/releases/v0.5.0.md` | Pendiente |
 
@@ -323,6 +323,8 @@ Siguen el orden de la propuesta. Cada una recibirá su razonamiento completo al 
 | D5 carriles de gasto | Tope mensual por proyecto en `project.yaml` y tope por corrida; la suscripción o la API key son de la persona | Gasto predecible y visible en el ledger | Confirmado en G4 |
 | D24 pipeline de impacto | Workflow en cada repo con token de solo lectura de los otros repos del producto (ADR-0013) | El reporte queda en el PR donde se decide el merge | G5 |
 | D25 autonomía en el piloto | `supervised` en los workstreams del piloto; `autonomous` solo después de medir planes supervisados | Un plan autónomo sin evidencia es gasto y riesgo sin control | G5 |
+| D26 tokens del pipeline | Un secreto de lectura de los repos del producto y otro para leer coyote si vive en otra cuenta; los equipos de CODEOWNERS se verifican solo con un token con Members: read | Un token fino de GitHub cubre repos de un solo dueño | G5 |
+| D27 revisión sin CODEOWNERS | Sin CODEOWNERS, un cambio R2 o R3 lo aprueba cualquier persona que no abrió el PR, y el reporte pide definir dueños | Los tres repos del piloto no tienen CODEOWNERS | G5 |
 | D23 unidad de trabajo | Producto multi-repo: servicios, app y backoffice juntos, en un proyecto aparte que lee los tres (ADR-0011) | Un cambio en uno afecta a los otros (G3) | Confirmado en G4 |
 | D20 lectura sin aprobación | Lista cerrada de comandos de solo lectura en la herramienta; sin patrones propios del proyecto | Leer no tiene efectos y evita la fatiga | Confirmado en G3 |
 | D21 validez de una aprobación | Solo en la máquina donde se dio (firma con clave local), 24 h como máximo | Un registro copiado o fabricado no sirve | Confirmado en G3 |

@@ -12,7 +12,7 @@ La regla A1 dice que ningún agente ejecuta acciones con efectos sin aprobación
 
 1. **R15.** Un commit, tag, PR o release con atribución a IA, o con la autoría de una herramienta, se bloquea.
 2. **Bloqueos que ninguna aprobación levanta:**
-   - que un agente corra `coyote approve`, `reject`, `revoke`, `auth`, `hooks` o `install`;
+   - que un agente corra `coyote approve`, `reject`, `revoke`, `auth`, `hooks` o `install`, o que lance otros agentes con `coyote run`, `coyote ws run` o `coyote ws continue`;
    - que escriba en el gate: `.claude/settings*.json`, `.claude/hooks/`, `.cursor/hooks*`, `.git/`, `.coyote/`, `coyote/approvals/`, `coyote/ledger/`, `coyote/project.yaml` (ahí vive la autonomía), la configuración global del IDE, de git o del shell;
    - que lea o escriba credenciales: `~/.ssh`, `~/.aws`, `~/.config/gh`, `~/.netrc`, la clave local de coyote y parecidas; también recorrer una carpeta que las contiene (`grep -r ~`);
    - que un subagente declare en un comando un agente distinto del que reporta el IDE.
@@ -30,7 +30,7 @@ Un comando pasa sin aprobación solo si cada segmento (separados por `;`, `&&`, 
 | `sort`, `uniq`, `tree`, `xxd`, `file`, `date`, `rg` | sin las banderas que escriben archivos o corren programas (`-o`, `--pre`, `-C`…) |
 | `git` | subcomandos de lectura (`status`, `log`, `diff`, `show`, `blame`, `grep`, `rev-parse`, `ls-files`…); `branch`, `tag`, `stash` y `reflog` solo para listar; `remote` solo los nombres (las URLs pueden llevar tokens); `config` solo `--get` de claves sin secretos (`user.name`, `user.email`, `init.defaultBranch`…), nunca `--list` ni `--get-regexp`; sin `-c`, `--git-dir`, `--output`, `--ext-diff` ni `--textconv` |
 | `go` | `version` y `env` con variables nombradas sin secretos (`GOPATH`, `GOOS`…); `vet`, `build` y `test` necesitan aprobación porque compilan (cgo corre el compilador de C) |
-| `coyote` | `status`, `log`, `get`, `ask` sin `--record`, `standards`, `attribution check`, `doctor`, `approvals`, `review`, `index`, `propose`, `install --check` |
+| `coyote` | `status`, `log`, `get`, `ask` sin `--record`, `standards`, `attribution check`, `doctor`, `approvals`, `review`, `index`, `propose`, `install --check`, `ws status` y `ws check` |
 
 Se rechaza cualquier construcción que el análisis no pueda garantizar: sustituciones (`$(...)`, comillas invertidas), variables, asignaciones de entorno, redirecciones a archivos (solo se admiten `/dev/null` y `2>&1`), subshells, segundo plano, heredocs, comentarios, rutas explícitas al programa y comodines sin comillas en programas cuyas banderas importan. Correr pruebas o compilar necesita aprobación: ejecuta código que el agente pudo escribir.
 
@@ -107,5 +107,5 @@ El gate falla cerrado: una entrada ilegible, un error o un pánico bloquean las 
 - WebFetch y WebSearch se tratan como lectura. La salida de datos del proyecto por red la controlan los permisos de dominio del IDE.
 - En Cursor, Codex y Copilot el IDE no reporta el subagente: un comando puede declarar otro `--agent`, y la persona lo ve al aprobarlo.
 - Un archivo de secretos del proyecto (`.env`) se lee libremente; protégelo con los permisos de lectura del IDE.
-- IDEs sin hook previo (Devin, Zed) no están cubiertos: llegan con el gate de CI en v0.5.
+- IDEs sin hook previo (Devin, Zed) no están cubiertos en la máquina: lo que llegue a un PR lo revisa `coyote gate pr` (docs/specs/ci-v1.md).
 - `supervised` y `autonomous` cambian cuándo se detiene el motor de workstreams (ADR-0014), no lo que el gate deja pasar: en los tres modos el gate aplica `manual`.
