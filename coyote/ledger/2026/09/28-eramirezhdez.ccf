@@ -59,3 +59,5 @@
 2026-09-28T07:49Z|@eramirezhdez/coyote-scribe|W-0003|coyote|doc|release|reporte de v0.3.0 para el gate G3|-|-|-|ok
 2026-09-28T17:23Z|@eramirezhdez/coyote-scribe|W-0003|coyote|close|release|W-0003 cerrado: v0.3.0 construida, revisada y aprobada|doc:coyote/workstreams/W-0003-gate/close.md apr:P-0003|-|-|ok
 2026-09-28T17:23Z|@eramirezhdez/coyote-scribe|W-0003|coyote|doc|release|aprobación de G3 para v0.3.0|-|-|-|ok
+2026-09-28T17:23Z|@eramirezhdez/coyote-scribe|W-0003|coyote|apr|release|G3 aprobado: v0.3.0, piloto sobre los tres repos, arranque de v0.4|apr:P-0003 doc:docs/releases/v0.3.0.md|-|-|ok
+2026-09-28T17:23Z|@eramirezhdez/coyote-scribe|W-0003|coyote|chore|release|registra la aprobación de G3 en el ledger|-|-|-|ok
