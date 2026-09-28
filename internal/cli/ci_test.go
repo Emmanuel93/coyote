@@ -300,7 +300,7 @@ func TestGatePR(t *testing.T) {
 	// Sin revisiones: R3 por la ruta de CODEOWNERS y por lo que rompe; el merge espera.
 	r := run(t, base, "", args...)
 	must(t, r, 1, "gate pr sin aprobación")
-	for _, want := range []string{"### coyote: R3, espera la aprobación de un dueño", "R3 por 1 archivo: el pipeline o quién revisa", "R3 por impacto: rompe 2 interfaces",
+	for _, want := range []string{"### coyote: R3, espera la aprobación de un dueño", "R3 por 1 archivo: el pipeline o quién revisa (1)", "R3 por impacto: rompe 2 interfaces",
 		"| `.github/CODEOWNERS` | R3 |", "- pendiente: @ana (`.github/CODEOWNERS`)", "- pendiente: @acme/pedidos (`services/pedidos-service/src/main/java/demo/PedidosController.java`)",
 		"**Impacto.** El cambio rompe 2 interfaces.", "coyote gate pr ·"} {
 		if !strings.Contains(r.stdout, want) {

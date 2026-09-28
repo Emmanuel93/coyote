@@ -53,7 +53,32 @@ func DecideGate(in GateInput) GateResult {
 		res.Risk = Max(res.Risk, f.Risk)
 	}
 	if n := len(in.Files); n > 0 {
-		res.Why = append(res.Why, fmt.Sprintf("%s por %s: %s", in.Files[0].Risk, pluralFiles(n), in.Files[0].Why))
+		// Los motivos, del más riesgoso al menos, con cuántos archivos cada uno.
+		type reason struct{ risk, why string }
+		counts := map[reason]int{}
+		var order []reason
+		for _, f := range in.Files {
+			k := reason{f.Risk, f.Why}
+			if counts[k] == 0 {
+				order = append(order, k)
+			}
+			counts[k]++
+		}
+		sort.SliceStable(order, func(i, j int) bool {
+			if Rank(order[i].risk) != Rank(order[j].risk) {
+				return Rank(order[i].risk) > Rank(order[j].risk)
+			}
+			return counts[order[i]] > counts[order[j]]
+		})
+		parts := make([]string, len(order))
+		for i, k := range order {
+			if k.risk == res.Risk {
+				parts[i] = fmt.Sprintf("%s (%d)", k.why, counts[k])
+			} else {
+				parts[i] = fmt.Sprintf("%s (%d, %s)", k.why, counts[k], k.risk)
+			}
+		}
+		res.Why = append(res.Why, fmt.Sprintf("%s por %s: %s", res.Risk, pluralFiles(n), strings.Join(parts, ", ")))
 	}
 	if Rank(in.Impact) >= 2 {
 		res.Risk = Max(res.Risk, in.Impact)

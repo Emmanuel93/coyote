@@ -99,6 +99,11 @@ func TestDecideGate(t *testing.T) {
 		Changed: []string{"pagos/application.yml", "README.md"},
 		Files:   []FileRisk{{Path: "pagos/application.yml", Risk: R2, Why: "la configuración del servicio"}}}
 
+	// El resumen agrupa los motivos con cuántos archivos cada uno.
+	sum := DecideGate(GateInput{Files: []FileRisk{{"a.sql", R3, "el esquema de datos"}, {"b.sql", R3, "el esquema de datos"}, {"Dockerfile", R3, "infraestructura"}, {"go.mod", R2, "las dependencias"}}})
+	if len(sum.Why) != 1 || sum.Why[0] != "R3 por 4 archivos: el esquema de datos (2), infraestructura (1), las dependencias (1, R2)" {
+		t.Errorf("resumen: %q", sum.Why)
+	}
 	// R1: nada que revisar.
 	r := DecideGate(GateInput{Changed: []string{"README.md"}})
 	if r.Required || !r.OK || r.Risk != R1 {
