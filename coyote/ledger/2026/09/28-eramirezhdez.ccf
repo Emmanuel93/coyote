@@ -56,3 +56,4 @@
 2026-09-28T07:18Z|@eramirezhdez/coyote-devsecops|W-0003|coyote|fix|gate|rg --hostname-bin, jq env y diff -r fuera de la lectura libre|-|-|-|ok
 2026-09-28T07:45Z|@eramirezhdez/coyote-reviewer|W-0003|coyote|rev|seguridad|revisión adversarial de v0.3: 4 hallazgos y 4 notas, corregidos con pruebas|doc:docs/specs/gate-v1.md|-|-|ok
 2026-09-28T07:46Z|@eramirezhdez/coyote-devsecops|W-0003|coyote|fix|gate|cierra los hallazgos de la revisión de v0.3|-|-|-|ok
+2026-09-28T07:49Z|@eramirezhdez/coyote-scribe|W-0003|coyote|doc|release|reporte de v0.3.0 para el gate G3|-|-|-|ok

@@ -1,6 +1,6 @@
 # Plan de ejecución — Coyote
 
-Estado: v0.2.0 aprobada en G2 (P-0002) · v0.3 en construcción · actualizado 2026-09-28
+Estado: v0.2.0 aprobada en G2 (P-0002) · v0.3 construida y verificada, esperando el gate G3 · actualizado 2026-09-28
 
 Este plan ejecuta la propuesta aprobada ("Plan de construcción — Framework Coyote"). Cada release se razona con la plantilla de cinco partes que usarán los agentes de Coyote (problema, restricciones, opciones, decisión, riesgos) y cierra con un gate humano: nada se etiqueta, se publica ni toca otros proyectos sin autorización explícita.
 
@@ -140,7 +140,7 @@ G2 autorizó (P-0002): etiquetar v0.2.0, validar tu token con una sola lectura a
 | T21 | Agentes y skills | Una definición sirve a todos los IDEs | 14 agentes y skills `coyote-*` con esquema de salida y R15; los del proyecto en `coyote/agents` y `coyote/skills` | Hecho |
 | T22 | `install` y `doctor --ide` | Configurar un IDE debe ser un comando, verificable en CI | Claude Code y Cursor; configuración fusionada sin pisar la tuya; `--check` | Hecho |
 | T23 | Identidad y autonomía | El ledger debe decir qué agente actuó, sin depender de lo que declara | Roster, identidad del IDE en el ledger, sesiones de agente sin poder aprobar | Hecho |
-| T24 | Verificación y G3 | Evidencia antes de activar el gate en proyectos reales | 24 pruebas de gate o más, demo de punta a punta, revisión adversarial y `docs/releases/v0.3.0.md` | En curso |
+| T24 | Verificación y G3 | Evidencia antes de activar el gate en proyectos reales | 24 pruebas de gate o más, demo de punta a punta, revisión adversarial y `docs/releases/v0.3.0.md` | En gate G3: 138 casos de gate; 4 hallazgos y 4 notas corregidos |
 
 G3 autoriza: el piloto en seco sobre un dominio real en solo lectura, activar el gate en el repo de coyote y en los proyectos que elijas, y los supuestos D6, D11, D19, D20, D21 y D22.
 
