@@ -54,6 +54,12 @@ func cmdRun(a *app, args []string) error {
 		fs.Usage()
 		return fail(2, "")
 	}
+	if *maxUSD < 0 || *maxUSD != *maxUSD || *maxUSD > 1000 {
+		return fail(2, "--max-usd inválido: entre 0 y 1000 dólares")
+	}
+	if *maxTurns < 0 || *maxTurns > 500 {
+		return fail(2, "--max-turns inválido: entre 1 y 500")
+	}
 	if *risk != "R1" && *risk != "R2" && *risk != "R3" {
 		return fail(2, "--risk %q inválido: R1, R2 o R3", *risk)
 	}
@@ -131,10 +137,12 @@ func cmdRun(a *app, args []string) error {
 		_ = a.recordRun(root, cfg, runEvent{agent: ag.Name, ws: *ws, scope: *scope, task: task, status: "skip", why: "presupuesto"})
 		return fail(1, "%s", d.Refused)
 	}
-	if len(gateInstalled(root)) == 0 || !contains(gateInstalled(root), "claude-code") {
+	if !contains(gateInstalled(root), "claude-code") {
+		_ = a.recordRun(root, cfg, runEvent{agent: ag.Name, ws: *ws, scope: *scope, task: task, status: "skip", why: "sin gate"})
 		return fail(1, "el gate no está instalado para Claude Code: sin él, un agente podría correr comandos sin aprobación; corre coyote install --ide claude-code")
 	}
 	if _, err := os.Stat(filepath.Join(root, ".claude", "agents", ag.Name+".md")); err != nil {
+		_ = a.recordRun(root, cfg, runEvent{agent: ag.Name, ws: *ws, scope: *scope, task: task, status: "skip", why: "agente sin instalar"})
 		return fail(1, "Claude Code no tiene el agente %s: corre coyote install --ide claude-code", ag.Name)
 	}
 	fmt.Fprintf(a.stderr, "corriendo %s con %s, hasta %d turnos y $%.2f…\n", ag.Name, d.Model, d.MaxTurns, d.MaxUSD)

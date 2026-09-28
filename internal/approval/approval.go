@@ -407,11 +407,7 @@ func (s *Store) Save(p Proposal) error {
 	if err != nil {
 		return err
 	}
-	tmp := dst + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, dst)
+	return fsx.WriteAtomic(dst, b, 0o600)
 }
 
 func (s *Store) remove(id string) error {

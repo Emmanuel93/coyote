@@ -153,7 +153,20 @@ type raw struct {
 func Parse(out []byte) (*Result, error) {
 	var r raw
 	text := bytes.TrimSpace(out)
-	if err := json.Unmarshal(text, &r); err != nil {
+	var list []raw
+	if bytes.HasPrefix(text, []byte("[")) && json.Unmarshal(text, &list) == nil {
+		// Algunas versiones devuelven la lista de mensajes: vale el último resultado.
+		found := false
+		for i := len(list) - 1; i >= 0; i-- {
+			if list[i].Type == "result" {
+				r, found = list[i], true
+				break
+			}
+		}
+		if !found {
+			return nil, fmt.Errorf("la salida de Claude Code no trae un resultado")
+		}
+	} else if err := json.Unmarshal(text, &r); err != nil {
 		found := false
 		lines := bytes.Split(text, []byte("\n"))
 		for i := len(lines) - 1; i >= 0; i-- {

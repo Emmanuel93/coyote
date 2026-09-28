@@ -74,7 +74,11 @@ type Scan struct {
 // dirtyCode cuenta los archivos de código con cambios sin commit o nuevos.
 // GIT_OPTIONAL_LOCKS=0 (en gitRead) evita que git status escriba el índice.
 func dirtyCode(dir string) int {
-	out, err := gitRead(dir, "status", "--porcelain=v1", "-z", "--untracked-files=all").Output()
+	cmd, err := gitWorktree(dir, "status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignore-submodules=all")
+	if err != nil {
+		return 0
+	}
+	out, err := cmd.Output()
 	if err != nil {
 		return 0
 	}

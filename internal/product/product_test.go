@@ -1083,3 +1083,86 @@ func TestLeerNoEscribeElRepo(t *testing.T) {
 		t.Errorf("leer el repo lo modificó: .git %v→%v, índice %v→%v", g0, g1, i0, i1)
 	}
 }
+
+// Un repo del producto puede declarar filtros o ser un clon parcial: leerlo
+// no debe correr sus programas ni traer objetos que escriban en .git.
+func TestRepoHostilNoEjecutaNada(t *testing.T) {
+	marker := filepath.Join(t.TempDir(), "PWNED")
+	dir := t.TempDir()
+	put(t, dir, "build.gradle.kts", "plugins { id(\"org.springframework.boot\") }\n")
+	put(t, dir, ".gitattributes", "*.java filter=x\n")
+	put(t, dir, "src/main/java/demo/A.java", "@RestController\nclass A {\n  @GetMapping(\"/a\")\n  Object a() { return null; }\n}\n")
+	gitRepo(t, dir)
+	for _, args := range [][]string{{"config", "filter.x.clean", "sh -c 'touch " + marker + "; cat'"}, {"config", "filter.x.smudge", "sh -c 'touch " + marker + "; cat'"}} {
+		if out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("%v %s", err, out)
+		}
+	}
+	// Archivo con otra fecha: git status y diff-index querrían pasarlo por el filtro.
+	later := time.Now().Add(3 * time.Second)
+	if err := os.Chtimes(filepath.Join(dir, "src/main/java/demo/A.java"), later, later); err != nil {
+		t.Fatal(err)
+	}
+	sc, err := Extract(Source{Name: "svc", Dir: dir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := Build([]*Scan{sc})
+	if _, err := m.Impact(Query{Repo: "svc", Diff: "HEAD"}, Sources{"svc": dir}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatal("leer el repo corrió su filtro clean o smudge")
+	}
+
+	// Clon parcial: los blobs faltan y traerlos correría uploadpack.
+	origin := t.TempDir()
+	put(t, origin, "a.txt", "uno\n")
+	gitRepo(t, origin)
+	put(t, origin, "a.txt", "dos\n")
+	commitAll(t, origin, "dos")
+	if out, err := exec.Command("git", "-C", origin, "config", "uploadpack.allowFilter", "true").CombinedOutput(); err != nil {
+		t.Fatalf("%v %s", err, out)
+	}
+	clone := filepath.Join(t.TempDir(), "clon")
+	if out, err := exec.Command("git", "-c", "protocol.file.allow=always", "clone", "-q", "--no-checkout",
+		"--filter=blob:none", "file://"+origin, clone).CombinedOutput(); err != nil {
+		t.Skipf("este git no hace clones parciales: %v %s", err, out)
+	}
+	if out, _ := exec.Command("git", "-C", clone, "rev-list", "--objects", "--missing=print", "HEAD").Output(); !strings.Contains(string(out), "?") {
+		t.Skip("el clon no quedó parcial: no hay blobs que falten")
+	}
+	hook := filepath.Join(t.TempDir(), "upload-pack")
+	if err := os.WriteFile(hook, []byte("#!/bin/sh\ntouch "+marker+"\nexec git-upload-pack \"$@\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// El repo hostil además reabre el transporte local que git cierra por defecto.
+	for _, kv := range [][2]string{{"remote.origin.uploadpack", hook}, {"protocol.file.allow", "always"}} {
+		if out, err := exec.Command("git", "-C", clone, "config", kv[0], kv[1]).CombinedOutput(); err != nil {
+			t.Fatalf("%v %s", err, out)
+		}
+	}
+	packs := func() int {
+		n, _ := filepath.Glob(filepath.Join(clone, ".git", "objects", "pack", "*"))
+		return len(n)
+	}
+	before := packs()
+	_, _ = changedLines(clone, "HEAD~1..HEAD", nil)
+	rd := newReader()
+	rd.prefetch(clone, "HEAD", []string{"a.txt"})
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatal("leer un clon parcial corrió uploadpack")
+	}
+	if packs() != before {
+		t.Fatal("leer un clon parcial trajo objetos a .git")
+	}
+}
+
+func TestMapaConBarrasEnRutas(t *testing.T) {
+	e := []Entry{{Repo: "web", Module: "apps/a|b", Role: Calls, Method: "GET", Path: "/x", File: "src/a|b.ts", Line: 3, Raw: "/x|y"}}
+	text := Encode("web", "abc1234", e)
+	_, _, got, err := Decode(text)
+	if err != nil || len(got) != 1 || strings.Contains(got[0].File, "|") {
+		t.Errorf("una barra en la ruta no rompe el mapa: %v %+v\n%s", err, got, text)
+	}
+}

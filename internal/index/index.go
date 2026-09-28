@@ -187,10 +187,7 @@ func writeCache(base, rel string, c *cache) {
 	if err != nil {
 		return
 	}
-	tmp := p + ".tmp"
-	if os.WriteFile(tmp, data, 0o644) == nil {
-		_ = os.Rename(tmp, p)
-	}
+	_ = fsx.WriteAtomic(p, data, 0o644)
 }
 
 // candidates lista los archivos que entran al índice, sin los excluidos por .coyoteignore.

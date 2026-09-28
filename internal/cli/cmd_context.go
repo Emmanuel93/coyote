@@ -94,7 +94,15 @@ func (a *app) contextRoot(repo string) (contextSource, error) {
 			if err != nil {
 				return contextSource{}, err
 			}
-			return contextSource{p, cfg.Name, p, index.CachePath}, nil
+			// La caché queda en el proyecto desde el que se pregunta, nunca en
+			// el otro; fuera de un proyecto no hay caché.
+			if here, _, err := a.project(); err == nil {
+				if same, _ := filepath.Abs(p); same == here {
+					return contextSource{here, cfg.Name, here, index.CachePath}, nil
+				}
+				return contextSource{p, cfg.Name, here, ".coyote/index-repos/" + cfg.Name + ".json"}, nil
+			}
+			return contextSource{p, cfg.Name, p, ""}, nil
 		}
 	}
 	root, cfg, err := a.project()

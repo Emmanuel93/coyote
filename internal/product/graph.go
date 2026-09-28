@@ -231,7 +231,7 @@ func Encode(repo, sha string, entries []Entry) string {
 		if e.Unresolved {
 			role += "?"
 		}
-		lines = append(lines, strings.Join([]string{role, dashIf(e.Method), clean(e.Path), e.Module, e.File, fmt.Sprint(e.Line), clean(e.Raw)}, "|"))
+		lines = append(lines, strings.Join([]string{role, dashIf(e.Method), clean(e.Path), clean(e.Module), clean(e.File), fmt.Sprint(e.Line), clean(e.Raw)}, "|"))
 	}
 	sort.Strings(lines)
 	for _, l := range lines {

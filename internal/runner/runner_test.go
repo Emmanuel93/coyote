@@ -82,3 +82,13 @@ func TestParseStream(t *testing.T) {
 		t.Errorf("última línea result: %+v %v", res, err)
 	}
 }
+
+func TestParseLista(t *testing.T) {
+	res, err := Parse([]byte("[{\"type\":\"system\"}," + okJSON + "]"))
+	if err != nil || res.SessionID != "abc-123" || res.CostUSD != 0.0421 {
+		t.Errorf("lista de mensajes: %+v %v", res, err)
+	}
+	if _, err := Parse([]byte(`[{"type":"system"}]`)); err == nil {
+		t.Error("una lista sin resultado es un error")
+	}
+}

@@ -174,14 +174,7 @@ func writeProductFile(root, relPath, content string) (string, error) {
 		}
 		status = "actualizado"
 	}
-	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
-		return "", err
-	}
-	tmp := p + ".tmp"
-	if err := os.WriteFile(tmp, []byte(content), 0o644); err != nil {
-		return "", err
-	}
-	return status, os.Rename(tmp, p)
+	return status, fsx.WriteAtomic(p, []byte(content), 0o644)
 }
 
 // ---- coyote map ----

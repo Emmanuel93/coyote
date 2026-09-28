@@ -1,6 +1,7 @@
 package router
 
 import (
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -87,5 +88,25 @@ func TestSplit(t *testing.T) {
 	cost, ok := c.Split("claude-sonnet-x", 0.018, 1000, 0, 0, 1000)
 	if !ok || cost.In+cost.Out < 0.0179 || cost.In+cost.Out > 0.0181 || cost.Out <= cost.In {
 		t.Errorf("con precios se separa y el total se conserva: %+v", cost)
+	}
+}
+
+func TestNoNumeros(t *testing.T) {
+	c := Default()
+	c.Budget.StopAt = math.NaN()
+	if c.Validate() == nil {
+		t.Error("stop_at NaN se rechaza")
+	}
+	c = Default()
+	c.Budget.WarnAt = math.Inf(1)
+	if c.Validate() == nil {
+		t.Error("warn_at infinito se rechaza")
+	}
+	d := Default().Decide(Input{MonthlyUSD: 10, SpentUSD: math.NaN()})
+	if d.Refused == "" {
+		t.Error("un gasto que no es número no deja correr")
+	}
+	if d := Default().Decide(Input{MaxUSD: math.Inf(1)}); d.MaxUSD != 2 {
+		t.Errorf("un tope infinito vuelve al del router: %v", d.MaxUSD)
 	}
 }

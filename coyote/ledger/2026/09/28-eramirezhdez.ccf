@@ -75,3 +75,4 @@
 2026-09-28T18:29Z|@eramirezhdez/coyote-dev|W-0004|coyote|fix|product|concordancia en las invariantes de dependencia|-|-|-|ok
 2026-09-28T19:17Z|@eramirezhdez/coyote-dev|W-0004|coyote|fix|product|diff con diff-tree y diff-index para no reescribir el índice de los…|-|-|-|ok
 2026-09-28T19:29Z|@eramirezhdez/coyote-dev|W-0004|coyote|feat|run|coyote run con Claude Code headless, router v1 y coyote close|-|-|-|ok
+2026-09-28T19:56Z|@eramirezhdez/coyote-dev|W-0004|coyote|fix|product|cierra los hallazgos de la revisión de v0.4|-|-|-|ok

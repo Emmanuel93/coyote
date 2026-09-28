@@ -125,13 +125,13 @@ func (c *Config) Validate() error {
 		}
 		check("risk_floor."+r, m)
 	}
-	if c.Budget.WarnAt <= 0 || c.Budget.StopAt <= 0 || c.Budget.WarnAt >= c.Budget.StopAt {
+	if !finite(c.Budget.WarnAt) || !finite(c.Budget.StopAt) || c.Budget.WarnAt <= 0 || c.Budget.StopAt <= 0 || c.Budget.WarnAt >= c.Budget.StopAt {
 		errs = append(errs, "budget: warn_at y stop_at deben ser positivos y warn_at menor que stop_at")
 	}
 	if c.Limits.MaxTurns <= 0 || c.Limits.MaxTurns > 500 {
 		errs = append(errs, "limits.max_turns: entre 1 y 500")
 	}
-	if c.Limits.MaxUSD <= 0 || c.Limits.MaxUSD > 1000 || math.IsNaN(c.Limits.MaxUSD) {
+	if !finite(c.Limits.MaxUSD) || c.Limits.MaxUSD <= 0 || c.Limits.MaxUSD > 1000 {
 		errs = append(errs, "limits.max_usd_per_run: mayor que 0 y hasta 1000")
 	}
 	if len(errs) > 0 {
@@ -140,6 +140,8 @@ func (c *Config) Validate() error {
 	}
 	return nil
 }
+
+func finite(f float64) bool { return !math.IsNaN(f) && !math.IsInf(f, 0) }
 
 func (c *Config) level(m string) int {
 	for i, l := range c.Levels {
@@ -208,8 +210,13 @@ func (c *Config) Decide(in Input) Decision {
 		d.MaxTurns = c.Limits.MaxTurns
 	}
 	d.MaxUSD = in.MaxUSD
-	if d.MaxUSD <= 0 {
+	if d.MaxUSD <= 0 || !finite(d.MaxUSD) {
 		d.MaxUSD = c.Limits.MaxUSD
+	}
+	if !finite(in.SpentUSD) || !finite(in.MonthlyUSD) || in.SpentUSD < 0 || in.MonthlyUSD < 0 {
+		d.Refused = "el gasto o el tope del mes no son números válidos: revisa el ledger y budgets.monthly_usd"
+		d.Model = model
+		return d
 	}
 	if in.MonthlyUSD > 0 {
 		// El margen evita que 0.04/0.05 (0.7999… en coma flotante) quede bajo el 80 %.

@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Emmanuel93/coyote/internal/fsx"
 	"github.com/Emmanuel93/coyote/internal/userdir"
 )
 
@@ -88,11 +89,7 @@ func (l *Limiter) save(s State) error {
 	if err != nil {
 		return err
 	}
-	tmp := l.Path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
-		return err
-	}
-	return os.Rename(tmp, l.Path)
+	return fsx.WriteAtomic(l.Path, data, 0o600)
 }
 
 // lock serializa a varios procesos de coyote sobre el mismo estado.

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -75,12 +76,18 @@ func changedLines(dir, diff string, files []string) (*fileChanges, error) {
 	opts := []string{"-c", "core.quotePath=false"}
 	flags := []string{"-p", "--no-color", "--no-ext-diff", "--no-textconv", "--no-renames", "--unified=0"}
 	var args []string
+	var cmd *exec.Cmd
 	if worktree {
-		args = append(append(append(opts, "diff-index"), flags...), left, "--")
+		args = append(append(append(opts, "diff-index", "--ignore-submodules=all"), flags...), left, "--")
+		c, err := gitWorktree(dir, args...)
+		if err != nil {
+			return nil, err
+		}
+		cmd = c
 	} else {
-		args = append(append(append(opts, "diff-tree", "-r"), flags...), left, right, "--")
+		args = append(append(append(opts, "diff-tree", "-r", "--ignore-submodules=all"), flags...), left, right, "--")
+		cmd = gitRead(dir, args...)
 	}
-	cmd := gitRead(dir, args...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Run(); err != nil {

@@ -81,3 +81,41 @@ func Regular(root, rel string) bool {
 	info, err := os.Lstat(filepath.Join(root, filepath.FromSlash(rel)))
 	return err == nil && info.Mode().IsRegular()
 }
+
+// WriteAtomic escribe path completo o no lo toca: escribe un temporal con
+// nombre al azar, creado en exclusiva en la misma carpeta, y lo renombra. Un
+// temporal con nombre fijo se podría plantar antes como symlink y hacer que
+// la escritura salga de la carpeta.
+func WriteAtomic(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	f, err := os.CreateTemp(dir, "."+filepath.Base(path)+".*.tmp")
+	if err != nil {
+		return err
+	}
+	tmp := f.Name()
+	ok := false
+	defer func() {
+		if !ok {
+			_ = os.Remove(tmp)
+		}
+	}()
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Chmod(perm); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		return err
+	}
+	ok = true
+	return nil
+}

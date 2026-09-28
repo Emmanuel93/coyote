@@ -324,7 +324,7 @@ func (sc *Scan) readme(m *Map, mods []*modInfo, omitted *int) string {
 		}
 	}
 	for _, c := range id.Contracts {
-		if !b.try(fmt.Sprintf("docs|%s|contrato %s", clean(c), strings.TrimSuffix(path.Base(c), path.Ext(c)))) {
+		if !b.try(fmt.Sprintf("docs|%s|contrato %s", clean(c), clean(strings.TrimSuffix(path.Base(c), path.Ext(c))))) {
 			*omitted++
 		}
 	}

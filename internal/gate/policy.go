@@ -256,9 +256,16 @@ func hard(format string, a ...any) *Hard { return &Hard{fmt.Sprintf(format, a...
 // tocando credenciales o lanzando otro agente cuando está en posición de comando (al inicio o después
 // de ;, &&, ||, |, paréntesis o un envoltorio como sudo, env o go run), lo
 // corra quien lo corra. Un mensaje de commit que solo lo menciona no cuenta.
-var coyoteAdmin = regexp.MustCompile(`(?i)(^|[;&|(\n` + "`" + `]|\$\()\s*([A-Za-z_][A-Za-z0-9_]*=\S*\s+)*` +
-	`((sudo|exec|env|nohup|time|command|xargs|nice|go\s+run)(\s+-\S+)*\s+)*` +
+var coyoteAdmin = regexp.MustCompile(`(?i)(^|[;&|(\n` + "`" + `]|\$\(|\b(?:sh|bash|zsh|dash|ksh)\s+-c\s+)\s*([A-Za-z_][A-Za-z0-9_]*=\S*\s+)*` +
+	`((sudo|doas|exec|env|nohup|time|command|xargs|nice|ionice|stdbuf|timeout|go\s+run)` +
+	`(\s+(-{1,2}[A-Za-z][\w-]*([= ][^\s;&|]+)?|[A-Za-z_][A-Za-z0-9_]*=\S*|\d+[smhd]?))*\s+)*` +
 	`(\S*/)?coyote(\s+-C\s+\S+)*\s+(approve|reject|revoke|auth|hooks|install|run)\b`)
+
+// adminText quita comillas y barras invertidas: el shell las quita antes de
+// correr, y "coyote" run o c\oyote approve son la misma orden.
+func adminText(cmd string) string {
+	return strings.NewReplacer(`\`, "", `"`, "", "'", "").Replace(cmd)
+}
 
 // shellProtected son textos que en un comando delatan que toca el gate o
 // credenciales, aunque el comando no se pueda analizar.
@@ -289,7 +296,7 @@ func (ps Paths) hardShell(a Action) *Hard {
 	cmd := strings.NewReplacer("\\\r\n", "", "\\\n", "").Replace(a.Command)
 	// Si el comando se analiza como de solo lectura, coyote solo aparece en
 	// subcomandos de lectura (install --check, por ejemplo).
-	if _, err := analyzeShell(cmd); err != nil && coyoteAdmin.MatchString(cmd) {
+	if _, err := analyzeShell(cmd); err != nil && coyoteAdmin.MatchString(adminText(cmd)) {
 		return hard("un agente no aprueba, rechaza ni revoca, no instala el gate ni credenciales y no lanza otros agentes (coyote run); eso lo hace la persona en su terminal")
 	}
 	for _, p := range shellProtected {
@@ -490,7 +497,7 @@ func (ps Paths) hardOther(a Action) *Hard {
 		allStrings(a.Input[k], &texts)
 	}
 	for _, t := range texts {
-		if coyoteAdmin.MatchString(t) {
+		if coyoteAdmin.MatchString(adminText(t)) {
 			return hard("un agente no aprueba ni instala el gate")
 		}
 		for _, p := range shellProtected {
