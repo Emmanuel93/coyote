@@ -83,3 +83,5 @@
 2026-09-28T20:00Z|@eramirezhdez/coyote-scribe|W-0004|coyote|doc|release|especificaciones de producto y corridas, y reporte de v0.4.0 para G4|-|-|-|ok
 2026-09-28T20:15Z|@eramirezhdez|W-0004|coyote|close|-|cierre de W-0004: 0 corridas, $0.00|doc:coyote/workstreams/W-0004-product/close.md|0/0/0|$0+$0|ok
 2026-09-28T20:15Z|@eramirezhdez/claude-code|W-0004|coyote|doc|release|aprobación de G4 para v0.4.0|-|-|-|ok
+2026-09-28T20:15Z|@eramirezhdez/claude-code|-|coyote|apr|release|G4 aprobado: v0.4.0, presupuesto de corridas y ramas de contexto|-|-|-|ok
+2026-09-28T20:15Z|@eramirezhdez/claude-code|W-0004|coyote|chore|release|registra la aprobación de G4 en el ledger|-|-|-|ok
