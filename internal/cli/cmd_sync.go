@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -31,10 +32,16 @@ func remoteHost(u string) string {
 	return "local"
 }
 
-// protectedBranch son las ramas que publica una persona, nunca un agente (A4, R17).
+// protectedBranch son las ramas que publica una persona, nunca un agente (A4,
+// R17). Sin distinguir mayúsculas: en sistemas de archivos que no las
+// distinguen, Main y main son la misma rama.
 func protectedBranch(b string) bool {
+	b = strings.ToLower(strings.TrimPrefix(b, "refs/heads/"))
 	return b == "main" || b == "master" || b == "trunk" || strings.HasPrefix(b, "release/")
 }
+
+// maxOutgoing es el máximo de commits que push revisa; más que eso se publica por partes.
+const maxOutgoing = 5000
 
 func cmdPush(a *app, args []string) error {
 	fs := a.flags("push", "[--remote origin] [--agent A] [--dry-run]")
@@ -82,14 +89,22 @@ func cmdPush(a *app, args []string) error {
 			}
 		}
 	}
-	upstream, upErr := gitx.Run(root, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
-	var revs []string
-	if upErr == nil && strings.TrimSpace(upstream) != "" {
-		revs = []string{strings.TrimSpace(upstream) + "..HEAD"}
-	} else {
-		revs = []string{"HEAD", "--not", "--remotes=" + *remote}
+	_, upErr := gitx.Run(root, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
+	// Lo que sale es todo lo que el remoto todavía no tiene, sea cual sea el
+	// upstream configurado: un upstream apuntando a una rama local no esconde commits.
+	revs := []string{"HEAD", "--not", "--remotes=" + *remote}
+	countOut, err := gitx.Run(root, append([]string{"rev-list", "--count"}, revs...)...)
+	if err != nil {
+		return err
 	}
-	outgoing, err := gitx.Log(root, 1000, true, revs...)
+	count, err := strconv.Atoi(strings.TrimSpace(countOut))
+	if err != nil {
+		return err
+	}
+	if count > maxOutgoing {
+		return fail(1, "hay %d commits por publicar; coyote revisa hasta %d: publica por partes", count, maxOutgoing)
+	}
+	outgoing, err := gitx.Log(root, count+1, true, revs...)
 	if err != nil {
 		return err
 	}
@@ -159,7 +174,11 @@ func cmdPush(a *app, args []string) error {
 	if *noVerify {
 		status, what = "skip", what+" sin lint"
 	}
-	return a.recordSync(root, cfg.Name, *agent, ccf.ShortWhat(what, ccf.MaxWhatWords), []string{"sha:" + gitx.HeadShort(root)}, status)
+	// El push ya ocurrió: si el ledger falla, se avisa, pero el resultado es éxito.
+	if err := a.recordSync(root, cfg.Name, *agent, ccf.ShortWhat(what, ccf.MaxWhatWords), []string{"sha:" + gitx.HeadShort(root)}, status); err != nil {
+		fmt.Fprintf(a.stderr, "aviso: publicado, pero el evento no quedó en el ledger: %v\n", err)
+	}
+	return nil
 }
 
 func (a *app) recordSync(root, repo, agent, what string, refs []string, status string) error {

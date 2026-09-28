@@ -225,7 +225,7 @@ func sparseCheckout(dir string, patterns []string, git func(...string) error) er
 
 // citedDocs devuelve patrones para los documentos .md citados en README.coyote.md.
 func citedDocs(dir string) []string {
-	data, err := os.ReadFile(filepath.Join(dir, ccfdoc.ReadmeFile))
+	data, err := fsx.ReadFile(dir, ccfdoc.ReadmeFile, 1<<20)
 	if err != nil {
 		return nil
 	}

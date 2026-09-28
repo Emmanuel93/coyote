@@ -13,9 +13,12 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Emmanuel93/coyote/internal/userdir"
 )
 
 // Profile define el ritmo permitido.
@@ -55,25 +58,13 @@ type Limiter struct {
 	Sleep   func(time.Duration)
 }
 
-// StateDir es el directorio de estado de coyote para esta persona.
-func StateDir() (string, error) {
-	if d := os.Getenv("COYOTE_STATE_DIR"); d != "" {
-		return d, nil
-	}
-	d, err := os.UserConfigDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(d, "coyote"), nil
-}
-
 // Open devuelve el limitador de la cuenta host con el perfil indicado.
 func Open(profile, host string) (*Limiter, error) {
 	p, ok := Profiles[profile]
 	if !ok {
 		return nil, fmt.Errorf("perfil de ritmo desconocido %q (usa human o batch)", profile)
 	}
-	dir, err := StateDir()
+	dir, err := userdir.StateDir()
 	if err != nil {
 		return nil, err
 	}
@@ -156,27 +147,47 @@ func (l *Limiter) Delay(kind string, s State) (time.Duration, string) {
 }
 
 // Wait espera lo necesario y registra la operación. Si la espera supera
-// MaxWait devuelve ErrBudget con la hora a la que conviene reintentar.
+// MaxWait devuelve ErrBudget con el momento en que conviene reintentar.
+//
+// El turno se reserva y se guarda antes de dormir, y el lock se suelta durante
+// la espera: otro proceso ve la escritura reservada y se forma detrás de ella.
 func (l *Limiter) Wait(kind string) (time.Duration, error) {
 	unlock, err := l.lock()
 	if err != nil {
 		return 0, err
 	}
-	defer unlock()
 	s := l.load()
 	d, why := l.Delay(kind, s)
 	if d > l.Profile.MaxWait {
-		return 0, fmt.Errorf("%w: %s; reintenta después de %s", ErrBudget, why, l.Now().Add(d).Format("15:04:05"))
-	}
-	if d > 0 {
-		l.Sleep(d)
+		unlock()
+		return 0, fmt.Errorf("%w: %s; reintenta después de %s", ErrBudget, why, when(l.Now(), l.Now().Add(d)))
 	}
 	if kind == "write" {
 		now := l.Now()
-		s.Writes = append(recent(s.Writes, now, time.Hour), now)
+		s.Writes = append(recent(s.Writes, now, time.Hour), now.Add(d))
+		if err := l.save(s); err != nil {
+			unlock()
+			return 0, err
+		}
 	}
-	return d, l.save(s)
+	unlock()
+	if d > 0 {
+		l.Sleep(d)
+	}
+	return d, nil
 }
+
+// when muestra la hora, con la fecha si no es hoy.
+func when(now, t time.Time) string {
+	if t.Format("2006-01-02") == now.Format("2006-01-02") {
+		return t.Format("15:04:05")
+	}
+	return t.Format("2006-01-02 15:04:05")
+}
+
+// maxRetry acota lo que un proveedor puede pedir esperar: un Retry-After absurdo
+// no bloquea la cuenta por años.
+const maxRetry = 24 * time.Hour
 
 // Observe guarda lo que el proveedor informó: cuota restante, reinicio y Retry-After.
 func (l *Limiter) Observe(h http.Header, status int) error {
@@ -193,13 +204,23 @@ func (l *Limiter) Observe(h http.Header, status int) error {
 	if v, err := strconv.Atoi(h.Get("X-RateLimit-Limit")); err == nil {
 		s.Limit = v
 	}
-	if v, err := strconv.ParseInt(h.Get("X-RateLimit-Reset"), 10, 64); err == nil {
-		s.Reset = time.Unix(v, 0)
+	if v, err := strconv.ParseInt(h.Get("X-RateLimit-Reset"), 10, 64); err == nil && v > 0 {
+		if r := time.Unix(v, 0); r.Before(now.Add(maxRetry)) {
+			s.Reset = r
+		} else {
+			s.Reset = now.Add(maxRetry)
+		}
 	}
 	if ra := h.Get("Retry-After"); ra != "" {
-		if secs, err := strconv.Atoi(ra); err == nil {
+		if secs, err := strconv.ParseInt(ra, 10, 64); err == nil && secs >= 0 {
+			if time.Duration(secs) > maxRetry/time.Second {
+				secs = int64(maxRetry / time.Second)
+			}
 			s.RetryUntil = now.Add(time.Duration(secs) * time.Second)
-		} else if t, err := http.ParseTime(ra); err == nil {
+		} else if t, err := http.ParseTime(ra); err == nil && t.After(now) {
+			if t.After(now.Add(maxRetry)) {
+				t = now.Add(maxRetry)
+			}
 			s.RetryUntil = t
 		}
 	} else if (status == http.StatusForbidden || status == http.StatusTooManyRequests) && s.Remaining == 0 && !s.Reset.IsZero() {
@@ -233,12 +254,15 @@ func (l *Limiter) Status() string {
 	return out
 }
 
+// recent devuelve las escrituras de la ventana, incluidas las reservadas hacia
+// adelante (hasta 10 minutos); fechas más lejanas son estado corrupto o reloj movido.
 func recent(ts []time.Time, now time.Time, window time.Duration) []time.Time {
 	var out []time.Time
 	for _, t := range ts {
-		if now.Sub(t) < window && !t.After(now.Add(time.Minute)) {
+		if now.Sub(t) < window && !t.After(now.Add(10*time.Minute)) {
 			out = append(out, t)
 		}
 	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Before(out[j]) })
 	return out
 }

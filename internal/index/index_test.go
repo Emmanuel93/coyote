@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Emmanuel93/coyote/internal/tokens"
 )
 
 func write(t *testing.T, root, rel, content string) {
@@ -21,6 +23,7 @@ func write(t *testing.T, root, rel, content string) {
 
 func project(t *testing.T) string {
 	t.Helper()
+	t.Setenv("COYOTE_STATE_DIR", t.TempDir())
 	root := t.TempDir()
 	write(t, root, "README.coyote.md", "---\ncoyote: 1\nrepo: tienda\ntype: backend\nowners: [\"@ana\"]\n---\n"+
 		"purpose|API de pedidos y pagos de la tienda\nrun|make run\ntest|make test\n"+
@@ -120,12 +123,21 @@ func TestPack(t *testing.T) {
 	if p.Used > p.Budget {
 		t.Fatalf("el paquete excede el presupuesto: %d > %d", p.Used, p.Budget)
 	}
-	small := ix.Pack("tienda", PackOptions{Budget: 60, Now: now})
-	if small.Used > 60 || small.Omitted == 0 {
+	small := ix.Pack("tienda", PackOptions{Budget: 120, Now: now})
+	md = small.Markdown()
+	if small.Used > 120 || small.Omitted == 0 {
 		t.Fatalf("con presupuesto chico debe omitir: used=%d omitted=%d", small.Used, small.Omitted)
 	}
-	if !strings.Contains(small.Markdown(), "Propósito") {
-		t.Fatal("la identidad entra primero")
+	if !strings.Contains(md, "Propósito") {
+		t.Fatalf("la identidad entra primero:\n%s", md)
+	}
+	for _, budget := range []int{100, 300, 1000} {
+		for _, f := range []func(*Pack) string{(*Pack).Markdown, (*Pack).CCF} {
+			q := ix.Pack("tienda", PackOptions{Scope: "pagos", Query: strings.Repeat("pagos y envíos ", 150), Budget: budget, Now: now})
+			if out := f(q); tokens.Estimate(out) > budget || q.Used > budget {
+				t.Errorf("con presupuesto %d la salida estima %d tokens (Used=%d)", budget, tokens.Estimate(out), q.Used)
+			}
+		}
 	}
 	ccf := p.CCF()
 	if !strings.HasPrefix(ccf, "# contexto|tienda|pagos|") || !strings.Contains(ccf, "inv|pagos|") {
@@ -144,6 +156,54 @@ func TestInScope(t *testing.T) {
 	for _, c := range cases {
 		if InScope(c.chunk, c.want) != c.ok {
 			t.Errorf("InScope(%q, %q) != %v", c.chunk, c.want, c.ok)
+		}
+	}
+}
+
+func TestIgnoreDirectoriesAndSpecialFiles(t *testing.T) {
+	root := project(t)
+	write(t, root, "README.coyote.md", "---\ncoyote: 1\nrepo: tienda\ntype: backend\nowners: [\"@ana\"]\n---\npurpose|tienda\nrun|x\ntest|x\ndocs|docs|documentos\n")
+	write(t, root, "docs/private/secret.md", "# Secreto\n\nclave de produccion xyzzy\n")
+	for _, pattern := range []string{"docs/private", "/docs/private", "**/private", "private", "docs/private/"} {
+		write(t, root, ".coyoteignore", pattern+"\n")
+		ix, err := Build(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, c := range ix.Chunks {
+			if strings.Contains(c.Text, "xyzzy") {
+				t.Fatalf(".coyoteignore %q no excluyó la carpeta", pattern)
+			}
+		}
+	}
+	// Una caché que es un symlink a /dev/zero o un archivo especial no se lee.
+	if err := os.MkdirAll(filepath.Join(root, ".coyote"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.Remove(filepath.Join(root, ".coyote", "index.json"))
+	if err := os.Symlink("/dev/zero", filepath.Join(root, ".coyote", "index.json")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Build(root); err != nil {
+		t.Fatal(err)
+	}
+	// Una caché fabricada con el mismo tamaño y fecha no contradice a git.
+	_ = os.Remove(filepath.Join(root, ".coyote", "index.json"))
+	if _, err := Build(root); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(filepath.Join(root, ".coyote", "index.json"))
+	forged := strings.Replace(string(data), "tienda", "TEXTO QUE NO ESTA EN GIT", 1)
+	if err := os.WriteFile(filepath.Join(root, ".coyote", "index.json"), []byte(forged), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ix, err := Build(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range ix.Chunks {
+		if strings.Contains(c.Text, "TEXTO QUE NO ESTA EN GIT") {
+			t.Fatal("la caché fabricada se usó en lugar del contenido real")
 		}
 	}
 }

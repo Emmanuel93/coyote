@@ -17,7 +17,7 @@ El estado es por cuenta (host), no por proyecto. Vive en el directorio de config
 | human (por defecto) | 6 | 120 | 3 s | 20 % | 2 min |
 | batch | 20 | 300 | 1 s | 20 % | 5 min |
 
-GitHub admite hasta 80 escrituras por minuto y 500 por hora; los perfiles quedan muy por debajo. Las lecturas no consumen el cupo de escrituras.
+GitHub admite hasta 80 escrituras por minuto y 500 por hora; los perfiles quedan muy por debajo. Las lecturas no consumen el cupo de escrituras. El turno de una escritura se reserva antes de esperar, así varios procesos en paralelo se forman en fila en vez de publicar a la vez.
 
 Tanto las escrituras como las lecturas respetan:
 
@@ -25,11 +25,13 @@ Tanto las escrituras como las lecturas respetan:
 - la cuota restante (`X-RateLimit-*`), dejando la reserva para el uso interactivo de la persona;
 - los límites secundarios: un 403 o 429 sin `Retry-After` espera un minuto.
 
+Una espera pedida por el proveedor se acota a 24 horas.
+
 Si la espera superara el máximo, la operación no se hace y se informa desde qué hora reintentar.
 
 ## Credenciales
 
-El token de la API se busca en `COYOTE_GITHUB_TOKEN`, `GH_TOKEN` o `GITHUB_TOKEN`, luego en `gh auth token` y luego en el llavero del sistema. `coyote auth login --with-token` y `--device` lo guardan en el llavero:
+El token de la API se busca en `COYOTE_GITHUB_TOKEN`, `GH_TOKEN` o `GITHUB_TOKEN` (solo para github.com, así un token no viaja por accidente a otro host), luego en `gh auth token` y luego en el llavero del sistema, que son por host. `coyote auth login --with-token` y `--device` lo guardan en el llavero:
 
 - **macOS:** `security`. El token viaja por la entrada estándar de `security -i`, no como argumento, así no aparece en la lista de procesos.
 - **Linux:** `secret-tool`, también por la entrada estándar.
@@ -41,13 +43,13 @@ El token nunca se escribe en archivos, en el ledger ni en la salida; se muestra 
 `coyote push [--remote origin] [--agent A] [--dry-run]` publica la rama actual después de revisar:
 
 1. que HEAD esté en una rama y que el remoto exista;
-2. que un agente, o el modo `autonomous`, no publique en `main`, `master`, `trunk` ni `release/*` (A4, R17);
+2. que un agente, o el modo `autonomous`, no publique en `main`, `master`, `trunk` ni `release/*`, sin distinguir mayúsculas (A4, R17);
 3. que autor y committer configurados sean una persona (R15);
-4. que ningún commit que sale, merges incluidos, lleve atribución a IA ni autoría de una herramienta (R15);
+4. que ningún commit que sale, merges incluidos, lleve atribución a IA ni autoría de una herramienta (R15). "Lo que sale" es todo lo que el remoto todavía no tiene (`HEAD --not --remotes=<remoto>`), sea cual sea el upstream configurado; con más de 5 000 commits se publica por partes;
 5. que los commits que salen sigan el formato (R2);
 6. que el estándar no tenga hallazgos MUST.
 
-Luego espera a ritmo humano y corre `git push` sin `--force` (coyote nunca fuerza). El evento `sync` queda en el ledger y entra en el siguiente `coyote commit`. `--no-verify` omite el lint solo para una persona y queda registrado con estado `skip`.
+Luego espera a ritmo humano y corre `git push` sin `--force` (coyote nunca fuerza). El evento `sync` queda en el ledger y entra en el siguiente `coyote commit`; si no se pudiera escribir, el push igual cuenta como hecho y se avisa. `--no-verify` omite el lint solo para una persona y queda registrado con estado `skip`.
 
 ## pull
 
@@ -72,7 +74,9 @@ Muestra tokens de entrada, caché y salida, y el costo de entrada, de salida y t
 
 Protecciones:
 
-- escucha solo en loopback;
+- escucha solo en loopback (`localhost` se traduce a `127.0.0.1`);
+- rechaza peticiones en forma absoluta (`GET http://…`), que podrían esquivar la verificación de `Host`;
+- un repo registrado solo aporta su propio consumo: su ledger no puede atribuir eventos a otro proyecto;
 - rechaza cualquier `Host` que no sea loopback (DNS rebinding);
 - solo acepta GET y HEAD;
 - no usa JavaScript;

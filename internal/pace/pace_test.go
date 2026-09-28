@@ -105,3 +105,41 @@ func TestSecondaryLimitWithoutRetryAfter(t *testing.T) {
 		t.Fatalf("límite secundario: se esperaba 1 minuto, %v %v", d, err)
 	}
 }
+
+func TestReservationSurvivesConcurrentWaiters(t *testing.T) {
+	l, c := limiter(t, "human")
+	// Primer proceso: escribe ya.
+	if _, err := l.Wait("write"); err != nil {
+		t.Fatal(err)
+	}
+	// Segundo proceso: su turno queda reservado 3 s adelante antes de dormir.
+	other := *l
+	var slept time.Duration
+	other.Sleep = func(d time.Duration) { slept = d }
+	if _, err := other.Wait("write"); err != nil {
+		t.Fatal(err)
+	}
+	// Un tercero, mientras el segundo duerme, se forma detrás de la reserva.
+	third := *l
+	var slept3 time.Duration
+	third.Sleep = func(d time.Duration) { slept3 = d }
+	if _, err := third.Wait("write"); err != nil {
+		t.Fatal(err)
+	}
+	if slept != 3*time.Second || slept3 != 6*time.Second {
+		t.Fatalf("reservas: segundo %v, tercero %v; se esperaba 3s y 6s", slept, slept3)
+	}
+	_ = c
+}
+
+func TestRetryAfterIsCapped(t *testing.T) {
+	l, _ := limiter(t, "human")
+	h := http.Header{}
+	h.Set("Retry-After", "99999999999")
+	if err := l.Observe(h, http.StatusTooManyRequests); err != nil {
+		t.Fatal(err)
+	}
+	if got := l.RetryAt().Sub(l.Now()); got > 24*time.Hour {
+		t.Fatalf("Retry-After sin tope: %v", got)
+	}
+}

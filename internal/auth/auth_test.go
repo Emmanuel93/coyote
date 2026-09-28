@@ -85,6 +85,12 @@ func TestTokenSources(t *testing.T) {
 	if _, src, _ := Token("github.com"); src != "variable GH_TOKEN" {
 		t.Fatalf("la variable tiene prioridad: %q", src)
 	}
+	if _, src, _ := Token("ghe.example.com"); src == "variable GH_TOKEN" {
+		t.Fatal("un token de entorno no debe usarse para otro host")
+	}
+	if _, _, err := Token("localhost:18443"); err == nil {
+		t.Fatal("un host con puerto o caracteres raros debe rechazarse")
+	}
 	t.Setenv("GH_TOKEN", "no es un token")
 	if _, _, err := Token("github.com"); err == nil {
 		t.Fatal("una variable con forma inválida debe fallar")

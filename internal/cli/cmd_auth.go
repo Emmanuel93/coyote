@@ -130,10 +130,10 @@ func authStatus(a *app, host string, check bool) error {
 	if !check {
 		return nil
 	}
+	// Sin plazo en el contexto: la espera del ritmo humano no debe consumir el
+	// plazo de la petición; el cliente HTTP ya tiene su propio límite de 30 s.
 	c := &github.Client{Base: apiBase(host), Token: tok, Pace: lim, UserAgent: "coyote/" + version.Version}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	login, scopes, err := c.User(ctx)
+	login, scopes, err := c.User(context.Background())
 	if err != nil {
 		return fail(1, "la API rechazó el token: %v", err)
 	}

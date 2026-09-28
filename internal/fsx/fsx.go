@@ -5,6 +5,7 @@ package fsx
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -44,4 +45,39 @@ func NoSymlinks(root, rel string) error {
 		}
 	}
 	return nil
+}
+
+// ReadFile lee rel dentro de root solo si es un archivo regular, sin symlinks
+// en el camino y de hasta max bytes: un FIFO, /dev/zero o un enlace a otro
+// lugar nunca se leen.
+func ReadFile(root, rel string, max int64) ([]byte, error) {
+	if err := NoSymlinks(root, rel); err != nil {
+		return nil, err
+	}
+	p := filepath.Join(root, filepath.FromSlash(rel))
+	info, err := os.Lstat(p)
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("%s no es un archivo regular", rel)
+	}
+	if info.Size() > max {
+		return nil, fmt.Errorf("%s pesa %d bytes; máximo %d", rel, info.Size(), max)
+	}
+	f, err := os.Open(p)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return io.ReadAll(io.LimitReader(f, max+1))
+}
+
+// Regular informa si rel es un archivo regular dentro de root, sin symlinks.
+func Regular(root, rel string) bool {
+	if NoSymlinks(root, rel) != nil {
+		return false
+	}
+	info, err := os.Lstat(filepath.Join(root, filepath.FromSlash(rel)))
+	return err == nil && info.Mode().IsRegular()
 }

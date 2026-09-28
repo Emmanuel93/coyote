@@ -4,6 +4,7 @@
 package ledger
 
 import (
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -36,8 +37,12 @@ func (l Ledger) Append(line ccf.Line, user string) (string, error) {
 		return "", err
 	}
 	text := line.String()
-	if _, err := ccf.Parse(text); err != nil {
+	parsed, err := ccf.Parse(text)
+	if err != nil {
 		return "", err
+	}
+	if parsed.String() != text {
+		return "", fmt.Errorf("el evento no se lee igual a como se escribiría; revisa espacios o separadores en sus campos")
 	}
 	p := l.PathFor(line.TS, user)
 	if l.Root != "" {
@@ -88,9 +93,17 @@ type Problem struct {
 }
 
 // ReadAll recorre el ledger completo, en orden cronológico.
+// maxFile acota cada archivo del ledger: un día de una persona no se acerca a esto.
+const maxFile = 16 << 20
+
 func (l Ledger) ReadAll() ([]Entry, []Problem, error) {
 	if _, err := os.Stat(l.Dir); os.IsNotExist(err) {
 		return nil, nil, nil
+	}
+	if l.Root != "" {
+		if err := fsx.NoSymlinks(l.Root, "coyote/ledger"); err != nil {
+			return nil, nil, err
+		}
 	}
 	var entries []Entry
 	var probs []Problem
@@ -99,6 +112,13 @@ func (l Ledger) ReadAll() ([]Entry, []Problem, error) {
 			return err
 		}
 		if d.IsDir() || !strings.HasSuffix(p, ".ccf") {
+			return nil
+		}
+		// Solo archivos regulares y acotados: un symlink o un /dev/zero en un repo
+		// ajeno no se lee (se informa como problema).
+		info, err := os.Lstat(p)
+		if err != nil || !info.Mode().IsRegular() || info.Size() > maxFile {
+			probs = append(probs, Problem{p, 0, fmt.Errorf("no es un archivo regular del ledger o es demasiado grande")})
 			return nil
 		}
 		data, err := os.ReadFile(p)

@@ -113,6 +113,10 @@ func protect(next http.Handler) http.Handler {
 			http.Error(w, "host no permitido", http.StatusForbidden)
 			return
 		}
+		if r.URL.IsAbs() || r.RequestURI != "" && !strings.HasPrefix(r.RequestURI, "/") {
+			http.Error(w, "solo rutas relativas", http.StatusBadRequest) // forma absoluta: puede esquivar Host
+			return
+		}
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			w.Header().Set("Allow", "GET, HEAD")
 			http.Error(w, "solo lectura", http.StatusMethodNotAllowed)

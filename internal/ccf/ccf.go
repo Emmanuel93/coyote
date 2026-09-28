@@ -77,7 +77,7 @@ type Line struct {
 var (
 	actorRe = regexp.MustCompile(`^(system|@[a-z0-9][a-z0-9._-]*(/[a-z0-9][a-z0-9._-]*)?)$`)
 	idRe    = regexp.MustCompile(`^[\p{L}\p{N}][\p{L}\p{N}._/-]*$`)
-	refRe   = regexp.MustCompile(`^[a-z][a-z0-9-]*:[^\s|]+$`)
+	refRe   = regexp.MustCompile(`^[a-z][a-z0-9-]*:[^\s\p{Z}|]+$`)
 	spaceRe = regexp.MustCompile(`\s+`)
 )
 

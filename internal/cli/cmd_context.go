@@ -7,8 +7,10 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/Emmanuel93/coyote/internal/ccf"
+	"github.com/Emmanuel93/coyote/internal/fsx"
 	"github.com/Emmanuel93/coyote/internal/identity"
 	"github.com/Emmanuel93/coyote/internal/index"
 	"github.com/Emmanuel93/coyote/internal/ledger"
@@ -197,12 +199,22 @@ func (a *app) recordAsk(question string, hits []index.Hit, ws, agent string) err
 		if i == 3 {
 			break
 		}
-		refs = append(refs, "doc:"+strings.ReplaceAll(h.Ref(), " ", "_"))
+		refs = append(refs, "doc:"+safeRef(h.Ref()))
 	}
 	line := ccf.Line{TS: a.now(), Actor: person.Actor(agent), Project: ledgerID(ws), Repo: cfg.Name, Type: "ask",
 		Scope: "-", What: ccf.ShortWhat(question, ccf.MaxWhatWords), Refs: refs, Status: "ok"}
 	_, err = ledger.Open(root).Append(line, person.Slug)
 	return err
+}
+
+// safeRef deja una referencia sin espacios (de ningún tipo) ni separadores.
+func safeRef(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsSpace(r) || unicode.Is(unicode.Z, r) || r == '|' {
+			return '_'
+		}
+		return r
+	}, s)
 }
 
 func orDash(s string) string {
@@ -224,6 +236,9 @@ func cmdIndex(a *app, args []string) error {
 		return err
 	}
 	if *rebuild {
+		if err := fsx.NoSymlinks(root, index.CachePath); err != nil {
+			return fail(1, "%v", err)
+		}
 		if err := os.Remove(filepath.Join(root, filepath.FromSlash(index.CachePath))); err != nil && !os.IsNotExist(err) {
 			return err
 		}

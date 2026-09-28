@@ -77,9 +77,17 @@ func Mask(tok string) string {
 	return prefix + "…" + tok[len(tok)-4:]
 }
 
-// Token busca el token para host y dice de qué fuente vino.
+// Token busca el token para host y dice de qué fuente vino. Las variables de
+// entorno solo valen para github.com: un token no se manda a otro host por
+// accidente (GitHub Enterprise usa gh o el llavero, que son por host).
 func Token(host string) (string, string, error) {
+	if err := checkHost(host); err != nil {
+		return "", "", err
+	}
 	for _, env := range []string{"COYOTE_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"} {
+		if host != "github.com" {
+			break
+		}
 		if t := strings.TrimSpace(os.Getenv(env)); t != "" {
 			if !Valid(t) {
 				return "", "", fmt.Errorf("%s no tiene forma de token", env)

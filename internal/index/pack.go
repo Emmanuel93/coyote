@@ -225,28 +225,60 @@ func orDash(s string) string {
 	return s
 }
 
-func (p *Pack) header() string {
+func shortQuery(q string) string {
+	w := strings.Fields(q)
+	if len(w) > 12 {
+		return strings.Join(w[:12], " ") + " …"
+	}
+	return strings.Join(w, " ")
+}
+
+func (p *Pack) title() string {
 	h := "# Contexto: " + p.Repo
 	if p.Scope != "" {
 		h += " · ámbito " + p.Scope
 	}
 	if p.Query != "" {
-		h += " · consulta \"" + p.Query + "\""
+		h += " · consulta \"" + shortQuery(p.Query) + "\""
 	}
-	return h + "\n~0000/0000 tokens · fuente: git (índice local)\n"
+	return h
 }
 
-// Markdown devuelve el paquete para personas y agentes.
-func (p *Pack) Markdown() string {
+func (p *Pack) header() string {
+	return p.title() + "\n~0000/0000 tokens · fuente: git (índice local) · 2006-01-02 15:04Z\n"
+}
+
+// fit devuelve el paquete ya formateado dentro del presupuesto: mide la salida
+// real (encabezado, fechas, referencias y pie incluidos) y quita desde el final,
+// que es lo menos prioritario, hasta que quepa.
+func (p *Pack) fit(format func(*Pack) string) string {
+	q := *p
+	q.Sections = make([]Section, len(p.Sections))
+	for i, s := range p.Sections {
+		q.Sections[i] = Section{Title: s.Title, Items: append([]Item(nil), s.Items...)}
+	}
+	for {
+		q.Used = tokens.Estimate(format(&q))
+		out := format(&q)
+		if n := tokens.Estimate(out); n <= q.Budget || len(q.Sections) == 0 {
+			p.Used, p.Omitted = n, q.Omitted
+			return out
+		}
+		last := &q.Sections[len(q.Sections)-1]
+		last.Items = last.Items[:len(last.Items)-1]
+		q.Omitted++
+		if len(last.Items) == 0 {
+			q.Sections = q.Sections[:len(q.Sections)-1]
+		}
+	}
+}
+
+// Markdown devuelve el paquete para personas y agentes, dentro del presupuesto.
+func (p *Pack) Markdown() string { return p.fit((*Pack).markdown) }
+
+func (p *Pack) markdown() string {
 	var b strings.Builder
-	title := "# Contexto: " + p.Repo
-	if p.Scope != "" {
-		title += " · ámbito " + p.Scope
-	}
-	if p.Query != "" {
-		title += " · consulta \"" + p.Query + "\""
-	}
-	fmt.Fprintf(&b, "%s\n~%d/%d tokens · fuente: git (índice local) · %s\n", title, p.Used, p.Budget, p.Built.Format("2006-01-02 15:04Z"))
+	fmt.Fprintf(&b, "%s\n~%d/%d tokens · fuente: git (índice local) · %s\n", p.title(), p.Used, p.Budget, p.Built.Format("2006-01-02 15:04Z"))
 	for _, s := range p.Sections {
 		fmt.Fprintf(&b, "\n## %s\n", s.Title)
 		for _, it := range s.Items {
@@ -259,10 +291,12 @@ func (p *Pack) Markdown() string {
 	return b.String()
 }
 
-// CCF devuelve el paquete en líneas compactas tipo|ámbito|texto|ref.
-func (p *Pack) CCF() string {
+// CCF devuelve el paquete en líneas compactas tipo|ámbito|texto|ref, dentro del presupuesto.
+func (p *Pack) CCF() string { return p.fit((*Pack).ccf) }
+
+func (p *Pack) ccf() string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "# contexto|%s|%s|%s|~%d/%d tokens\n", p.Repo, orDash(p.Scope), strings.ReplaceAll(orDash(p.Query), "|", "/"), p.Used, p.Budget)
+	fmt.Fprintf(&b, "# contexto|%s|%s|%s|~%d/%d tokens\n", p.Repo, orDash(p.Scope), strings.ReplaceAll(orDash(shortQuery(p.Query)), "|", "/"), p.Used, p.Budget)
 	for _, s := range p.Sections {
 		for _, it := range s.Items {
 			typ := it.Type
@@ -275,6 +309,9 @@ func (p *Pack) CCF() string {
 			text := strings.ReplaceAll(strings.TrimPrefix(it.Line, "- "), "|", "/")
 			fmt.Fprintf(&b, "%s|%s|%s|%s\n", orDash(typ), orDash(it.Scope), text, it.Ref())
 		}
+	}
+	if p.Omitted > 0 {
+		fmt.Fprintf(&b, "# omitidos|%d\n", p.Omitted)
 	}
 	return b.String()
 }

@@ -28,6 +28,9 @@ func cmdWeb(a *app, args []string) error {
 	if err := web.Loopback(*addr); err != nil {
 		return fail(2, "%v", err)
 	}
+	if host, port, err := net.SplitHostPort(*addr); err == nil && host == "localhost" {
+		*addr = net.JoinHostPort("127.0.0.1", port) // no se confía en lo que resuelva localhost
+	}
 	root, cfg, err := a.project()
 	if err != nil {
 		return err
@@ -61,7 +64,15 @@ func cmdWeb(a *app, args []string) error {
 			if err != nil {
 				return nil, err
 			}
-			all = append(all, usage.FromLedger(src.name, entries)...)
+			evs := usage.FromLedger(src.name, entries)
+			if src.root != root {
+				// Un repo registrado solo aporta sus propios eventos: su ledger no
+				// puede atribuir consumo a otro proyecto.
+				for i := range evs {
+					evs[i].Repo = src.name
+				}
+			}
+			all = append(all, evs...)
 		}
 		return all, nil
 	}}

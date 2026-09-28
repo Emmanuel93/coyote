@@ -8,6 +8,9 @@ package index
 import (
 	"bufio"
 	"bytes"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io/fs"
@@ -25,6 +28,7 @@ import (
 	"github.com/Emmanuel93/coyote/internal/fsx"
 	"github.com/Emmanuel93/coyote/internal/glob"
 	"github.com/Emmanuel93/coyote/internal/tokens"
+	"github.com/Emmanuel93/coyote/internal/userdir"
 )
 
 // Clases de fragmento.
@@ -40,7 +44,7 @@ const (
 // CachePath es la caché del índice, relativa a la raíz; .coyote/ no se versiona.
 const CachePath = ".coyote/index.json"
 
-const cacheVersion = 2
+const cacheVersion = 3
 
 // Chunk es la unidad que se busca y se entrega como contexto.
 type Chunk struct {
@@ -73,10 +77,21 @@ type Index struct {
 }
 
 type fileEntry struct {
-	Size   int64   `json:"size"`
-	Mtime  int64   `json:"mtime"`
+	Hash   string  `json:"sha256"`
+	MAC    string  `json:"mac"` // HMAC con la clave local: una caché ajena o fabricada no valida
 	Chunks []Chunk `json:"chunks"`
 }
+
+func entryMAC(key []byte, rel string, e *fileEntry) string {
+	m := hmac.New(sha256.New, key)
+	chunks, _ := json.Marshal(e.Chunks)
+	m.Write([]byte(rel + "\x00" + e.Hash + "\x00"))
+	m.Write(chunks)
+	return hex.EncodeToString(m.Sum(nil))
+}
+
+// maxFile es el tamaño máximo de un archivo indexable.
+const maxFile = 1 << 20
 
 type cache struct {
 	Version int                   `json:"version"`
@@ -89,24 +104,36 @@ func Build(root string) (*Index, error) {
 	if err != nil {
 		return nil, err
 	}
-	old := readCache(root)
+	key, keyErr := userdir.Key("index")
+	old := &cache{Files: map[string]*fileEntry{}}
+	if keyErr == nil {
+		old = readCache(root)
+	}
 	fresh := &cache{Version: cacheVersion, Files: map[string]*fileEntry{}}
 	ix := &Index{Root: root}
 	for _, rel := range files {
-		info, err := os.Stat(filepath.Join(root, filepath.FromSlash(rel)))
-		if err != nil || info.IsDir() || info.Size() > 1<<20 {
-			continue
+		data, err := fsx.ReadFile(root, rel, maxFile)
+		if err != nil {
+			continue // ilegible, especial, enorme o detrás de un symlink: no se indexa
 		}
-		if e, ok := old.Files[rel]; ok && e.Size == info.Size() && e.Mtime == info.ModTime().UnixNano() {
+		// La caché se reutiliza solo si el contenido es idéntico (ADR-0007): fechas
+		// y tamaños se pueden fabricar, el hash no.
+		sum := sha256.Sum256(data)
+		hash := hex.EncodeToString(sum[:])
+		if e, ok := old.Files[rel]; ok && e.Hash == hash && hmac.Equal([]byte(e.MAC), []byte(entryMAC(key, rel, e))) {
 			fresh.Files[rel] = e
 			ix.Reused++
 			continue
 		}
-		chunks, err := parseFile(root, rel)
+		chunks, err := parseFile(rel, data)
 		if err != nil {
 			continue // un archivo ilegible no impide indexar el resto
 		}
-		fresh.Files[rel] = &fileEntry{Size: info.Size(), Mtime: info.ModTime().UnixNano(), Chunks: chunks}
+		e := &fileEntry{Hash: hash, Chunks: chunks}
+		if keyErr == nil {
+			e.MAC = entryMAC(key, rel, e)
+		}
+		fresh.Files[rel] = e
 		ix.Parsed++
 	}
 	for _, rel := range files {
@@ -114,7 +141,7 @@ func Build(root string) (*Index, error) {
 			ix.Chunks = append(ix.Chunks, e.Chunks...)
 		}
 	}
-	if ix.Parsed > 0 || len(fresh.Files) != len(old.Files) {
+	if keyErr == nil && (ix.Parsed > 0 || len(fresh.Files) != len(old.Files)) {
 		writeCache(root, fresh)
 	}
 	ix.bm25 = newBM25(ix.Chunks)
@@ -123,7 +150,7 @@ func Build(root string) (*Index, error) {
 
 func readCache(root string) *cache {
 	c := &cache{Files: map[string]*fileEntry{}}
-	data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(CachePath)))
+	data, err := fsx.ReadFile(root, CachePath, 64<<20)
 	if err != nil {
 		return c
 	}
@@ -160,10 +187,7 @@ func candidates(root string) ([]string, error) {
 	var out []string
 	add := func(rel string) {
 		rel = filepath.ToSlash(filepath.Clean(rel))
-		if seen[rel] || strings.HasPrefix(rel, "../") || glob.Any(ignore, rel) || fsx.NoSymlinks(root, rel) != nil {
-			return
-		}
-		if info, err := os.Stat(filepath.Join(root, filepath.FromSlash(rel))); err != nil || info.IsDir() {
+		if seen[rel] || rel == ".." || strings.HasPrefix(rel, "../") || filepath.IsAbs(rel) || Ignored(ignore, rel) || !fsx.Regular(root, rel) {
 			return
 		}
 		seen[rel] = true
@@ -197,7 +221,7 @@ func candidates(root string) ([]string, error) {
 	walk("coyote/decisions", md)
 	walk("coyote/workstreams", func(p string) bool { return md(p) || strings.HasSuffix(p, ".yaml") })
 	walk("coyote/ledger", func(p string) bool { return strings.HasSuffix(p, ".ccf") })
-	if d, err := os.ReadFile(filepath.Join(root, ccfdoc.ReadmeFile)); err == nil {
+	if d, err := fsx.ReadFile(root, ccfdoc.ReadmeFile, maxFile); err == nil {
 		doc, _ := ccfdoc.Parse(ccfdoc.ReadmeFile, d)
 		for _, e := range doc.All("docs") {
 			if len(e.Fields) == 0 {
@@ -215,8 +239,21 @@ func candidates(root string) ([]string, error) {
 	return out, nil
 }
 
+// Ignored aplica .coyoteignore con la semántica de .gitignore para carpetas:
+// un patrón que coincide con una carpeta excluye todo lo que tiene debajo,
+// termine o no en "/".
+func Ignored(patterns []string, rel string) bool {
+	parts := strings.Split(rel, "/")
+	for i := 1; i <= len(parts); i++ {
+		if glob.Any(patterns, strings.Join(parts[:i], "/")) {
+			return true
+		}
+	}
+	return false
+}
+
 func ignorePatterns(root string) []string {
-	data, err := os.ReadFile(filepath.Join(root, ".coyoteignore"))
+	data, err := fsx.ReadFile(root, ".coyoteignore", maxFile)
 	if err != nil {
 		return nil
 	}
@@ -231,11 +268,7 @@ func ignorePatterns(root string) []string {
 	return out
 }
 
-func parseFile(root, rel string) ([]Chunk, error) {
-	data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel)))
-	if err != nil {
-		return nil, err
-	}
+func parseFile(rel string, data []byte) ([]Chunk, error) {
 	if bytes.IndexByte(data, 0) >= 0 {
 		return nil, fmt.Errorf("%s es binario", rel)
 	}

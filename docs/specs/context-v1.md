@@ -17,7 +17,9 @@ Un agente no debería leer todo el repo para tocar una parte. `get context` le e
 | `coyote/workstreams/**` | workstream | una sección de `close.md` o una clave de `plan.yaml` |
 | `coyote/ledger/**/*.ccf` | event | un evento |
 
-Lo que coincide con `.coyoteignore` no se indexa (R12). Tampoco se indexan archivos binarios, de más de 1 MB o accesibles a través de symlinks. La caché vive en `.coyote/index.json` (fuera de git) y se invalida por archivo según tamaño y fecha de modificación.
+Lo que coincide con `.coyoteignore` no se indexa (R12). Se usa la semántica de `.gitignore` para carpetas: un patrón que nombra una carpeta excluye todo lo que tiene debajo, con o sin `/` final. Tampoco se indexan archivos binarios, de más de 1 MB, especiales (FIFO, dispositivos) ni accesibles a través de symlinks.
+
+La caché vive en `.coyote/index.json` (fuera de git). Cada archivo se reutiliza solo si su SHA-256 no cambió y si su entrada lleva una firma HMAC hecha con una clave local de la persona (0600, en su directorio de configuración). Así, una caché copiada de otra máquina o fabricada dentro de un repo no se usa: el índice nunca contradice a git.
 
 ## Búsqueda
 

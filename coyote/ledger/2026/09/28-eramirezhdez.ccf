@@ -39,3 +39,5 @@
 2026-09-28T05:39Z|@eramirezhdez/coyote-security|W-0002|coyote|note|web|inv: coyote web escucha solo en loopback, valida Host y es de…|doc:CONTEXT.coyote.md|-|-|ok
 2026-09-28T05:39Z|@eramirezhdez/coyote-dev|W-0002|coyote|feat|web|vista FinOps de costos por proyecto y por persona|-|-|-|ok
 2026-09-28T05:40Z|@eramirezhdez/coyote-scribe|W-0002|coyote|doc|specs|contexto v1 y remoto v1; README con los comandos de v0.2|-|-|-|ok
+2026-09-28T06:08Z|@eramirezhdez/coyote-reviewer|W-0002|coyote|rev|seguridad|revisión adversarial de v0.2: 14 hallazgos, todos corregidos con pruebas|doc:docs/releases/v0.2.0.md|-|-|ok
+2026-09-28T06:08Z|@eramirezhdez/coyote-dev|W-0002|coyote|fix|remote|cierra los hallazgos de la revisión de v0.2|-|-|-|ok

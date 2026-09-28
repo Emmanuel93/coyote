@@ -451,8 +451,10 @@ func ValidateRepo(r RepoRef) error {
 	return nil
 }
 
-// AddRepo agrega o actualiza un repo en coyote/project.yaml conservando
-// comentarios y formato del resto del archivo.
+// AddRepo agrega o actualiza un repo en coyote/project.yaml. Edita el texto
+// para conservar comentarios, líneas en blanco y formato; si la sección repos
+// tiene una forma que no reconoce, recurre a reescribir el YAML. Nunca deja un
+// project.yaml inválido: si lo escrito no se puede cargar, restaura el original.
 func AddRepo(root string, r RepoRef) (string, error) {
 	if err := ValidateRepo(r); err != nil {
 		return "", err
@@ -465,21 +467,130 @@ func AddRepo(root string, r RepoRef) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if _, err := Load(root); err != nil {
+		return "", err
+	}
+	out, status, ok := addRepoText(string(data), r)
+	if !ok {
+		b, st, err := addRepoNode(data, r)
+		if err != nil {
+			return "", err
+		}
+		out, status = string(b), st
+	}
+	if err := os.WriteFile(p, []byte(out), 0o644); err != nil {
+		return "", err
+	}
+	if _, err := Load(root); err != nil {
+		_ = os.WriteFile(p, data, 0o644) // lo escrito no se puede leer: se deja como estaba
+		return "", err
+	}
+	return status, nil
+}
+
+// yamlQuote devuelve un escalar YAML entre comillas dobles.
+func yamlQuote(v string) string {
+	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(v) + `"`
+}
+
+func repoLine(indent string, r RepoRef) string {
+	parts := []string{"name: " + r.Name}
+	for _, kv := range [][2]string{{"url", r.URL}, {"path", r.Path}, {"branch", r.Branch}} {
+		if kv[1] != "" {
+			parts = append(parts, kv[0]+": "+yamlQuote(kv[1]))
+		}
+	}
+	return indent + "- { " + strings.Join(parts, ", ") + " }"
+}
+
+var (
+	reposKeyRe = regexp.MustCompile(`^repos:\s*(#.*)?$`)
+	reposEmpty = regexp.MustCompile(`^repos:\s*(\[\s*\]|~|null)?\s*(#.*)?$`)
+	itemRe     = regexp.MustCompile(`^(\s*)-\s`)
+)
+
+// addRepoText edita la sección repos como texto; ok=false si no reconoce su forma.
+func addRepoText(content string, r RepoRef) (string, string, bool) {
+	lines := strings.Split(strings.TrimSuffix(content, "\n"), "\n")
+	key := -1
+	for i, l := range lines {
+		if strings.HasPrefix(l, "repos:") {
+			key = i
+			break
+		}
+	}
+	if key < 0 {
+		return strings.Join(lines, "\n") + "\nrepos:\n" + repoLine("  ", r) + "\n", "agregado", true
+	}
+	if !reposEmpty.MatchString(lines[key]) {
+		return "", "", false // repos: [ ... ] en una línea u otra forma: se reescribe con YAML
+	}
+	if !reposKeyRe.MatchString(lines[key]) {
+		lines[key] = "repos:"
+	}
+	end := len(lines)
+	for j := key + 1; j < len(lines); j++ {
+		t := strings.TrimSpace(lines[j])
+		if t == "" || strings.HasPrefix(t, "#") {
+			continue
+		}
+		if !strings.HasPrefix(lines[j], " ") && !strings.HasPrefix(lines[j], "-") {
+			end = j
+			break
+		}
+	}
+	indent, last := "  ", key
+	nameRe := regexp.MustCompile(`^\s*-\s*\{.*\bname:\s*"?` + regexp.QuoteMeta(r.Name) + `"?\s*[,}]`)
+	blockName := regexp.MustCompile(`^\s*-\s*name:\s*"?` + regexp.QuoteMeta(r.Name) + `"?\s*(#.*)?$`)
+	for j := key + 1; j < end; j++ {
+		l := lines[j]
+		t := strings.TrimSpace(l)
+		if t == "" || strings.HasPrefix(t, "#") {
+			continue
+		}
+		if m := itemRe.FindStringSubmatch(l); m != nil {
+			indent = m[1]
+			if nameRe.MatchString(l) {
+				lines[j] = repoLine(indent, r)
+				return strings.Join(lines, "\n") + "\n", "actualizado", true
+			}
+			if blockName.MatchString(l) {
+				return "", "", false // entrada en varias líneas: se reescribe con YAML
+			}
+			if !strings.HasPrefix(t, "- {") || !strings.HasSuffix(t, "}") {
+				return "", "", false
+			}
+		} else if !strings.HasPrefix(t, "#") {
+			return "", "", false
+		}
+		last = j
+	}
+	out := append([]string{}, lines[:last+1]...)
+	out = append(out, repoLine(indent, r))
+	out = append(out, lines[last+1:]...)
+	return strings.Join(out, "\n") + "\n", "agregado", true
+}
+
+// addRepoNode agrega o actualiza el repo reescribiendo el YAML (puede perder formato).
+func addRepoNode(data []byte, r RepoRef) ([]byte, string, error) {
 	var doc yaml.Node
 	if err := yaml.Unmarshal(data, &doc); err != nil {
-		return "", fmt.Errorf("%s: %w", ConfigPath, err)
+		return nil, "", fmt.Errorf("%s: %w", ConfigPath, err)
 	}
 	if doc.Kind != yaml.DocumentNode || len(doc.Content) == 0 || doc.Content[0].Kind != yaml.MappingNode {
-		return "", fmt.Errorf("%s no es un mapa YAML", ConfigPath)
+		return nil, "", fmt.Errorf("%s no es un mapa YAML", ConfigPath)
 	}
 	top := doc.Content[0]
 	var repos *yaml.Node
 	for i := 0; i+1 < len(top.Content); i += 2 {
 		if top.Content[i].Value == "repos" {
 			repos = top.Content[i+1]
+			if repos.Kind != yaml.SequenceNode {
+				repos.Kind, repos.Tag, repos.Value, repos.Content = yaml.SequenceNode, "!!seq", "", nil
+			}
 		}
 	}
-	if repos == nil || repos.Kind != yaml.SequenceNode {
+	if repos == nil {
 		repos = &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
 		top.Content = append(top.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: "repos"}, repos)
 	}
@@ -508,20 +619,10 @@ func AddRepo(root string, r RepoRef) (string, error) {
 	enc := yaml.NewEncoder(&buf)
 	enc.SetIndent(2)
 	if err := enc.Encode(&doc); err != nil {
-		return "", err
+		return nil, "", err
 	}
 	if err := enc.Close(); err != nil {
-		return "", err
+		return nil, "", err
 	}
-	if _, err := Load(root); err != nil {
-		return "", err
-	}
-	if err := os.WriteFile(p, buf.Bytes(), 0o644); err != nil {
-		return "", err
-	}
-	if _, err := Load(root); err != nil {
-		_ = os.WriteFile(p, data, 0o644) // lo escrito no se puede leer: se deja como estaba
-		return "", err
-	}
-	return status, nil
+	return buf.Bytes(), status, nil
 }

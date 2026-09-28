@@ -739,3 +739,57 @@ func TestWeb(t *testing.T) {
 		}
 	}
 }
+
+func TestPushRevisaTodoLoQueSale(t *testing.T) {
+	base := setup(t)
+	noPace(t)
+	bare := filepath.Join(base, "r.git")
+	git(t, base, "init", "-q", "--bare", "-b", "main", bare)
+	root := filepath.Join(base, "r")
+	must(t, run(t, base, "", "init", "r", "--type", "library", "--purpose", "prueba de push"), 0, "init")
+	git(t, root, "add", "-A")
+	must(t, run(t, root, "", "commit", "-m", "chore: adopta coyote"), 0, "commit")
+	git(t, root, "remote", "add", "origin", "file://"+bare)
+	must(t, run(t, root, "", "push"), 0, "push inicial")
+	git(t, root, "checkout", "-q", "-b", "ws/tarea")
+	if err := os.WriteFile(filepath.Join(root, "a.txt"), []byte("a\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, root, "add", "a.txt")
+	git(t, root, "commit", "-q", "--no-verify", "-m", "feat: a", "-m", aiTrailer)
+	// Un upstream local que ya contiene el commit no lo esconde: el remoto no lo tiene.
+	git(t, root, "branch", "base2")
+	git(t, root, "branch", "-u", "base2")
+	must(t, run(t, root, "", "push", "--agent", "coyote-dev"), 1, "push con atribución escondida por el upstream")
+	// Un agente no publica en Main aunque cambie mayúsculas.
+	git(t, root, "reset", "-q", "--hard", "main")
+	git(t, root, "checkout", "-q", "-b", "Main")
+	must(t, run(t, root, "", "push", "--agent", "coyote-dev"), 1, "agente en Main")
+}
+
+func TestReferenciasConEspaciosRaros(t *testing.T) {
+	base := setup(t)
+	root := filepath.Join(base, "z")
+	must(t, run(t, base, "", "init", "z", "--purpose", "prueba de referencias"), 0, "init")
+	adr := filepath.Join(root, "coyote", "decisions", "ADR-1 model:gratis.md")
+	if err := os.WriteFile(adr, []byte("# ADR-1: pagos idempotentes\n\n## Decisión\nlos pagos son idempotentes por clave\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	must(t, run(t, root, "", "ask", "pagos idempotentes", "--record"), 0, "ask --record")
+	if strings.Contains(ledgerText(t, root), " model:gratis") {
+		t.Fatalf("una referencia se partió en dos por un espacio raro:\n%s", ledgerText(t, root))
+	}
+	// index --rebuild no borra fuera del proyecto a través de un symlink.
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "index.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_ = os.RemoveAll(filepath.Join(root, ".coyote"))
+	if err := os.Symlink(outside, filepath.Join(root, ".coyote")); err != nil {
+		t.Fatal(err)
+	}
+	must(t, run(t, root, "", "index", "--rebuild"), 1, "index --rebuild con .coyote symlink")
+	if _, err := os.Stat(filepath.Join(outside, "index.json")); err != nil {
+		t.Fatal("se borró un archivo fuera del proyecto")
+	}
+}
