@@ -1,0 +1,18 @@
+# Plan de v0.5 (formato de ADR-0014; el motor que lo ejecuta llega en T35).
+id: W-0005
+title: v0.5 pipeline de impacto, motor de workstreams y equipo
+owner: "@eramirezhdez"
+autonomy: manual
+risk: R2
+reasoning: docs/plan/EXECUTION_PLAN.md#v05-team--razonamiento
+authorized_by: coyote/approvals/P-0004.json
+gate: G5                    # pipeline en los repos de la organización y supervised en el piloto
+steps:
+  - { id: T32, does: plan razonado y ADR-0013, ADR-0014, agent: coyote-sr-solution-architect, output: [docs/plan/EXECUTION_PLAN.md, coyote/decisions/] }
+  - { id: T33, does: coyote ci impact, agent: coyote-dev, output: internal/ci }
+  - { id: T34, does: coyote install --ci github, agent: coyote-devsecops, output: internal/install }
+  - { id: T35, does: motor de workstreams, agent: coyote-architect, output: internal/workstream }
+  - { id: T36, does: coyote gate pr, agent: coyote-dev, output: internal/ci }
+  - { id: T37, does: corridas medidas en el piloto, agent: persona, output: ledger del piloto, gate: human }
+  - { id: T38, does: verificación y reporte de G5, agent: coyote-reviewer, output: docs/releases/v0.5.0.md, gate: human }
+close: { summary: close.md }

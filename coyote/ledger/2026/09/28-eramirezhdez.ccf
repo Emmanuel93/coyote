@@ -87,3 +87,4 @@
 2026-09-28T20:15Z|@eramirezhdez/claude-code|W-0004|coyote|chore|release|registra la aprobación de G4 en el ledger|-|-|-|ok
 2026-09-28T20:15Z|@eramirezhdez/claude-code|-|coyote|rel|release|v0.4.0 etiquetada y binarios generados|tag:v0.4.0 sha:28d0f17|-|-|ok
 2026-09-28T20:15Z|@eramirezhdez/claude-code|W-0004|coyote|chore|release|registra el release v0.4.0 en el ledger|-|-|-|ok
+2026-09-28T20:19Z|@eramirezhdez/coyote-sr-solution-architect|W-0005|coyote|doc|plan|razonamiento de v0.5 y ADR-0013, ADR-0014|-|-|-|ok

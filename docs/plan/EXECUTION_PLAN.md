@@ -1,6 +1,6 @@
 # Plan de ejecución — Coyote
 
-Estado: v0.4.0 aprobada en G4 (P-0004) · v0.5 en planeación · actualizado 2026-09-28
+Estado: v0.4.0 aprobada en G4 (P-0004) · v0.5 en construcción · actualizado 2026-09-28
 
 Este plan ejecuta la propuesta aprobada ("Plan de construcción — Framework Coyote"). Cada release se razona con la plantilla de cinco partes que usarán los agentes de Coyote (problema, restricciones, opciones, decisión, riesgos) y cierra con un gate humano: nada se etiqueta, se publica ni toca otros proyectos sin autorización explícita.
 
@@ -20,8 +20,9 @@ Este plan ejecuta la propuesta aprobada ("Plan de construcción — Framework Co
 | v0.2 remote + context | Remotos git con autoría humana y cuotas; índice local; `get context`; `ask`; web v0 | G2 | Uso del token de GitHub; costo del primer job de indexado |
 | v0.3 gate | Aprobaciones por hash, hooks de IDE, agentes y skills, `install` para Claude Code y Cursor | G3 | Piloto en seco sobre un dominio real, en solo lectura |
 | v0.4 run | Producto multi-repo: extracción de contexto, mapa entre repos e impacto de un cambio; `coyote run`, router v1 y cierres con costo | G4 | Presupuesto para correr agentes y llevar las propuestas del piloto a cada repo |
-| v0.5 team | Autonomía `supervised` y `autonomous`, colaboración, IaC, DevSecOps, SRE, resto de IDEs, web v1 | G5 | Aplicar Coyote a los repos de la organización |
-| v1.0 | Endurecimiento, auditoría, documentación | G6 | Release 1.0 |
+| v0.5 team | Pipeline de impacto en cada PR, motor de workstreams (`supervised` y `autonomous`), aprobación en equipo por PR y corridas medidas | G5 | Aplicar coyote a los repos de la organización: pipeline y `supervised` |
+| v0.6 | Resto de IDEs, web v1, IaC, DevSecOps y SRE | G6 | Según lo que muestre v0.5 |
+| v1.0 | Endurecimiento, auditoría, documentación | G7 | Release 1.0 |
 
 ## v0.1 init — razonamiento
 
@@ -215,6 +216,89 @@ La revisión adversarial encontró que leer un repo podía correr sus filtros de
 
 G4 autoriza: el presupuesto para correr agentes con `coyote run` en tu Mac, llevar las propuestas del piloto a cada repo por PR y arrancar v0.5.
 
+## v0.5 team — razonamiento
+
+**Problema.**
+- En G3 pediste que el pipeline sacara el contexto de los tres repos y viera cada cambio de manera holística. v0.4 lo hace, pero solo cuando alguien corre `coyote impact` en su máquina. Nada lo corre en cada PR, así que un cambio que rompe a la app o al backoffice todavía llega a `main` sin que nadie lo vea.
+- `coyote run` corre un paso a la vez y lo lanza la persona. Los workstreams (`plan.yaml`) son documentos, no planes que se ejecuten, y `supervised` y `autonomous` se aceptan en `project.yaml` sin tener efecto.
+- Las aprobaciones valen en una sola máquina (D21): en equipo, una compañera no puede aprobar lo que tu agente propone ni revisar un cambio de riesgo en el PR (D6).
+- No hay corridas reales medidas: G4 autorizó el presupuesto, pero la primera corrida es tuya.
+
+**Lo que mostró v0.4.**
+- El mapa del producto cuesta segundos y cero dólares: 930 interfaces en unos 3 s y el impacto de un diff en 5 a 8 s. Correrlo en cada PR es barato.
+- Lo caro y lo riesgoso son los agentes: dólares y efectos. El gate y los topes ya los contienen.
+- El piloto encontró tópicos que nadie publica y cambios sin commit que tocan a la app. Es justo lo que un chequeo en el PR debe mostrar antes del merge.
+
+**Restricciones.**
+- El pipeline corre en GitHub Actions de cada repo. Los otros dos repos son privados: el job necesita un token de solo lectura como secreto. Instalarlo en los repos de la organización es lo que autoriza G5; v0.5 lo construye y lo prueba con eventos simulados.
+- Sin red ni dependencias nuevas en el entorno de construcción. La API de GitHub se prueba con servidores falsos, como en v0.2.
+- La autonomía no afloja el gate sin evidencia (A1, A4):
+  - `supervised` corre los pasos de un plan con un punto de control humano entre pasos;
+  - `autonomous` corre dentro de los topes del plan en una rama `ws/`, y lo evalúa quien lo autorizó.
+
+  En ambos, lo que tiene efectos sigue pasando por el gate y ningún agente se aprueba.
+- C1 y R15 como siempre; el costo de cada paso en el ledger (A3).
+
+**Opciones para el pipeline.**
+- A. Un workflow en cada repo que en el PR:
+  1. trae el proyecto del producto y los otros repos, solo lectura;
+  2. corre `coyote impact` sobre el diff del PR;
+  3. deja el reporte en el resumen del job y en un comentario del PR.
+- B. Un workflow central en el proyecto del producto, disparado desde cada repo con `repository_dispatch`. Es un salto más y un permiso de escritura entre repos.
+- C. Solo un hook local antes del push. Depende de que cada persona lo tenga y no deja rastro en el PR.
+
+**Opciones para el motor de workstreams.**
+- A. Un motor en coyote: cada paso de `plan.yaml` declara agente, entradas, salida, riesgo y tope (A2). Corre con `coyote run`, pasa sus artefactos al siguiente paso, se detiene en los puntos de control y lleva el presupuesto del workstream.
+- B. Un solo `coyote run` con un agente coordinador que llama subagentes. Menos control: un solo tope para todo y el ledger no ve cada paso.
+
+**Decisión.**
+- **Pipeline: A** (ADR-0013).
+  - `coyote ci impact` corre dentro de GitHub Actions: lee el evento del PR, arma el mapa con los otros repos y reporta el impacto del diff.
+  - El reporte va en el resumen del job y en un solo comentario del PR que se actualiza, no uno por push.
+  - Política: `warn` por defecto; `fail` hace fallar el chequeo cuando algo se rompe.
+  - `coyote install --ci github` genera el workflow; `--check` lo verifica.
+- **Motor: A** (ADR-0014). `coyote ws check|run|continue|status`:
+  - En `supervised`, el motor se detiene después de cada paso hasta que la persona revisa el artefacto y corre `coyote ws continue`.
+  - En `autonomous`, sigue hasta un punto de control, el tope del plan o una falla. Corre en una rama `ws/<W>`, y la persona que lo autorizó evalúa el resultado antes del merge.
+  - El gate aplica el modo del proyecto: sigue sin aprobarse nada solo.
+- **Equipo:** `coyote gate pr` es un chequeo de PR:
+  - calcula el riesgo del cambio por rutas y por impacto;
+  - un cambio R2 o R3, o uno que rompe a otro repo, pide la revisión aprobada de un dueño (CODEOWNERS) antes del merge (R17).
+
+  Es la aprobación en equipo de D6, sin claves compartidas.
+- **Medición:** las primeras corridas reales en el piloto las lanzas tú, dentro del presupuesto de G4. Sus números (costo por corrida, caché, turnos) ajustan los valores del router antes de dejar correr planes.
+- **Alcance:** los demás IDEs, la web v1 y las herramientas de IaC, DevSecOps y SRE pasan a v0.6. v0.5 se enfoca en el pipeline, el motor y el trabajo en equipo, para que G5 autorice cosas verificadas.
+
+**Riesgos.**
+- Un token de lectura de los otros repos en cada repo. Mitigación:
+  - de solo lectura (contents: read), limitado a los repos del producto;
+  - el workflow corre en PRs de ramas del mismo repo, nunca de forks;
+  - el workflow no ejecuta código del PR fuera de coyote.
+- Comentarios ruidosos. Mitigación: un solo comentario que se actualiza y el detalle en el resumen del job.
+- Un plan autónomo que gasta de más o hace algo inesperado. Mitigación:
+  - tope del plan y de cada paso;
+  - corre en una rama `ws/`;
+  - lo con efectos pasa por el gate y cada paso queda en el ledger.
+- Que el chequeo del PR bloquee por un falso positivo del mapa. Mitigación: `warn` por defecto; `fail` solo para lo que se rompe, con la lista de lo que el mapa no pudo leer.
+
+### Tareas de v0.5
+
+| ID | Tarea | Razonamiento | Aceptación | Estado |
+| --- | --- | --- | --- | --- |
+| T32 | Plan y ADR-0013, ADR-0014 | El pipeline y el motor cambian cómo se integra coyote al trabajo diario | Esta sección, los ADRs y W-0005 | Hecho |
+| T33 | `coyote ci impact` | Es el pipeline que pediste en G3: cada PR se ve contra todo el producto | Lee el evento del PR, arma el mapa con los otros repos, escribe el resumen del job, crea o actualiza un solo comentario y sale según la política; pruebas con eventos y API simulados | Pendiente |
+| T34 | `coyote install --ci github` | Instalarlo debe ser un comando, igual que el gate | Workflow por repo del producto con permisos mínimos, sin forks, y la documentación del secreto; `--check` | Pendiente |
+| T35 | Motor de workstreams | Sin motor, `supervised` y `autonomous` son palabras | `coyote ws check\|run\|continue\|status`: contrato por paso (A2), artefactos encadenados, puntos de control, tope del plan, rama `ws/` en autónomo; pruebas con un `claude` simulado | Pendiente |
+| T36 | `coyote gate pr` | La aprobación en equipo sin compartir claves | Riesgo por rutas e impacto; un R2, R3 o un cambio que rompe pide la revisión de un dueño; reporte en el PR | Pendiente |
+| T37 | Corridas medidas | Evidencia antes de dejar correr planes | Tus primeras corridas en el piloto, con su costo y caché en el ledger y en el reporte de G5 | Pendiente |
+| T38 | Verificación y G5 | Evidencia antes de aplicar coyote en los repos de la organización | Pruebas, revisión adversarial y `docs/releases/v0.5.0.md` | Pendiente |
+
+G5 autoriza:
+
+1. Instalar el pipeline en los tres repos: los PR de los workflows y el secreto de lectura.
+2. `supervised` en los workstreams del piloto.
+3. Arrancar v0.6: los demás IDEs, la web v1 y las herramientas de IaC, DevSecOps y SRE.
+
 ## v0.5 a v1.0
 
 Siguen el orden de la propuesta. Cada una recibirá su razonamiento completo al cerrar la anterior, con lo aprendido en su gate; así el plan no fija hoy lo que conviene decidir con evidencia.
@@ -228,7 +312,7 @@ Siguen el orden de la propuesta. Cada una recibirá su razonamiento completo al 
 | D4 embeddings | Ninguno en v0.2 (BM25 local); locales cuando lleguen | No sacar código a terceros sin autorización || Confirmado en G2 |
 | D6 aprobación R2–R3 | CLI con registro firmado en v0.3; pull request con `coyote gate pr` en CI después | La CLI funciona sin red; el PR agrega revisión de equipo | Confirmado en G3 |
 | D11 IDE del piloto | Claude Code | Es el de nivel 1 con hooks más completos | Confirmado en G3 |
-| D10 visibilidad de costos | Cada persona ve lo suyo, admins todo | Menor exposición por defecto | G4 |
+| D10 visibilidad de costos | Cada persona ve lo suyo, admins todo | Menor exposición por defecto | G5 (llega con el trabajo en equipo) |
 | D12 hub | `kredius`, sin crearlo hasta G5 | Aislamiento | G5 |
 | D13 nombres de archivo | `README.coyote.md` y `CONTEXT.coyote.md` | Coherente con `README.md` y `AGENTS.md` | Confirmado en G1 |
 | D14 alcance de R15 | Commits, PRs, comentarios, docs, releases y autoría del commit | Es lo que pediste | Confirmado en G1 |
@@ -237,6 +321,8 @@ Siguen el orden de la propuesta. Cada una recibirá su razonamiento completo al 
 | D19 autonomía por defecto | `manual` | Nada con efectos sin aprobación mientras no haya evidencia | Confirmado en G3 |
 | D3 runner de `coyote run` | Claude Code headless en la máquina de la persona (ADR-0012) | Aplica el gate y reporta tokens y costo sin runtime nuevo | Confirmado en G4 |
 | D5 carriles de gasto | Tope mensual por proyecto en `project.yaml` y tope por corrida; la suscripción o la API key son de la persona | Gasto predecible y visible en el ledger | Confirmado en G4 |
+| D24 pipeline de impacto | Workflow en cada repo con token de solo lectura de los otros repos del producto (ADR-0013) | El reporte queda en el PR donde se decide el merge | G5 |
+| D25 autonomía en el piloto | `supervised` en los workstreams del piloto; `autonomous` solo después de medir planes supervisados | Un plan autónomo sin evidencia es gasto y riesgo sin control | G5 |
 | D23 unidad de trabajo | Producto multi-repo: servicios, app y backoffice juntos, en un proyecto aparte que lee los tres (ADR-0011) | Un cambio en uno afecta a los otros (G3) | Confirmado en G4 |
 | D20 lectura sin aprobación | Lista cerrada de comandos de solo lectura en la herramienta; sin patrones propios del proyecto | Leer no tiene efectos y evita la fatiga | Confirmado en G3 |
 | D21 validez de una aprobación | Solo en la máquina donde se dio (firma con clave local), 24 h como máximo | Un registro copiado o fabricado no sirve | Confirmado en G3 |
