@@ -34,7 +34,7 @@ CLI en Go para contexto versionado, gates humanos, estándar por capas y costo t
 - [how] release: make dist genera binarios de macOS y Linux con la versión inyectada por ldflags (Makefile)
 - [term] ccf: Coyote Compact Format: una línea por evento, once campos separados por barra vertical (docs/specs/ccf-v1.md)
 - [risk] tokens: el estimador local de tokens puede desviarse del conteo real; v0.2 lo contrasta con count_tokens (ADR-0006)
-- [todo] remote: push, pull y get context con OAuth device flow y cuotas a ritmo humano llegan en v0.2 (docs/plan/EXECUTION_PLAN.md)
+- [todo] agents: motor de agentes, aprobaciones por hash y hooks de IDE llegan en v0.3 (docs/plan/EXECUTION_PLAN.md)
 - [inv] index: el índice se reconstruye desde git; .coyote/ es caché y nunca se versiona (ADR-0007)
 - [inv] sync: push y pull usan el git del sistema; coyote nunca guarda credenciales de git (ADR-0008)
 - [inv] web: coyote web escucha solo en loopback, valida Host y es de solo lectura (internal/web/web.go)

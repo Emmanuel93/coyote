@@ -2,7 +2,7 @@
 
 Coyote es una CLI en Go para trabajar con agentes de IA en proyectos de software sin perder el control: el contexto del proyecto vive versionado junto al código, cada acción queda registrada con su costo, el estándar del equipo se valida solo y ningún entregable sale firmado por una herramienta de IA.
 
-Estado: **v0.1.0** (aprobada en el gate G1). Funciona sin red y sin credenciales. Los remotos (GitHub), el índice de contexto, los agentes y la web de costos llegan en las siguientes versiones; el orden está en [docs/plan/EXECUTION_PLAN.md](docs/plan/EXECUTION_PLAN.md).
+Estado: **v0.2.0** en gate G2 (v0.1.0 aprobada en G1). Funciona sin red; para GitHub usa tus propias credenciales. Los remotos (GitHub), el índice de contexto, los agentes y la web de costos llegan en las siguientes versiones; el orden está en [docs/plan/EXECUTION_PLAN.md](docs/plan/EXECUTION_PLAN.md).
 
 ## Qué resuelve
 
@@ -33,6 +33,10 @@ git add -A
 coyote commit -m "feat(pedidos): alta del proyecto"
 coyote log                          # eventos con tokens y costo
 coyote standards lint               # 0 si cumple las reglas MUST
+coyote get context --scope pedidos  # lo que un agente necesita saber, acotado
+coyote ask "cuándo se confirma un pedido"
+coyote push                         # revisa autoría y estándar, y publica a ritmo humano
+coyote web                          # costos en http://127.0.0.1:7410
 ```
 
 `coyote init` nunca sobrescribe: en un repo existente solo agrega lo que falta.
@@ -53,6 +57,13 @@ coyote standards lint               # 0 si cumple las reglas MUST
 | `generate agents [--check]` | genera `AGENTS.md` o verifica que esté al día |
 | `hooks install` | instala el hook `commit-msg` |
 | `doctor` | diagnóstico completo del proyecto |
+| `get context [repo]` | paquete de contexto acotado (`--scope`, `--query`, `--budget`) con referencias |
+| `ask "pregunta"` | busca en el contexto del proyecto o de otro repo, sin llamar a ningún modelo |
+| `index [--rebuild]` | arma el índice local y muestra su tamaño |
+| `repo add\|list\|fetch` | repos del proyecto; de otros repos se traen solo sus documentos |
+| `push` / `pull` | publica y trae con autoría, estándar y ritmo humano revisados |
+| `auth login\|status\|logout` | token de GitHub desde el entorno, `gh` o el llavero; nunca en archivos |
+| `web` | costos por proyecto, persona, modelo y agente en `127.0.0.1` |
 
 `coyote help <comando>` muestra las opciones. `-C <ruta>` corre cualquier comando sobre otro directorio.
 
@@ -80,7 +91,7 @@ coyote/
 
 ## Documentación
 
-- Especificaciones: [CCF v1](docs/specs/ccf-v1.md) (ledger), [CCF-doc v1](docs/specs/ccf-doc-v1.md) (documentos), [estándar v1](docs/specs/standards-v1.md), [atribución v1](docs/specs/attribution-v1.md).
+- Especificaciones: [CCF v1](docs/specs/ccf-v1.md) (ledger), [CCF-doc v1](docs/specs/ccf-doc-v1.md) (documentos), [estándar v1](docs/specs/standards-v1.md), [atribución v1](docs/specs/attribution-v1.md), [contexto v1](docs/specs/context-v1.md), [remoto v1](docs/specs/remote-v1.md).
 - Estándar default: [standards/default/STANDARD.md](standards/default/STANDARD.md).
 - Decisiones: [coyote/decisions/](coyote/decisions/).
 - Plan y releases: [docs/plan/EXECUTION_PLAN.md](docs/plan/EXECUTION_PLAN.md), [docs/releases/](docs/releases/).

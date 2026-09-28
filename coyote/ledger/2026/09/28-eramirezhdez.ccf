@@ -38,3 +38,4 @@
 2026-09-28T05:35Z|@eramirezhdez/coyote-devsecops|W-0002|coyote|feat|sync|push y pull con gates, ritmo humano y credenciales en el llavero|-|-|-|ok
 2026-09-28T05:39Z|@eramirezhdez/coyote-security|W-0002|coyote|note|web|inv: coyote web escucha solo en loopback, valida Host y es de…|doc:CONTEXT.coyote.md|-|-|ok
 2026-09-28T05:39Z|@eramirezhdez/coyote-dev|W-0002|coyote|feat|web|vista FinOps de costos por proyecto y por persona|-|-|-|ok
+2026-09-28T05:40Z|@eramirezhdez/coyote-scribe|W-0002|coyote|doc|specs|contexto v1 y remoto v1; README con los comandos de v0.2|-|-|-|ok
