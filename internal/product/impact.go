@@ -2,9 +2,7 @@ package product
 
 import (
 	"fmt"
-	"os"
 	"path"
-	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -402,36 +400,20 @@ type mentionGraph struct {
 
 func newMentionGraph(dir, mod string) *mentionGraph {
 	g := &mentionGraph{types: map[string][]string{}, texts: map[string]string{}, mentions: map[string][]string{}}
-	root := filepath.Join(dir, filepath.FromSlash(mod))
-	_ = filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
-		if err != nil {
-			return nil
-		}
-		if d.IsDir() {
-			if skipDirs[d.Name()] {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		ext := path.Ext(d.Name())
-		if ext != ".java" && ext != ".kt" {
-			return nil
-		}
-		rel, _ := filepath.Rel(dir, p)
-		rel = filepath.ToSlash(rel)
-		if isTestPath(rel) {
-			return nil
+	for _, rel := range moduleFiles(dir, mod) {
+		ext := path.Ext(rel)
+		if (ext != ".java" && ext != ".kt") || isTestPath(rel) {
+			continue
 		}
 		data, ok := readRegular(dir, rel)
 		if !ok {
-			return nil
+			continue
 		}
 		g.texts[rel] = string(data)
 		for _, m := range typeDeclRe.FindAllStringSubmatch(string(data), -1) {
 			g.types[rel] = append(g.types[rel], m[1])
 		}
-		return nil
-	})
+	}
 	// Índice identificador → archivos que lo mencionan: un recorrido por
 	// archivo en lugar de una expresión por tipo y archivo.
 	uses := map[string][]string{}

@@ -943,3 +943,57 @@ func TestRutasConcatenadas(t *testing.T) {
 		t.Errorf("concatenación en TypeScript: %+v", calls)
 	}
 }
+
+func TestBFFConCarpetaOut(t *testing.T) {
+	base := t.TempDir()
+	svc := filepath.Join(base, "svc")
+	put(t, svc, "build.gradle.kts", "plugins { id(\"org.springframework.boot\") }\n")
+	put(t, svc, "services/dominio/build.gradle.kts", "x\n")
+	put(t, svc, "services/dominio/src/main/java/demo/adapter/in/api/Api.java", "@RestController\n@RequestMapping(\"/api/v1/cosas\")\nclass Api {\n    @GetMapping\n    public Object list() { return null; }\n}\n")
+	put(t, svc, "services/bff/build.gradle.kts", "x\n")
+	put(t, svc, "services/bff/src/main/java/demo/adapter/in/api/Ctrl.java", `package demo.adapter.in.api;
+@RestController
+public class Ctrl {
+    private final CosasClient cosas;
+    @GetMapping("/cosas")
+    public Object list() { return cosas.listar(); }
+}
+`)
+	put(t, svc, "services/bff/src/main/java/demo/adapter/out/client/CosasClient.java", `package demo.adapter.out.client;
+public class CosasClient {
+    private final WebClient webClient;
+    public Object listar() {
+        return webClient.get().uri("/api/v1/cosas").retrieve();
+    }
+}
+`)
+	app := filepath.Join(base, "app")
+	put(t, app, "pubspec.yaml", "name: a\n")
+	put(t, app, "lib/repo.dart", "class R {\n  Future l() => _dio.get('/cosas');\n}\n")
+	for _, git := range []bool{true, false} {
+		if git {
+			gitRepo(t, svc)
+		}
+		var scans []*Scan
+		src := Sources{"svc": svc, "app": app}
+		for _, n := range []string{"svc", "app"} {
+			sc, err := Extract(Source{Name: n, Dir: src[n]})
+			if err != nil {
+				t.Fatal(err)
+			}
+			scans = append(scans, sc)
+		}
+		im, err := Build(scans).Impact(Query{Endpoint: "GET /api/v1/cosas"}, src)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !hitIn(im.Indirect, "app", "/cosas") {
+			t.Errorf("git=%v: un cliente en adapter/out también se sigue hasta la app: %+v", git, im)
+		}
+		if git {
+			if err := os.RemoveAll(filepath.Join(svc, ".git")); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+}

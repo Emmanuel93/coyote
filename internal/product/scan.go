@@ -142,7 +142,9 @@ func files(dir string) ([]string, string, error) {
 			return nil
 		}
 		if d.IsDir() {
-			if skipDirs[d.Name()] && p != dir {
+			// Las carpetas de compilación se saltan, pero no un paquete del
+			// código que se llame igual (adapter/out, build, target bajo src/).
+			if rel, _ := filepath.Rel(dir, p); skipDirs[d.Name()] && p != dir && !underSrc(filepath.ToSlash(rel)) {
 				return filepath.SkipDir
 			}
 			return nil
@@ -426,22 +428,7 @@ type moduleCtx struct {
 
 func loadModuleCtx(dir, mod string) *moduleCtx {
 	mc := &moduleCtx{consts: constTable{}, props: map[string]string{}, cfg: map[string]cfgClass{}}
-	root := filepath.Join(dir, filepath.FromSlash(mod))
-	_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return nil
-		}
-		if d.IsDir() {
-			if skipDirs[d.Name()] && p != root {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		rel, err := filepath.Rel(dir, p)
-		if err != nil {
-			return nil
-		}
-		rel = filepath.ToSlash(rel)
+	for _, rel := range moduleFiles(dir, mod) {
 		ext := strings.ToLower(path.Ext(rel))
 		if (ext == ".java" || ext == ".kt") && !isTestPath(rel) {
 			if data, ok := readRegular(dir, rel); ok {
@@ -455,7 +442,30 @@ func loadModuleCtx(dir, mod string) *moduleCtx {
 				parseProps(rel, data, mc.props)
 			}
 		}
-		return nil
-	})
+	}
 	return mc
+}
+
+// moduleFiles lista los archivos de un módulo con la misma lista que el mapa
+// (git, con lo nuevo sin commit), para que el análisis vea lo mismo que el mapa.
+func moduleFiles(dir, mod string) []string {
+	list, _, err := files(dir)
+	if err != nil {
+		return nil
+	}
+	if mod == "." || mod == "" {
+		return list
+	}
+	var out []string
+	for _, f := range list {
+		if strings.HasPrefix(f, mod+"/") {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// underSrc informa si una ruta está dentro de una carpeta de código fuente.
+func underSrc(rel string) bool {
+	return strings.HasPrefix(rel, "src/") || strings.Contains(rel, "/src/") || strings.HasPrefix(rel, "lib/") || strings.Contains(rel, "/lib/")
 }
