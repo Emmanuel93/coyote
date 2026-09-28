@@ -38,7 +38,7 @@ Frontmatter:
 |-------|-------------|---------|
 | coyote | sí | `1` |
 | repo | sí | `acme-shop` |
-| type | sí | `backend`, `mobile`, `web`, `infra`, `hub`, `tool`, `library`, `docs`, `data` u `other` |
+| type | sí | `backend`, `mobile`, `web`, `infra`, `hub`, `product`, `tool`, `library`, `docs`, `data` u `other` |
 | stack | no | `[typescript, postgres]` |
 | owners | recomendada | `["@ana"]` |
 | standards | no | `{ profile: backend, waive: [{id: R10, reason: "README heredado", adr: ADR-0003}] }` |

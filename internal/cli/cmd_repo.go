@@ -22,7 +22,7 @@ var docPatterns = []string{"/README.coyote.md", "/CONTEXT.coyote.md", "/README.m
 
 func cmdRepo(a *app, args []string) error {
 	if len(args) == 0 {
-		return fail(2, "uso: coyote repo add <nombre> <url> [--path P] [--branch B] | list | fetch [nombre]")
+		return fail(2, "uso: coyote repo add <nombre> [url] [--path P] [--branch B] | list | fetch [nombre]")
 	}
 	switch args[0] {
 	case "add":
@@ -36,8 +36,8 @@ func cmdRepo(a *app, args []string) error {
 }
 
 func repoAdd(a *app, args []string) error {
-	fs := a.flags("repo add", "<nombre> <url> [--path P] [--branch B]")
-	path := fs.String("path", "", "copia local del repo, relativa al proyecto (opcional)")
+	fs := a.flags("repo add", "<nombre> [url] [--path P] [--branch B]")
+	path := fs.String("path", "", "copia local del repo, relativa al proyecto o absoluta; coyote solo la lee")
 	branch := fs.String("branch", "", "rama de la que se leen los documentos (por defecto, la principal)")
 	pos, err := parseArgs(fs, args)
 	if err != nil {
@@ -60,6 +60,9 @@ func repoAdd(a *app, args []string) error {
 		return fail(1, "%v", err)
 	}
 	fmt.Fprintf(a.stdout, "repo %s %s en %s; su contexto: coyote get context %s\n", r.Name, status, project.ConfigPath, r.Name)
+	if cfg, err := project.Load(root); err == nil && cfg.Type == "product" && r.Path != "" {
+		fmt.Fprintln(a.stdout, "producto: coyote map arma el mapa de interfaces y coyote extract propone sus documentos")
+	}
 	return nil
 }
 
@@ -131,6 +134,17 @@ func (a *app) repoDocs(root string, r project.RepoRef) (string, error) {
 		if _, err := os.Stat(filepath.Join(p, ccfdoc.ReadmeFile)); err == nil {
 			return p, nil
 		}
+	}
+	// En un producto, la propuesta de coyote extract mientras el repo no tenga
+	// sus propios documentos.
+	proposed := filepath.Join(root, filepath.FromSlash(reposDir), r.Name)
+	if fsx.NoSymlinks(root, reposDir+"/"+r.Name+"/"+ccfdoc.ReadmeFile) == nil && fsx.Regular(root, reposDir+"/"+r.Name+"/"+ccfdoc.ReadmeFile) {
+		if r.URL == "" || r.Path != "" {
+			return proposed, nil
+		}
+	}
+	if r.URL == "" {
+		return "", fmt.Errorf("el repo %s no tiene %s: corre coyote extract %s para proponerlo", r.Name, ccfdoc.ReadmeFile, r.Name)
 	}
 	return a.fetchDocs(root, r, false)
 }

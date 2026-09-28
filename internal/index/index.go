@@ -27,6 +27,7 @@ import (
 	"github.com/Emmanuel93/coyote/internal/ccfdoc"
 	"github.com/Emmanuel93/coyote/internal/fsx"
 	"github.com/Emmanuel93/coyote/internal/glob"
+	"github.com/Emmanuel93/coyote/internal/product"
 	"github.com/Emmanuel93/coyote/internal/tokens"
 	"github.com/Emmanuel93/coyote/internal/userdir"
 )
@@ -39,16 +40,18 @@ const (
 	KindDoc        = "doc"
 	KindWorkstream = "workstream"
 	KindEvent      = "event"
+	KindMap        = "map" // interfaces del producto (coyote/map/*.map)
 )
 
 // CachePath es la caché del índice, relativa a la raíz; .coyote/ no se versiona.
 const CachePath = ".coyote/index.json"
 
-const cacheVersion = 3
+const cacheVersion = 4
 
 // Chunk es la unidad que se busca y se entrega como contexto.
 type Chunk struct {
 	Kind   string    `json:"k"`
+	Repo   string    `json:"r,omitempty"` // repo del producto al que se refiere (coyote/repos/, coyote/map/)
 	Type   string    `json:"t,omitempty"` // inv, dec, purpose, estado del ADR, tipo de evento...
 	Scope  string    `json:"s,omitempty"`
 	Title  string    `json:"h,omitempty"`
@@ -99,15 +102,23 @@ type cache struct {
 }
 
 // Build arma el índice de root usando la caché cuando los archivos no cambiaron.
-func Build(root string) (*Index, error) {
+func Build(root string) (*Index, error) { return BuildCached(root, root, CachePath) }
+
+// BuildCached arma el índice de root con la caché en base/rel. Sirve para
+// indexar la carpeta de otro repo sin escribir nada en ella: la caché queda en
+// el proyecto que pregunta. Con rel vacío no hay caché.
+func BuildCached(root, base, rel string) (*Index, error) {
 	files, err := candidates(root)
 	if err != nil {
 		return nil, err
 	}
 	key, keyErr := userdir.Key("index")
+	if rel == "" {
+		keyErr = errNoCache
+	}
 	old := &cache{Files: map[string]*fileEntry{}}
 	if keyErr == nil {
-		old = readCache(root)
+		old = readCache(base, rel)
 	}
 	fresh := &cache{Version: cacheVersion, Files: map[string]*fileEntry{}}
 	ix := &Index{Root: root}
@@ -142,15 +153,17 @@ func Build(root string) (*Index, error) {
 		}
 	}
 	if keyErr == nil && (ix.Parsed > 0 || len(fresh.Files) != len(old.Files)) {
-		writeCache(root, fresh)
+		writeCache(base, rel, fresh)
 	}
 	ix.bm25 = newBM25(ix.Chunks)
 	return ix, nil
 }
 
-func readCache(root string) *cache {
+var errNoCache = fmt.Errorf("sin caché")
+
+func readCache(base, rel string) *cache {
 	c := &cache{Files: map[string]*fileEntry{}}
-	data, err := fsx.ReadFile(root, CachePath, 64<<20)
+	data, err := fsx.ReadFile(base, rel, 64<<20)
 	if err != nil {
 		return c
 	}
@@ -162,11 +175,11 @@ func readCache(root string) *cache {
 }
 
 // writeCache guarda la caché si puede; si no, el índice funciona igual.
-func writeCache(root string, c *cache) {
-	if fsx.NoSymlinks(root, CachePath) != nil {
+func writeCache(base, rel string, c *cache) {
+	if fsx.NoSymlinks(base, rel) != nil {
 		return
 	}
-	p := filepath.Join(root, filepath.FromSlash(CachePath))
+	p := filepath.Join(base, filepath.FromSlash(rel))
 	if os.MkdirAll(filepath.Dir(p), 0o755) != nil {
 		return
 	}
@@ -221,6 +234,12 @@ func candidates(root string) ([]string, error) {
 	walk("coyote/decisions", md)
 	walk("coyote/workstreams", func(p string) bool { return md(p) || strings.HasSuffix(p, ".yaml") })
 	walk("coyote/ledger", func(p string) bool { return strings.HasSuffix(p, ".ccf") })
+	// Producto multi-repo: el mapa de interfaces y los documentos propuestos de cada repo.
+	walk("coyote/map", func(p string) bool { return strings.HasSuffix(p, ".map") })
+	walk("coyote/repos", func(p string) bool {
+		b := filepath.Base(p)
+		return b == ccfdoc.ReadmeFile || b == ccfdoc.ContextFile
+	})
 	if d, err := fsx.ReadFile(root, ccfdoc.ReadmeFile, maxFile); err == nil {
 		doc, _ := ccfdoc.Parse(ccfdoc.ReadmeFile, d)
 		for _, e := range doc.All("docs") {
@@ -275,6 +294,15 @@ func parseFile(rel string, data []byte) ([]Chunk, error) {
 	switch {
 	case rel == ccfdoc.ReadmeFile || rel == ccfdoc.ContextFile:
 		return parseCCFDoc(rel, data), nil
+	case strings.HasPrefix(rel, "coyote/map/"):
+		return parseMap(rel, data), nil
+	case strings.HasPrefix(rel, "coyote/repos/"):
+		chunks := parseCCFDoc(rel, data)
+		repo := strings.SplitN(strings.TrimPrefix(rel, "coyote/repos/"), "/", 2)[0]
+		for i := range chunks {
+			chunks[i].Repo = repo
+		}
+		return chunks, nil
 	case strings.HasPrefix(rel, "coyote/ledger/"):
 		return parseLedger(rel, data), nil
 	case strings.HasPrefix(rel, "coyote/decisions/"):
@@ -285,6 +313,57 @@ func parseFile(rel string, data []byte) ([]Chunk, error) {
 		return parseMarkdown(rel, data, KindWorkstream), nil
 	}
 	return parseMarkdown(rel, data, KindDoc), nil
+}
+
+// mapChunkEntries acota cuántas interfaces lleva un fragmento del mapa.
+const mapChunkEntries = 30
+
+// parseMap indexa el mapa de un repo del producto: un fragmento por módulo y
+// rol (expone, llama, publica, escucha) con sus rutas o tópicos, para que ask
+// y get context encuentren quién expone o usa algo.
+func parseMap(rel string, data []byte) []Chunk {
+	repo, _, entries, err := product.Decode(string(data))
+	if err != nil {
+		return nil
+	}
+	type group struct {
+		mod, role string
+		items     []string
+	}
+	var order []string
+	groups := map[string]*group{}
+	for _, e := range entries {
+		item := e.Describe()
+		if e.Unresolved {
+			item = e.Raw + " (sin resolver)"
+		}
+		key := e.Module + "|" + e.Role
+		g := groups[key]
+		if g == nil {
+			g = &group{mod: e.Module, role: e.Role}
+			groups[key] = g
+			order = append(order, key)
+		}
+		g.items = append(g.items, item)
+	}
+	sort.Strings(order)
+	var out []Chunk
+	for _, k := range order {
+		g := groups[k]
+		name := product.ModuleName(g.mod)
+		if g.mod == "." || g.mod == "" {
+			name = repo
+		}
+		for i := 0; i < len(g.items); i += mapChunkEntries {
+			end := i + mapChunkEntries
+			if end > len(g.items) {
+				end = len(g.items)
+			}
+			out = append(out, chunk(Chunk{Kind: KindMap, Repo: repo, Type: g.role, Scope: name,
+				Title: repo + ": " + name + " " + g.role, Text: strings.Join(g.items[i:end], ", "), Path: rel}))
+		}
+	}
+	return out
 }
 
 func chunk(c Chunk) Chunk {

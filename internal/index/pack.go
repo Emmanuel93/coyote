@@ -83,6 +83,9 @@ func (ix *Index) Pack(repo string, o PackOptions) *Pack {
 		}
 	}
 	relevant := func(c Chunk) bool {
+		if o.Scope != "" && c.Repo != "" && InScope(c.Repo, o.Scope) {
+			return true // el ámbito es un repo del producto: todo lo suyo
+		}
 		if o.Scope != "" && c.Kind != KindReadme && !InScope(c.Scope, o.Scope) {
 			return false
 		}
@@ -98,12 +101,17 @@ func (ix *Index) Pack(repo string, o PackOptions) *Pack {
 				cands = append(cands, c)
 			}
 		}
+		cands = mergeRepos(cands)
 		// Con consulta, dentro de cada grupo va primero lo más relevante; las
 		// invariantes del ámbito entran todas, sea cual sea la consulta.
 		if o.Query != "" && i > 1 {
 			sort.SliceStable(cands, func(a, b int) bool { return rank[cands[a].Ref()] > rank[cands[b].Ref()] })
 		}
 		p.add(t.title, cands, func(c Chunk) string { return lineFor(c) })
+	}
+	// Producto multi-repo: las interfaces relevantes del mapa.
+	if q := strings.TrimSpace(o.Query + " " + o.Scope); q != "" {
+		p.add("Interfaces del producto", hitsChunks(ix.Search(q, SearchOptions{Kinds: []string{KindMap}, Limit: 8})), lineFor)
 	}
 	// ADRs y documentos: solo los relevantes para el ámbito o la consulta; sin
 	// ninguno de los dos, la lista de ADRs con su estado.
@@ -154,6 +162,27 @@ func (p *Pack) add(title string, cands []Chunk, format func(Chunk) string) {
 	}
 }
 
+// mergeRepos junta en una línea lo que varios repos del producto dicen igual
+// (la misma entrada en sus documentos propuestos): se lee una vez, con sus repos.
+func mergeRepos(cands []Chunk) []Chunk {
+	var out []Chunk
+	at := map[string]int{}
+	for _, c := range cands {
+		if c.Repo == "" {
+			out = append(out, c)
+			continue
+		}
+		k := c.Kind + "|" + c.Type + "|" + c.Scope + "|" + c.Text + "|" + c.Title
+		if i, ok := at[k]; ok {
+			out[i].Repo += ", " + c.Repo
+			continue
+		}
+		at[k] = len(out)
+		out = append(out, c)
+	}
+	return out
+}
+
 func hitsChunks(hits []Hit) []Chunk {
 	out := make([]Chunk, len(hits))
 	for i, h := range hits {
@@ -185,6 +214,14 @@ func adrTitles(chunks []Chunk) []Chunk {
 const maxItemWords = 60
 
 func lineFor(c Chunk) string {
+	line := chunkLine(c)
+	if c.Repo != "" && c.Kind != KindMap {
+		line = "- " + c.Repo + " · " + strings.TrimPrefix(line, "- ")
+	}
+	return line
+}
+
+func chunkLine(c Chunk) string {
 	text := c.Text
 	if w := strings.Fields(text); len(w) > maxItemWords {
 		text = strings.Join(w[:maxItemWords], " ") + " …"

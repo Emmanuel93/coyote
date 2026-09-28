@@ -37,7 +37,7 @@ const (
 )
 
 // ProjectTypes son los tipos de proyecto válidos; también son perfiles del estándar.
-var ProjectTypes = []string{"backend", "mobile", "web", "infra", "hub", "tool", "library", "docs", "data", "other"}
+var ProjectTypes = []string{"backend", "mobile", "web", "infra", "hub", "product", "tool", "library", "docs", "data", "other"}
 
 // ValidProjectType informa si t es un tipo de proyecto válido.
 func ValidProjectType(t string) bool {

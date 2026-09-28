@@ -40,15 +40,15 @@ func cmdGet(a *app, args []string) error {
 	if len(pos) > 0 {
 		repo = pos[0]
 	}
-	root, name, err := a.contextRoot(repo)
+	cs, err := a.contextRoot(repo)
 	if err != nil {
 		return err
 	}
-	ix, err := index.Build(root)
+	ix, err := cs.build()
 	if err != nil {
 		return err
 	}
-	p := ix.Pack(name, index.PackOptions{Scope: *scope, Query: *query, Budget: *budget, Events: *events, Now: a.now()})
+	p := ix.Pack(cs.name, index.PackOptions{Scope: *scope, Query: *query, Budget: *budget, Events: *events, Now: a.now()})
 	switch *format {
 	case "md":
 		fmt.Fprint(a.stdout, p.Markdown())
@@ -60,19 +60,30 @@ func cmdGet(a *app, args []string) error {
 	return nil
 }
 
+// contextSource es de dónde sale el contexto y dónde queda la caché de su
+// índice: la carpeta de otro repo se lee sin escribir nada en ella.
+type contextSource struct {
+	root, name     string
+	cacheBase, rel string
+}
+
+func (c contextSource) build() (*index.Index, error) {
+	return index.BuildCached(c.root, c.cacheBase, c.rel)
+}
+
 // contextRoot resuelve de qué proyecto se pide contexto: el actual, una ruta
 // local a otro proyecto coyote o un repo registrado en coyote/project.yaml.
-func (a *app) contextRoot(repo string) (string, string, error) {
+func (a *app) contextRoot(repo string) (contextSource, error) {
 	wd, err := a.workdir()
 	if err != nil {
-		return "", "", err
+		return contextSource{}, err
 	}
 	if repo == "" || repo == "." {
 		root, cfg, err := a.project()
 		if err != nil {
-			return "", "", err
+			return contextSource{}, err
 		}
-		return root, cfg.Name, nil
+		return contextSource{root, cfg.Name, root, index.CachePath}, nil
 	}
 	if p := repo; strings.ContainsAny(p, "/\\") || strings.HasPrefix(p, ".") {
 		if !filepath.IsAbs(p) {
@@ -81,25 +92,26 @@ func (a *app) contextRoot(repo string) (string, string, error) {
 		if _, err := os.Stat(filepath.Join(p, filepath.FromSlash(project.ConfigPath))); err == nil {
 			cfg, err := project.Load(p)
 			if err != nil {
-				return "", "", err
+				return contextSource{}, err
 			}
-			return p, cfg.Name, nil
+			return contextSource{p, cfg.Name, p, index.CachePath}, nil
 		}
 	}
 	root, cfg, err := a.project()
 	if err != nil {
-		return "", "", err
+		return contextSource{}, err
 	}
 	if repo == cfg.Name {
-		return root, cfg.Name, nil
+		return contextSource{root, cfg.Name, root, index.CachePath}, nil
 	}
 	for _, r := range cfg.Repos {
 		if r.Name == repo {
 			dir, err := a.repoDocs(root, r)
-			return dir, r.Name, err
+			// La caché del índice de otro repo queda en este proyecto, nunca en el repo.
+			return contextSource{dir, r.Name, root, ".coyote/index-repos/" + r.Name + ".json"}, err
 		}
 	}
-	return "", "", fail(1, "no conozco el repo %q: regístralo con coyote repo add %s <url>", repo, repo)
+	return contextSource{}, fail(1, "no conozco el repo %q: regístralo con coyote repo add %s <url>", repo, repo)
 }
 
 func cmdAsk(a *app, args []string) error {
@@ -121,12 +133,13 @@ func cmdAsk(a *app, args []string) error {
 		fs.Usage()
 		return fail(2, "")
 	}
-	root, name, err := a.contextRoot(*repo)
+	cs, err := a.contextRoot(*repo)
 	if err != nil {
 		return err
 	}
+	name := cs.name
 	start := time.Now()
-	ix, err := index.Build(root)
+	ix, err := cs.build()
 	if err != nil {
 		return err
 	}
@@ -148,12 +161,12 @@ func cmdAsk(a *app, args []string) error {
 	}
 	if *asJSON {
 		type out struct {
-			Kind, Type, Scope, Title, Text, Ref string
-			Score                               float64
+			Kind, Repo, Type, Scope, Title, Text, Ref string
+			Score                                     float64
 		}
 		res := make([]out, len(hits))
 		for i, h := range hits {
-			res[i] = out{h.Kind, h.Type, h.Scope, h.Title, h.Text, h.Ref(), h.Score}
+			res[i] = out{h.Kind, h.Repo, h.Type, h.Scope, h.Title, h.Text, h.Ref(), h.Score}
 		}
 		enc := json.NewEncoder(a.stdout)
 		enc.SetIndent("", "  ")
@@ -167,6 +180,8 @@ func cmdAsk(a *app, args []string) error {
 		for i, h := range hits {
 			label := h.Kind
 			switch {
+			case (h.Kind == index.KindContext || h.Kind == index.KindReadme) && h.Repo != "":
+				label = fmt.Sprintf("%s · [%s] %s", h.Repo, h.Type, orDash(h.Scope))
 			case h.Kind == index.KindContext || h.Kind == index.KindReadme:
 				label = fmt.Sprintf("[%s] %s", h.Type, orDash(h.Scope))
 			case h.Kind == index.KindEvent:

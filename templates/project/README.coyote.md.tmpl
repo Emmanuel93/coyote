@@ -8,5 +8,10 @@ standards: { profile: {{.Type}} }
 ---
 # {{.Name}}
 purpose|{{.Purpose}}
+{{- if eq .Type "product"}}
+run|coyote map
+test|coyote map --check
+{{- else}}
 run|TODO: comando para correr
 test|TODO: comando para probar
+{{- end}}
