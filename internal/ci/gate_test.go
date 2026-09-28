@@ -58,7 +58,7 @@ func TestCodeowners(t *testing.T) {
 *.sql                @org/datos
 /docs/               @luis
 apps/                @org/apps
-/services/pagos      @org/Pagos @marta correo@ejemplo.com
+/services/pagos      @org/Pagos @marta
 /services/pagos/README.md
 docs/*.md            @luis @eva   # comentario
 !ignorado            @nadie
@@ -143,6 +143,26 @@ func TestDecideGate(t *testing.T) {
 	in.Reviews = []Review{{User: "zoe", State: "APPROVED", CommitID: head}}
 	if r = DecideGate(in); r.OK || !strings.Contains(strings.Join(r.Notes, "\n"), "no pude verificar quién es de @org/secreto") {
 		t.Errorf("equipo sin verificar: %+v", r)
+	}
+	// Quien escribió commits del PR no aprueba su propio código.
+	in = base
+	in.Reviews = []Review{{User: "marta", State: "APPROVED", CommitID: head}}
+	in.Excluded = []string{"Marta"}
+	if r = DecideGate(in); r.OK {
+		t.Errorf("aprueba quien escribió un commit: %+v", r)
+	}
+	// Un dueño por correo no deja aprobar a cualquiera.
+	in = base
+	in.Owners = ParseCodeowners("*.yml dba@ejemplo.com\n")
+	in.Reviews = []Review{{User: "mallory", State: "APPROVED", CommitID: head}}
+	if r = DecideGate(in); r.OK || !strings.Contains(strings.Join(r.Notes, "\n"), "dba@ejemplo.com es dueño por correo") {
+		t.Errorf("dueño por correo: %+v", r)
+	}
+	// Quien pide cambios y no se puede verificar como dueño también detiene.
+	in.Owners = ParseCodeowners("* @org/secreto\n")
+	in.Reviews = []Review{{User: "zoe", State: "CHANGES_REQUESTED"}}
+	if r = DecideGate(in); r.OK || strings.Join(r.Blockers, ",") != "zoe" || !strings.Contains(strings.Join(r.Notes, "\n"), "@zoe pidió cambios y no pude verificar") {
+		t.Errorf("pedido de cambios sin verificar: %+v", r)
 	}
 	// Sin CODEOWNERS vale cualquier persona que no abrió el PR.
 	in = base

@@ -59,6 +59,48 @@ func Reviews(ctx context.Context, c *github.Client, repo string, number int) ([]
 	return out, nil
 }
 
+// CommitAuthors lista quién escribió o subió los commits del PR (sus logins
+// de GitHub): nadie revisa su propio código, aunque el PR sea de otra persona.
+func CommitAuthors(ctx context.Context, c *github.Client, repo string, number int) ([]string, error) {
+	if strings.Count(repo, "/") != 1 || strings.ContainsAny(repo, " ?#") || number <= 0 {
+		return nil, fmt.Errorf("repo o PR inválido: %q #%d", repo, number)
+	}
+	seen := map[string]bool{}
+	for page := 1; page <= 3; page++ { // GitHub lista hasta 250 commits de un PR
+		var list []struct {
+			Author *struct {
+				Login string `json:"login"`
+			} `json:"author"`
+			Committer *struct {
+				Login string `json:"login"`
+			} `json:"committer"`
+		}
+		path := fmt.Sprintf("/repos/%s/pulls/%d/commits?per_page=100&page=%d", repo, number, page)
+		if _, err := c.Do(ctx, http.MethodGet, path, nil, &list); err != nil {
+			return nil, err
+		}
+		for _, cm := range list {
+			for _, u := range []*struct {
+				Login string `json:"login"`
+			}{cm.Author, cm.Committer} {
+				// web-flow es quien firma los commits hechos desde la web de GitHub.
+				if u != nil && u.Login != "" && !strings.EqualFold(u.Login, "web-flow") {
+					seen[strings.ToLower(u.Login)] = true
+				}
+			}
+		}
+		if len(list) < 100 {
+			break
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for u := range seen {
+		out = append(out, u)
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
 // ErrUnverifiable es un equipo cuya membresía el token no puede leer.
 var ErrUnverifiable = errors.New("no se puede verificar el equipo con este token")
 

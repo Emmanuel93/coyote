@@ -23,7 +23,10 @@ type Owners struct {
 	rules []ownerRule
 }
 
-var ownerRe = regexp.MustCompile(`^@[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:/[A-Za-z0-9._-]+)?$`)
+var (
+	ownerRe = regexp.MustCompile(`^@[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:/[A-Za-z0-9._-]+)?$`)
+	emailRe = regexp.MustCompile(`^[^@\s]+@[^@\s]+\.[^@\s]+$`)
+)
 
 // ReadCodeowners busca el CODEOWNERS de un repo. Sin archivo devuelve nil.
 func ReadCodeowners(dir string) *Owners {
@@ -44,8 +47,9 @@ func ReadCodeowners(dir string) *Owners {
 	return nil
 }
 
-// ParseCodeowners lee las reglas. Solo cuentan dueños @persona u @org/equipo:
-// un correo no se puede comparar con quien aprueba en GitHub.
+// ParseCodeowners lee las reglas. Un dueño es @persona, @org/equipo o un
+// correo; un correo queda como dueño aunque no se pueda comparar con quien
+// aprueba en GitHub: esa regla no la aprueba cualquiera.
 func ParseCodeowners(text string) *Owners {
 	o := &Owners{}
 	for _, raw := range strings.Split(text, "\n") {
@@ -63,7 +67,7 @@ func ParseCodeowners(text string) *Owners {
 		pat := strings.ReplaceAll(fields[0], "\x00", " ")
 		var owners []string
 		for _, f := range fields[1:] {
-			if ownerRe.MatchString(f) {
+			if ownerRe.MatchString(f) || emailRe.MatchString(f) {
 				owners = append(owners, strings.ToLower(f))
 			}
 		}

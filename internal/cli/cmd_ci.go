@@ -37,9 +37,17 @@ func cmdCI(a *app, args []string) error {
 	if *policy != "warn" && *policy != "fail" {
 		return fail(2, "--policy %q inválida: warn o fail", *policy)
 	}
-	p, err := a.prAnalysis(repos, *self, *event, *base, *head)
-	if err != nil || p == nil {
+	p, err := a.prAnalysis(repos, *self, *event, *base, *head, false)
+	if err != nil {
 		return err
+	}
+	if p == nil {
+		// Un fork no se analiza con pull_request: con fail el chequeo no puede
+		// quedar verde por omisión (coyote gate pr, con pull_request_target, sí lo evalúa).
+		if *policy == "fail" {
+			return fail(1, "coyote: el PR viene de un fork y ci impact no lo evalúa; con la política fail no pasa (usa coyote gate pr)")
+		}
+		return nil
 	}
 	report := ciReport(p.im, p.m, len(p.sources), p.pr, p.self, *policy)
 	a.publishReport(report, *summary, *comment, p.pr)
@@ -60,8 +68,9 @@ type prRun struct {
 }
 
 // prAnalysis lee el evento, arma el mapa con los repos y calcula el impacto
-// del diff del PR. Devuelve nil, sin error, si el PR viene de un fork.
-func (a *app) prAnalysis(repos []string, self, event, base, head string) (*prRun, error) {
+// del diff del PR. Sin allowFork, devuelve nil, sin error, si el PR viene de
+// un fork.
+func (a *app) prAnalysis(repos []string, self, event, base, head string, allowFork bool) (*prRun, error) {
 	sources, err := ciSources(repos)
 	if err != nil {
 		return nil, err
@@ -86,8 +95,8 @@ func (a *app) prAnalysis(repos []string, self, event, base, head string) (*prRun
 			return nil, fail(2, "commit inválido %q", s)
 		}
 	}
-	if pr.FromFork() {
-		fmt.Fprintln(a.stdout, "coyote: el PR viene de un fork; el pipeline de impacto no corre con código de forks")
+	if pr.FromFork() && !allowFork {
+		fmt.Fprintln(a.stdout, "coyote: el PR viene de un fork; ci impact no corre con código de forks")
 		return nil, nil
 	}
 	selfName := self

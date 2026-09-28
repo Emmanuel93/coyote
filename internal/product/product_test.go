@@ -1166,3 +1166,39 @@ func TestMapaConBarrasEnRutas(t *testing.T) {
 		t.Errorf("una barra en la ruta no rompe el mapa: %v %+v\n%s", err, got, text)
 	}
 }
+
+// Un PR no esconde archivos con .gitattributes, archivos vacíos o nombres
+// que git escribe entre comillas: la lista sale de --name-status -z.
+func TestCambiosQueGitNoMuestra(t *testing.T) {
+	dir := t.TempDir()
+	put(t, dir, "src/Api.java", "@RestController\nclass Api {\n  @GetMapping(\"/x\")\n  Object x() { return null; }\n}\n")
+	put(t, dir, "CODEOWNERS", "* @ana\n")
+	gitRepo(t, dir)
+	put(t, dir, ".gitattributes", "* -diff\n")
+	put(t, dir, "src/Api.java", "@RestController\nclass Api {\n  @GetMapping(\"/y\")\n  Object y() { return null; }\n}\n")
+	put(t, dir, ".github/CODEOWNERS", "")
+	put(t, dir, "a\"b\\c.yml", "x: 1\n")
+	commitAll(t, dir, "esconde")
+	files, err := ChangedFiles(dir, "HEAD~1...HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{".gitattributes", ".github/CODEOWNERS", "a\"b\\c.yml", "src/Api.java"}
+	if strings.Join(files, "|") != strings.Join(want, "|") {
+		t.Errorf("archivos cambiados: %q", files)
+	}
+	ch, err := changedLines(dir, "HEAD~1..HEAD", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Con -diff no hay hunks: el archivo cuenta completo a los dos lados.
+	if got := ch.new["src/Api.java"]; len(got) != 1 || got[0] != whole || len(ch.old["src/Api.java"]) != 1 {
+		t.Errorf("archivo sin hunks: nuevo %v base %v", got, ch.old["src/Api.java"])
+	}
+	if len(ch.new[".github/CODEOWNERS"]) != 1 || len(ch.old[".github/CODEOWNERS"]) != 0 {
+		t.Errorf("archivo vacío agregado: %v %v", ch.new[".github/CODEOWNERS"], ch.old[".github/CODEOWNERS"])
+	}
+	if diffName(`"b/a\"b\\c.yml"`) != `a"b\c.yml` || diffName("/dev/null") != "" || diffName("a/x y.go\t") != "x y.go" {
+		t.Error("nombres entre comillas")
+	}
+}

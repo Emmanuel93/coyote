@@ -133,6 +133,12 @@ func TestCIImpact(t *testing.T) {
 	if !strings.Contains(r.stdout, "fork") || gh.patches != patches || gh.posts != posts {
 		t.Errorf("un fork no se analiza:\n%s", r.stdout)
 	}
+	// Con la política fail, un fork no queda verde por omisión.
+	r = run(t, base, "", append(args, "--policy", "fail")...)
+	must(t, r, 1, "fork con fail")
+	if !strings.Contains(r.stderr, "viene de un fork") {
+		t.Errorf("fork con fail:\n%s", r.stderr)
+	}
 	// Errores de uso.
 	must(t, run(t, base, "", "ci", "impact"), 2, "sin repos")
 	must(t, run(t, base, "", "ci", "impact", "--repo", "servicios="+svc, "--self", "nadie", "--base", baseSHA, "--head", headSHA, "--event", ""), 2, "self desconocido")
@@ -228,6 +234,7 @@ func TestGatePR(t *testing.T) {
 	}
 	var mu sync.Mutex
 	reviews := []map[string]any{}
+	commits := []map[string]any{{"author": map[string]string{"login": "beto"}, "committer": map[string]string{"login": "web-flow"}}}
 	comments := map[int64]string{}
 	var teamAuth string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -242,6 +249,12 @@ func TestGatePR(t *testing.T) {
 		case r.URL.Path == "/repos/acme/servicios/pulls/7/reviews":
 			if r.URL.Query().Get("page") == "1" {
 				_ = json.NewEncoder(w).Encode(reviews)
+			} else {
+				_ = json.NewEncoder(w).Encode([]any{})
+			}
+		case r.URL.Path == "/repos/acme/servicios/pulls/7/commits":
+			if r.URL.Query().Get("page") == "1" {
+				_ = json.NewEncoder(w).Encode(commits)
 			} else {
 				_ = json.NewEncoder(w).Encode([]any{})
 			}
@@ -310,13 +323,28 @@ func TestGatePR(t *testing.T) {
 		{"user": map[string]string{"login": "ana"}, "state": "APPROVED", "commit_id": headSHA},
 		{"user": map[string]string{"login": "luis"}, "state": "APPROVED", "commit_id": headSHA},
 	}
+	// Si luis subió un commit al PR, su aprobación no cuenta para su propio código.
+	commits = append(commits, map[string]any{"author": map[string]string{"login": "Luis"}, "committer": map[string]string{"login": "luis"}})
+	must(t, run(t, base, "", args...), 1, "aprueba quien escribió un commit")
+	commits = commits[:1]
 	r = run(t, base, "", args...)
 	must(t, r, 0, "aprobado")
 	if !strings.Contains(r.stdout, "### coyote: R3, aprobado por @ana, @luis") || teamAuth != "Bearer tok-equipos" || len(comments) != 1 {
 		t.Errorf("aprobado:\n%s\nauth del equipo %q, comentarios %d", r.stdout, teamAuth, len(comments))
 	}
-	// Con warn nunca falla, y un cambio sin riesgo no pide revisión.
+	// Un PR desde un fork se evalúa igual (pull_request_target): no pasa por omisión.
+	ev["pull_request"].(map[string]any)["head"].(map[string]any)["repo"] = map[string]string{"full_name": "otra/servicios"}
+	raw, _ = json.Marshal(ev)
+	if err := os.WriteFile(event, raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
 	reviews = nil
+	r = run(t, base, "", args...)
+	must(t, r, 1, "fork evaluado")
+	if !strings.Contains(r.stdout, "### coyote: R3, espera la aprobación de un dueño") {
+		t.Errorf("fork:\n%s", r.stdout)
+	}
+	// Con warn nunca falla, y un cambio sin riesgo no pide revisión.
 	must(t, run(t, base, "", append(args[:len(args)-2], "--policy", "warn")...), 0, "warn")
 	r = run(t, base, "", "gate", "pr", "--repo", "servicios="+svc, "--base", baseSHA, "--head", baseSHA, "--event", "", "--policy", "fail")
 	must(t, r, 0, "sin cambios")

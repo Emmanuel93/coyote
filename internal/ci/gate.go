@@ -1,7 +1,6 @@
 package ci
 
 import (
-	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -19,6 +18,8 @@ type GateInput struct {
 	ImpactFiles []string
 	Owners      *Owners // CODEOWNERS de la rama base; nil si el repo no tiene
 	Reviews     []Review
+	// Excluded son quienes escribieron commits del PR: no revisan su propio código.
+	Excluded []string
 	// Member dice si una persona es de un equipo @org/equipo.
 	Member func(team, user string) (bool, error)
 }
@@ -64,6 +65,10 @@ func DecideGate(in GateInput) GateResult {
 		return res
 	}
 	author := strings.ToLower(in.Author)
+	excluded := map[string]bool{}
+	for _, u := range in.Excluded {
+		excluded[strings.ToLower(u)] = true
+	}
 	// Los grupos: por archivo riesgoso, sus dueños; si el riesgo viene solo
 	// del impacto, los dueños de todo lo cambiado forman un solo grupo.
 	byKey := map[string]*Group{}
@@ -110,43 +115,55 @@ func DecideGate(in GateInput) GateResult {
 		res.Notes = append(res.Notes, "el repo no tiene CODEOWNERS: cuenta la aprobación de cualquier persona que no abrió el PR; define dueños en .github/CODEOWNERS")
 	}
 	unverified := map[string]bool{}
-	eligible := func(g *Group, user string) bool {
+	// eligible dice si una persona es dueña del grupo; unsure, si no se puede saber.
+	eligible := func(g *Group, user string) (ok, unsure bool) {
 		if len(g.Owners) == 0 {
-			return true
+			return true, false
 		}
 		for _, o := range g.Owners {
-			if !strings.Contains(o, "/") {
+			switch {
+			case !strings.HasPrefix(o, "@"):
+				// Un correo no se compara con un login de GitHub.
+				unverified[o] = true
+				unsure = true
+			case !strings.Contains(o, "/"):
 				if strings.TrimPrefix(o, "@") == user {
-					return true
+					return true, false
 				}
-				continue
-			}
-			if in.Member == nil {
+			case in.Member == nil:
 				unverified[o] = true
-				continue
-			}
-			ok, err := in.Member(o, user)
-			if errors.Is(err, ErrUnverifiable) || err != nil {
-				unverified[o] = true
-				continue
-			}
-			if ok {
-				return true
+				unsure = true
+			default:
+				member, err := in.Member(o, user)
+				if err != nil {
+					unverified[o] = true
+					unsure = true
+					continue
+				}
+				if member {
+					return true, false
+				}
 			}
 		}
-		return false
+		return false, unsure
 	}
 	approvers, blockers, stale := map[string]bool{}, map[string]bool{}, map[string]bool{}
+	unsureBlock := map[string]bool{}
 	for _, k := range keys {
 		g := byKey[k]
 		for _, r := range in.Reviews {
-			if r.User == author || !eligible(g, r.User) {
+			if r.User == author || excluded[r.User] {
 				continue
 			}
-			switch r.State {
-			case "CHANGES_REQUESTED":
+			ok, unsure := eligible(g, r.User)
+			switch {
+			case r.State == "CHANGES_REQUESTED" && (ok || unsure):
+				// Un pedido de cambios de quien puede ser dueño detiene el merge.
 				blockers[r.User] = true
-			case "APPROVED":
+				if !ok {
+					unsureBlock[r.User] = true
+				}
+			case r.State == "APPROVED" && ok:
 				if res.Risk == R3 && r.CommitID != in.HeadSHA {
 					stale[r.User] = true
 					continue
@@ -164,7 +181,14 @@ func DecideGate(in GateInput) GateResult {
 		}
 	}
 	for _, t := range keysOf(unverified) {
-		res.Notes = append(res.Notes, fmt.Sprintf("no pude verificar quién es de %s con el token del job: su aprobación no cuenta hasta que el token pueda leer los equipos (Members: read) o CODEOWNERS nombre personas", t))
+		if strings.HasPrefix(t, "@") {
+			res.Notes = append(res.Notes, fmt.Sprintf("no pude verificar quién es de %s con el token del job: su aprobación no cuenta hasta que el token pueda leer los equipos (Members: read) o CODEOWNERS nombre personas", t))
+		} else {
+			res.Notes = append(res.Notes, fmt.Sprintf("%s es dueño por correo: coyote no lo puede comparar con quien aprueba en GitHub; nombra @persona o @org/equipo en CODEOWNERS", t))
+		}
+	}
+	for _, u := range keysOf(unsureBlock) {
+		res.Notes = append(res.Notes, fmt.Sprintf("@%s pidió cambios y no pude verificar si es dueño: su pedido cuenta hasta que lo resuelva", u))
 	}
 	res.OK = len(res.Blockers) == 0
 	for _, g := range res.Groups {

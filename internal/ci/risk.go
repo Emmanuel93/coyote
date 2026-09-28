@@ -26,7 +26,8 @@ type Rule struct {
 // DefaultRules son las reglas genéricas de riesgo por rutas. Cada proyecto
 // agrega las suyas (--risk R3=patrón); nunca se relajan desde el PR.
 var DefaultRules = []Rule{
-	{R3, []string{".github/workflows/**", ".gitlab-ci.yml", "CODEOWNERS", ".github/CODEOWNERS", "docs/CODEOWNERS"}, "el pipeline o quién revisa"},
+	{R3, []string{".github/workflows/**", ".github/actions/**", ".gitlab-ci.yml", "CODEOWNERS", ".github/CODEOWNERS", "docs/CODEOWNERS"}, "el pipeline o quién revisa"},
+	{R3, []string{".gitattributes", "**/.gitattributes", ".gitmodules"}, "cómo git lee los archivos"},
 	{R3, []string{"**/migrations/**", "**/migration/**", "**/db/changelog/**", "**/flyway/**", "**/*.sql"}, "el esquema de datos"},
 	{R3, []string{"**/auth/**", "**/security/**", "**/crypto/**"}, "autenticación o seguridad"},
 	{R3, []string{"**/*.tf", "**/terraform/**", "**/helm/**", "**/k8s/**", "**/kubernetes/**", "**/Dockerfile", "**/docker-compose*.{yml,yaml}"}, "infraestructura"},

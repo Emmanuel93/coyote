@@ -78,10 +78,10 @@ func (o CIOptions) Validate() error {
 }
 
 // GitHubWorkflow arma .github/workflows/coyote.yml para un repo del producto
-// (ADR-0013). En cada PR interno, y con cada revisión, trae los otros repos
-// con el token de solo lectura, compila coyote de una versión etiquetada y
-// corre coyote gate pr: el impacto en el producto, el riesgo y la revisión
-// de un dueño (R17).
+// (ADR-0013). Corre en pull_request_target: el workflow, la política y las
+// reglas de riesgo son los de la rama base, así un PR no cambia el chequeo
+// que lo evalúa. El código del PR se lee como dato con git de plomería y
+// nunca se compila ni se ejecuta; por eso los forks se evalúan igual.
 func GitHubWorkflow(o CIOptions) (string, error) {
 	if err := o.Validate(); err != nil {
 		return "", err
@@ -91,12 +91,12 @@ func GitHubWorkflow(o CIOptions) (string, error) {
 	w("# Generado por coyote install --ci github (ADR-0013). No lo edites aquí: cámbialo en el proyecto del producto.")
 	w("# Secretos: %s, un token de solo lectura (Contents: read) de los repos del producto;", SecretName)
 	w("# %s, si coyote vive en otra cuenta; %s (opcional), Members: read para verificar los equipos de CODEOWNERS.", ToolSecretName, TeamsSecretName)
+	w("# pull_request_target: este archivo y sus reglas salen de la rama base. El código del PR se lee como dato:")
+	w("# nunca se compila ni se ejecuta. Después de una aprobación, vuelve a correr el chequeo (Re-run) o empuja un commit.")
 	w("name: coyote gate pr")
 	w("on:")
-	w("  pull_request:")
+	w("  pull_request_target:")
 	w("    types: [opened, synchronize, reopened, ready_for_review]")
-	w("  pull_request_review:")
-	w("    types: [submitted, dismissed]")
 	w("permissions:")
 	w("  contents: read")
 	w("  pull-requests: write")
@@ -106,12 +106,10 @@ func GitHubWorkflow(o CIOptions) (string, error) {
 	w("jobs:")
 	w("  gate:")
 	w("    name: riesgo e impacto")
-	w("    # Solo PRs de ramas de este repo: un fork no recibe los secretos ni corre coyote.")
-	w("    if: github.event.pull_request.head.repo.full_name == github.repository")
 	w("    runs-on: ubuntu-latest")
 	w("    timeout-minutes: 15")
 	w("    steps:")
-	w("      - name: %s en el commit del PR", o.Self.Name)
+	w("      - name: %s en el commit del PR, como dato", o.Self.Name)
 	w("        uses: %s", checkoutAction)
 	w("        with:")
 	w("          ref: ${{ github.event.pull_request.head.sha }}")

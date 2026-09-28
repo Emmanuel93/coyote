@@ -44,8 +44,10 @@ func gatePR(a *app, args []string) error {
 		}
 		rules = append(rules, rule)
 	}
-	p, err := a.prAnalysis(repos, *self, *event, *base, *head)
-	if err != nil || p == nil {
+	// Con pull_request_target los forks se evalúan como cualquier PR: su
+	// código se lee como dato y nunca se ejecuta.
+	p, err := a.prAnalysis(repos, *self, *event, *base, *head, true)
+	if err != nil {
 		return err
 	}
 	dir := p.src[p.self]
@@ -72,8 +74,8 @@ func gatePR(a *app, args []string) error {
 	}
 	var notes []string
 	if probe := ci.DecideGate(in); probe.Required {
-		reviews, member, note := a.prReviews(p.pr)
-		in.Reviews, in.Member = reviews, member
+		reviews, member, authors, note := a.prReviews(p.pr)
+		in.Reviews, in.Member, in.Excluded = reviews, member, authors
 		if note != "" {
 			notes = append(notes, note)
 		}
@@ -102,20 +104,25 @@ func impactRisk(im *product.Impact, self string) (string, string) {
 
 // prReviews lee las revisiones con el token del job. La membresía de los
 // equipos usa COYOTE_TEAMS_TOKEN si está: el token del job no ve los equipos.
-func (a *app) prReviews(pr ci.PR) ([]ci.Review, func(team, user string) (bool, error), string) {
+func (a *app) prReviews(pr ci.PR) ([]ci.Review, func(team, user string) (bool, error), []string, string) {
 	token := os.Getenv("GITHUB_TOKEN")
 	repo := pr.Repo
 	if repo == "" {
 		repo = os.Getenv("GITHUB_REPOSITORY")
 	}
 	if token == "" || repo == "" || pr.Number == 0 {
-		return nil, nil, "sin GITHUB_TOKEN, el repo o el número del PR no leo las revisiones: nadie cuenta como aprobación"
+		return nil, nil, nil, "sin GITHUB_TOKEN, el repo o el número del PR no leo las revisiones: nadie cuenta como aprobación"
 	}
 	api := os.Getenv("GITHUB_API_URL")
 	c := &github.Client{Base: api, Token: token}
 	reviews, err := ci.Reviews(context.Background(), c, repo, pr.Number)
 	if err != nil {
-		return nil, nil, "no pude leer las revisiones del PR: " + err.Error()
+		return nil, nil, nil, "no pude leer las revisiones del PR: " + err.Error()
+	}
+	// Quien escribió commits del PR no lo revisa; si no se pueden leer, no cuenta ninguna aprobación.
+	authors, err := ci.CommitAuthors(context.Background(), c, repo, pr.Number)
+	if err != nil {
+		return nil, nil, nil, "no pude leer los commits del PR para saber quién los escribió: nadie cuenta como aprobación"
 	}
 	teams := c
 	if t := os.Getenv("COYOTE_TEAMS_TOKEN"); t != "" {
@@ -139,7 +146,7 @@ func (a *app) prReviews(pr ci.PR) ([]ci.Review, func(team, user string) (bool, e
 		memo[k] = v
 		return v, nil
 	}
-	return reviews, member, ""
+	return reviews, member, authors, ""
 }
 
 // gateReport arma el comentario: el veredicto del gate, el riesgo y quién

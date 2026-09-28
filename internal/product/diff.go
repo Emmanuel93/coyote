@@ -56,6 +56,11 @@ var whole = lineRange{1, 1 << 30}
 // cada archivo cuenta completo. Usa los comandos de plomería de git
 // (diff-tree y diff-index), que nunca escriben el índice: git diff lo
 // refresca y lo reescribe aunque solo se le pida leer.
+//
+// La lista de archivos sale de --name-status -z, que no depende de los
+// atributos del árbol ni de comillas: un archivo sin hunks (binario, vacío,
+// marcado con -diff en .gitattributes o con solo un cambio de modo) cuenta
+// completo.
 func changedLines(dir, diff string, files []string) (*fileChanges, error) {
 	ch := &fileChanges{old: map[string][]lineRange{}, new: map[string][]lineRange{}}
 	if diff == "" {
@@ -66,27 +71,22 @@ func changedLines(dir, diff string, files []string) (*fileChanges, error) {
 		}
 		return ch, nil
 	}
-	if strings.HasPrefix(diff, "-") {
-		return nil, fmt.Errorf("rango de git inválido %q", diff)
+	names, err := diffNames(dir, diff)
+	if err != nil {
+		return nil, err
 	}
 	left, right, worktree := diffSides(dir, diff)
-	if left == "" || (!worktree && right == "") {
-		return nil, fmt.Errorf("git: no reconozco el rango %q", diff)
-	}
 	opts := []string{"-c", "core.quotePath=false"}
 	flags := []string{"-p", "--no-color", "--no-ext-diff", "--no-textconv", "--no-renames", "--unified=0"}
-	var args []string
 	var cmd *exec.Cmd
 	if worktree {
-		args = append(append(append(opts, "diff-index", "--ignore-submodules=all"), flags...), left, "--")
-		c, err := gitWorktree(dir, args...)
+		c, err := gitWorktree(dir, append(append(append(opts, "diff-index", "--ignore-submodules=all"), flags...), left, "--")...)
 		if err != nil {
 			return nil, err
 		}
 		cmd = c
 	} else {
-		args = append(append(append(opts, "diff-tree", "-r", "--ignore-submodules=all"), flags...), left, right, "--")
-		cmd = gitRead(dir, args...)
+		cmd = gitRead(dir, append(append(append(opts, "diff-tree", "-r", "--ignore-submodules=all"), flags...), left, right, "--")...)
 	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
@@ -94,13 +94,6 @@ func changedLines(dir, diff string, files []string) (*fileChanges, error) {
 		return nil, fmt.Errorf("git diff %s: %v %s", diff, err, strings.TrimSpace(stderr.String()))
 	}
 	oldName, newName := "", ""
-	name := func(l, prefix string) string {
-		p := strings.TrimSuffix(strings.TrimPrefix(l, prefix), "\t")
-		if p == "/dev/null" {
-			return ""
-		}
-		return strings.TrimPrefix(strings.TrimPrefix(p, "a/"), "b/")
-	}
 	sc := bufio.NewScanner(&stdout)
 	sc.Buffer(make([]byte, 1<<20), 16<<20)
 	for sc.Scan() {
@@ -109,9 +102,9 @@ func changedLines(dir, diff string, files []string) (*fileChanges, error) {
 		case strings.HasPrefix(l, "diff --git "):
 			oldName, newName = "", ""
 		case strings.HasPrefix(l, "--- "):
-			oldName = name(l, "--- ")
+			oldName = diffName(l[4:])
 		case strings.HasPrefix(l, "+++ "):
-			newName = name(l, "+++ ")
+			newName = diffName(l[4:])
 		case strings.HasPrefix(l, "@@"):
 			m := hunkRe.FindStringSubmatch(l)
 			if m == nil {
@@ -128,19 +121,83 @@ func changedLines(dir, diff string, files []string) (*fileChanges, error) {
 	if err := sc.Err(); err != nil {
 		return nil, err
 	}
+	// Lo que git lista sin hunks cuenta completo en el lado que existe.
+	for _, n := range names {
+		if n.status != 'A' && len(ch.old[n.path]) == 0 {
+			ch.old[n.path] = []lineRange{whole}
+		}
+		if n.status != 'D' && len(ch.new[n.path]) == 0 {
+			ch.new[n.path] = []lineRange{whole}
+		}
+	}
+	return ch, nil
+}
+
+// diffName lee el nombre de una línea --- o +++: sin el prefijo a/ o b/, y
+// sin las comillas con las que git escribe los nombres raros.
+func diffName(s string) string {
+	s = strings.TrimSuffix(s, "\t")
+	if strings.HasPrefix(s, "\"") {
+		if u, err := strconv.Unquote(s); err == nil {
+			s = u
+		}
+	}
+	if s == "/dev/null" {
+		return ""
+	}
+	return strings.TrimPrefix(strings.TrimPrefix(s, "a/"), "b/")
+}
+
+type nameStatus struct {
+	status byte // A, D, M, T…
+	path   string
+}
+
+// diffNames lista los archivos de un rango con su estado. Contra el árbol de
+// trabajo, lo nuevo que git aún no sigue también entra, como agregado.
+func diffNames(dir, diff string) ([]nameStatus, error) {
+	if strings.HasPrefix(diff, "-") {
+		return nil, fmt.Errorf("rango de git inválido %q", diff)
+	}
+	left, right, worktree := diffSides(dir, diff)
+	if left == "" || (!worktree && right == "") {
+		return nil, fmt.Errorf("git: no reconozco el rango %q", diff)
+	}
+	flags := []string{"-z", "--name-status", "--no-renames", "--ignore-submodules=all"}
+	var cmd *exec.Cmd
 	if worktree {
-		// Contra el árbol de trabajo, lo nuevo que git aún no sigue también es
-		// parte del cambio: entra completo.
-		out, err := gitRead(dir, "ls-files", "-z", "--others", "--exclude-standard").Output()
+		c, err := gitWorktree(dir, append(append([]string{"diff-index"}, flags...), left, "--")...)
+		if err != nil {
+			return nil, err
+		}
+		cmd = c
+	} else {
+		cmd = gitRead(dir, append(append([]string{"diff-tree", "-r"}, flags...), left, right, "--")...)
+	}
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("git diff %s: %v %s", diff, err, strings.TrimSpace(stderr.String()))
+	}
+	parts := strings.Split(stdout.String(), "\x00")
+	var out []nameStatus
+	for i := 0; i+1 < len(parts); i += 2 {
+		if parts[i] == "" || parts[i+1] == "" {
+			continue
+		}
+		out = append(out, nameStatus{status: parts[i][0], path: parts[i+1]})
+	}
+	if worktree {
+		o, err := gitRead(dir, "ls-files", "-z", "--others", "--exclude-standard").Output()
 		if err == nil {
-			for _, f := range strings.Split(string(out), "\x00") {
+			for _, f := range strings.Split(string(o), "\x00") {
 				if f != "" {
-					ch.new[f] = []lineRange{whole}
+					out = append(out, nameStatus{status: 'A', path: f})
 				}
 			}
 		}
 	}
-	return ch, nil
+	return out, nil
 }
 
 // hunkRange convierte "inicio,cuenta" en un rango; una cuenta de cero es un
@@ -526,23 +583,22 @@ func (m *Map) contractChanges(rd *reader, dir, repo string, ch *fileChanges, lef
 
 // ChangedFiles lista los archivos que cambia un rango de git (base...head,
 // base..head o una revisión contra el árbol de trabajo): los nuevos, los
-// modificados y los borrados. Lee con plomería, como el resto del paquete.
+// modificados y los borrados, también los binarios y los vacíos. Lee con
+// plomería, como el resto del paquete.
 func ChangedFiles(dir, diff string) ([]string, error) {
 	if diff == "" {
 		return nil, fmt.Errorf("falta el rango de git")
 	}
-	ch, err := changedLines(dir, diff, nil)
+	names, err := diffNames(dir, diff)
 	if err != nil {
 		return nil, err
 	}
 	seen := map[string]bool{}
 	var out []string
-	for _, m := range []map[string][]lineRange{ch.new, ch.old} {
-		for f := range m {
-			if !seen[f] {
-				seen[f] = true
-				out = append(out, f)
-			}
+	for _, n := range names {
+		if !seen[n.path] {
+			seen[n.path] = true
+			out = append(out, n.path)
 		}
 	}
 	sort.Strings(out)
