@@ -24,3 +24,6 @@
 2026-09-28T01:47Z|@eramirezhdez/coyote-scribe|W-0001|coyote|doc|release|README y reporte de v0.1.0 para el gate G1|-|-|-|ok
 2026-09-28T04:52Z|@eramirezhdez/coyote-reviewer|W-0001|coyote|rev|seguridad|segunda revisión adversarial: 9 hallazgos, todos corregidos con pruebas|doc:docs/releases/v0.1.0.md|-|-|ok
 2026-09-28T04:52Z|@eramirezhdez/coyote-dev|W-0001|coyote|fix|core|cierra los hallazgos de la segunda revisión adversarial|-|-|-|ok
+2026-09-28T04:52Z|@eramirezhdez|W-0001|coyote|apr|release|G1 aprobado: v0.1.0, repo privado en GitHub y arranque de v0.2|apr:P-0001 doc:docs/releases/v0.1.0.md|-|-|ok
+2026-09-28T04:52Z|@eramirezhdez|W-0001|coyote|close|release|W-0001 cerrado: v0.1.0 construida, revisada dos veces y aprobada|doc:coyote/workstreams/W-0001-bootstrap/close.md apr:P-0001|-|-|ok
+2026-09-28T04:52Z|@eramirezhdez/coyote-scribe|W-0001|coyote|doc|release|segunda revisión y aprobación de G1 para v0.1.0|-|-|-|ok

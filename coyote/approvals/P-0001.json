@@ -1,0 +1,21 @@
+{
+  "id": "P-0001",
+  "gate": "G1",
+  "release": "v0.1.0",
+  "workstream": "W-0001",
+  "decision": "approved",
+  "approver": "@eramirezhdez",
+  "date": "2026-09-28",
+  "reviewed_commit": "c265395",
+  "authorizes": [
+    "etiquetar v0.1.0 después de una segunda revisión adversarial",
+    "generar los binarios de macOS",
+    "publicar en git@github.com:Emmanuel93/coyote.git, privado y sin licencia, y agregar ahí los commits de cada gate aprobado",
+    "arrancar v0.2"
+  ],
+  "conditions": [
+    "la segunda revisión corre antes del tag y sus hallazgos se corrigen",
+    "el push lo hace la persona con sus propias credenciales"
+  ],
+  "evidence": "docs/releases/v0.1.0.md"
+}

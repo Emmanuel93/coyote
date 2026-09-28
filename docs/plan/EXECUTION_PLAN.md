@@ -1,6 +1,6 @@
 # Plan de ejecución — Coyote
 
-Estado: v0.1 construida y verificada · esperando el gate G1 · actualizado 2026-09-28
+Estado: v0.1.0 aprobada en G1 (P-0001) · v0.2 en planeación · actualizado 2026-09-28
 
 Este plan ejecuta la propuesta aprobada ("Plan de construcción — Framework Coyote"). Cada release se razona con la plantilla de cinco partes que usarán los agentes de Coyote (problema, restricciones, opciones, decisión, riesgos) y cierra con un gate humano: nada se etiqueta, se publica ni toca otros proyectos sin autorización explícita.
 
@@ -51,8 +51,8 @@ Este plan ejecuta la propuesta aprobada ("Plan de construcción — Framework Co
 | T7 | CLI local | Los comandos son la interfaz de humanos, agentes e IDEs | `init`, `status`, `note`, `record`, `log`, `commit`, `standards`, `attribution`, `gate`, `generate agents`, `hooks`, `doctor` | Hecho |
 | T8 | Dogfooding | La herramienta debe cumplir su propio estándar | `coyote/` propio, AGENTS.md generado, lint en verde, commits con `coyote commit` | Hecho |
 | T9 | Ejemplo y CI | Probar sin datos reales y dejar la verificación automática lista para GitHub | `examples/acme-shop` y `.github/workflows/ci.yml` | Hecho |
-| T10 | Verificación | Evidencia antes de pedir autorización | vet, pruebas, demo de punta a punta y revisión independiente | Hecho: 13 hallazgos corregidos (ver docs/releases/v0.1.0.md) |
-| T11 | Entrega y gate G1 | Pedir autorización con evidencia, no con promesas | Repo en `~/Documents/coyote` con historia y autoría tuya; reporte en `docs/releases/v0.1.0.md` | En gate G1 |
+| T10 | Verificación | Evidencia antes de pedir autorización | vet, pruebas, demo de punta a punta y revisión independiente | Hecho: dos revisiones adversariales, 13 + 9 hallazgos corregidos (ver docs/releases/v0.1.0.md) |
+| T11 | Entrega y gate G1 | Pedir autorización con evidencia, no con promesas | Repo en `~/Documents/coyote` con historia y autoría tuya; reporte en `docs/releases/v0.1.0.md` | Hecho: G1 aprobado (P-0001) |
 
 ## v0.2 remote + context — razonamiento (borrador para G2)
 
@@ -79,8 +79,8 @@ Siguen el orden de la propuesta. Cada una recibirá su razonamiento completo al 
 | D6 aprobación R2–R3 | Pull request de GitHub | Deja rastro con identidad y revisión | G3 |
 | D10 visibilidad de costos | Cada persona ve lo suyo, admins todo | Menor exposición por defecto | G4 |
 | D12 hub | `kredius`, sin crearlo hasta G5 | Aislamiento | G5 |
-| D13 nombres de archivo | `README.coyote.md` y `CONTEXT.coyote.md` | Coherente con `README.md` y `AGENTS.md` | G1 |
-| D14 alcance de R15 | Commits, PRs, comentarios, docs y releases | Es lo que pediste | G1 |
+| D13 nombres de archivo | `README.coyote.md` y `CONTEXT.coyote.md` | Coherente con `README.md` y `AGENTS.md` | Confirmado en G1 |
+| D14 alcance de R15 | Commits, PRs, comentarios, docs, releases y autoría del commit | Es lo que pediste | Confirmado en G1 |
 | D15 web | Plantillas Go con HTMX embebidas | Un solo binario | G2 |
 | D16 tokens | Llavero del sistema | No dejar secretos en disco | G2 |
 | D19 autonomía por defecto | `manual` | Nada con efectos sin aprobación mientras no haya evidencia | G3 |

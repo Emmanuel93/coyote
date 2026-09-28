@@ -1,6 +1,6 @@
 # Cierre W-0001 — Bootstrap de coyote v0.1
 
-Responsable del resultado: @eramirezhdez (modo manual; se cierra en el gate G1).
+Responsable del resultado: @eramirezhdez (modo manual). Cerrado con la aprobación de G1 (`coyote/approvals/P-0001.json`).
 
 ## Resultado
 
@@ -11,7 +11,7 @@ Responsable del resultado: @eramirezhdez (modo manual; se cierra en el gate G1).
 | T5–T6 | estándar por capas, filtro de atribución en cinco capas | `standards/default/`, pruebas de `internal/standards`, `internal/attribution` |
 | T7 | CLI de 14 comandos | pruebas de punta a punta en `internal/cli` |
 | T8–T9 | dogfooding, ejemplo sintético, CI | `coyote standards lint` en verde aquí y en `examples/acme-shop` |
-| T10 | revisión adversarial: 13 hallazgos corregidos | `docs/releases/v0.1.0.md` |
+| T10 | dos revisiones adversariales: 13 + 9 hallazgos corregidos | `docs/releases/v0.1.0.md` |
 
 ## Consumo
 
