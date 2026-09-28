@@ -43,6 +43,7 @@ type modInfo struct {
 	longer                                    map[string]bool // el prefijo tiene rutas más largas
 	topics                                    []string
 	consumers                                 map[string]int // "repo: módulo" → enlaces
+	providers                                 map[string]int // de quién depende: "repo: módulo" → enlaces
 	firstExposed, firstUnresolved             *Entry
 }
 
@@ -85,7 +86,7 @@ func (sc *Scan) moduleInfo(m *Map) []*modInfo {
 	get := func(p string) *modInfo {
 		mi := by[p]
 		if mi == nil {
-			mi = &modInfo{path: p, name: ModuleName(p), prefixes: map[string]int{}, longer: map[string]bool{}, consumers: map[string]int{}}
+			mi = &modInfo{path: p, name: ModuleName(p), prefixes: map[string]int{}, longer: map[string]bool{}, consumers: map[string]int{}, providers: map[string]int{}}
 			by[p] = mi
 		}
 		return mi
@@ -124,6 +125,9 @@ func (sc *Scan) moduleInfo(m *Map) []*modInfo {
 	if m != nil {
 		for _, l := range m.Links {
 			to, from := m.Entries[l.To], m.Entries[l.From]
+			if from.Repo == sc.Repo && to.Repo != sc.Repo {
+				get(from.Module).providers[label(to)]++ // depende de otro repo del producto
+			}
 			if to.Repo != sc.Repo || (from.Repo == to.Repo && from.Module == to.Module) {
 				continue
 			}
@@ -401,6 +405,28 @@ func (sc *Scan) context(mods []*modInfo, today string, omitted *int) string {
 			ref = fmt.Sprintf("%s#L%d", mi.firstExposed.File, mi.firstExposed.Line)
 		}
 		line := fmt.Sprintf("inv|%s|lo usan %s; un cambio de contrato los afecta|%s", scopeName(sc.Repo, mi.path), clean(listOf(users, 3)), clean(ref))
+		if !b.try(line) {
+			*omitted++
+		}
+	}
+	// Los módulos que dependen de otro repo del producto: un cambio allá los afecta.
+	for _, mi := range mods {
+		if len(mi.providers) == 0 {
+			continue
+		}
+		total := 0
+		for _, n := range mi.providers {
+			total += n
+		}
+		ref := "-"
+		for _, e := range sc.Entries {
+			if e.Module == mi.path && (e.Role == Calls || e.Role == Listens) && !e.Unresolved {
+				ref = fmt.Sprintf("%s#L%d", e.File, e.Line)
+				break
+			}
+		}
+		line := fmt.Sprintf("inv|%s|usa %s de %s; un cambio en ellos lo afecta|%s", scopeName(sc.Repo, mi.path),
+			plural(total, "interfaz", "interfaces"), clean(listOf(topKeys(mi.providers, len(mi.providers)), 3)), clean(ref))
 		if !b.try(line) {
 			*omitted++
 		}

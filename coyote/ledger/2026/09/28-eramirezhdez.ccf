@@ -71,3 +71,4 @@
 2026-09-28T18:20Z|@eramirezhdez/coyote-dev|W-0004|coyote|fix|product|rutas concatenadas con variables y constantes|-|-|-|ok
 2026-09-28T18:24Z|@eramirezhdez/coyote-dev|W-0004|coyote|fix|product|el grafo de llamadas usa la lista de git y no salta…|-|-|-|ok
 2026-09-28T18:26Z|@eramirezhdez/coyote-dev|W-0004|coyote|perf|product|lecturas de git en lote y tipos cambiados solo del código|-|-|-|ok
+2026-09-28T18:28Z|@eramirezhdez/coyote-dev|W-0004|coyote|fix|product|propósito en prosa, descripciones por oración y dependencias de cada módulo|-|-|-|ok

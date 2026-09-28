@@ -477,6 +477,22 @@ func TestProposals(t *testing.T) {
 	if strings.Contains(app.Readme, "mod|raíz") {
 		t.Error("el repo entero no se lista como módulo")
 	}
+	if !strings.Contains(app.Context, "inv|tienda_pedidos|usa 2 interfaces de servicios: bff-movil; un cambio en ellos lo afecta") {
+		t.Errorf("un módulo que consume otro repo declara de qué depende:\n%s", app.Context)
+	}
+}
+
+func TestPropositoEnProsa(t *testing.T) {
+	cases := map[string]string{
+		"# App\n\n1. Visión General 2. Arquitectura - 2.0 Microfrontends\n\nApp móvil del producto. Tiene más detalle después.\n": "App móvil del producto.",
+		"# Lib\n\n- uno\n- dos\n\n> nota\n\nThis library was generated with Nx.\n\nCliente HTTP del backoffice.\n":             "Cliente HTTP del backoffice.",
+		"# X\n\n" + strings.Repeat("palabra ", 40) + "\n": strings.TrimSpace(strings.Repeat("palabra ", 29)) + " …",
+	}
+	for readme, want := range cases {
+		if got := purpose(readme); got != want {
+			t.Errorf("purpose(%q) = %q, se esperaba %q", readme[:20], got, want)
+		}
+	}
 }
 
 func TestProposalFitsBudget(t *testing.T) {

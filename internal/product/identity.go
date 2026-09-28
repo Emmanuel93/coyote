@@ -147,9 +147,13 @@ func identify(dir string, list []string) Identity {
 			case "package.json", "project.json":
 				m.Description = jsonField(read(f), "description")
 			}
+			if boilerplate(m.Description) {
+				m.Description = ""
+			}
 			if m.Description == "" {
 				m.Description = purpose(read(path.Join(m.Path, "README.md")))
 			}
+			m.Description = sentence(m.Description, 20)
 			id.Modules = appendModule(id.Modules, m)
 		case strings.HasPrefix(f, "docs/") && strings.HasSuffix(f, ".md"):
 			id.Docs = append(id.Docs, Doc{Path: f, Title: title(read(f), base)})
@@ -197,18 +201,62 @@ func appendModule(ms []Module, m Module) []Module {
 	return append(ms, m)
 }
 
-// purpose toma el primer párrafo que no es título, insignia ni tabla.
+// purpose toma el primer párrafo en prosa: ni título, insignia, tabla,
+// código, lista ni índice.
 func purpose(readme string) string {
 	for _, para := range strings.Split(strings.ReplaceAll(readme, "\r\n", "\n"), "\n\n") {
 		p := strings.TrimSpace(para)
 		if p == "" || strings.HasPrefix(p, "#") || strings.HasPrefix(p, "!") || strings.HasPrefix(p, "[!") ||
-			strings.HasPrefix(p, "|") || strings.HasPrefix(p, "<") || strings.HasPrefix(p, "```") || strings.HasPrefix(p, "---") {
+			strings.HasPrefix(p, "|") || strings.HasPrefix(p, "<") || strings.HasPrefix(p, "```") || strings.HasPrefix(p, "---") ||
+			strings.HasPrefix(p, ">") || isList(p) {
 			continue
 		}
 		p = strings.Join(strings.Fields(mdInline.ReplaceAllString(p, "$1")), " ")
-		return firstWords(p, 30)
+		if boilerplate(p) {
+			continue
+		}
+		return sentence(p, 30)
 	}
 	return ""
+}
+
+var listLine = regexp.MustCompile(`^\s*(?:[-*+]\s|\d+[.)]\s)`)
+
+// isList informa si un párrafo es una lista o un índice.
+func isList(p string) bool {
+	lines := strings.Split(p, "\n")
+	n := 0
+	for _, l := range lines {
+		if listLine.MatchString(l) {
+			n++
+		}
+	}
+	return n > 0 && n*2 >= len(lines) || regexp.MustCompile(`^\d+\.\s+\S+.*\d+\.\s`).MatchString(p)
+}
+
+// boilerplate reconoce las descripciones que dejan los generadores.
+func boilerplate(s string) bool {
+	l := strings.ToLower(s)
+	for _, b := range []string{"this library was generated with nx", "this application was generated", "a new flutter project",
+		"a new flutter package", "generated with angular cli", "this project was bootstrapped with", "todo"} {
+		if strings.HasPrefix(l, b) {
+			return true
+		}
+	}
+	return false
+}
+
+// sentence acorta un texto a su primera oración o, si es más larga, a n
+// palabras con puntos suspensivos.
+func sentence(s string, n int) string {
+	if i := strings.Index(s, ". "); i > 0 && len(strings.Fields(s[:i])) <= n {
+		s = s[:i+1]
+	}
+	w := strings.Fields(s)
+	if len(w) > n {
+		return firstWords(strings.Join(w[:n-1], " "), n) + " …"
+	}
+	return firstWords(s, n)
 }
 
 var mdInline = regexp.MustCompile("\\[([^\\]]*)\\]\\([^)]*\\)|[*_`]")
