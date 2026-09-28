@@ -100,6 +100,22 @@ func TestCredentialsAndGateAreBlocked(t *testing.T) {
 		{"Bash", map[string]any{"command": "coyote ws run W-0002"}},
 		{"Bash", map[string]any{"command": "coyote -C . ws continue W-0002 --redo 'otra vez'"}},
 		{"Bash", map[string]any{"command": "git status && env COYOTE_IDE= coyote ws  run W-0002"}},
+		// Envoltorios y construcciones del shell que dejan a coyote en posición de comando.
+		{"Bash", map[string]any{"command": "{ coyote ws run W-0001; }"}},
+		{"Bash", map[string]any{"command": "eval 'coyote ws run W-0001'"}},
+		{"Bash", map[string]any{"command": "if true; then coyote ws continue W-0001; fi"}},
+		{"Bash", map[string]any{"command": "! coyote ws run W-0001"}},
+		{"Bash", map[string]any{"command": "coyote ws $'run' W-0001"}},
+		{"Bash", map[string]any{"command": "coyote ws${IFS}run W-0001"}},
+		{"Bash", map[string]any{"command": `coyote -C "mi proyecto" ws run W-0001`}},
+		{"Bash", map[string]any{"command": "bash -lc 'coyote ws run W-0001'"}},
+		{"Bash", map[string]any{"command": "echo W-0001 | xargs -I{} coyote ws run {}"}},
+		{"Bash", map[string]any{"command": "script -qc 'env -u CLAUDECODE -u COYOTE_IDE coyote ws continue W-0001' /dev/null"}},
+		{"Bash", map[string]any{"command": "setsid coyote ws run W-0001"}},
+		{"Bash", map[string]any{"command": "coproc coyote ws run W-0001"}},
+		{"Bash", map[string]any{"command": "for i in 1; do coyote ws run W-0001; done"}},
+		{"Bash", map[string]any{"command": "flock /tmp/l coyote approve --all"}},
+		{"Bash", map[string]any{"command": "while true; do coyote approve --all; done"}},
 		{"Bash", map[string]any{"command": "rm .claude/settings.json"}},
 		{"Bash", map[string]any{"command": "echo '{\"disableAllHooks\": true}' > x.json"}},
 		{"Bash", map[string]any{"command": "git config core.hooksPath /tmp/h"}},
@@ -116,6 +132,7 @@ func TestCredentialsAndGateAreBlocked(t *testing.T) {
 		{"Write", map[string]any{"file_path": filepath.Join(home, ".claude", "settings.json"), "content": "{}"}},
 		{"Write", map[string]any{"file_path": filepath.Join(home, ".ssh", "authorized_keys"), "content": "k"}},
 		{"Read", map[string]any{"file_path": filepath.Join(home, ".ssh", "id_rsa")}},
+		{"Read", map[string]any{"file_path": filepath.Join(root, ".git", "config")}},
 		{"Read", map[string]any{"file_path": filepath.Join(home, ".config", "coyote", "approvals.key")}},
 		{"Grep", map[string]any{"pattern": "password", "path": home}},
 		{"Bash", map[string]any{"command": "grep -r password ~"}},
@@ -141,9 +158,10 @@ func TestCredentialsAndGateAreBlocked(t *testing.T) {
 		}
 	}
 	// Un commit que solo menciona el comando no es un agente aprobando.
-	msg := claude(t, "Bash", map[string]any{"command": `git commit -m "docs: explica coyote approve"`}, root)
-	if d := ps.Evaluate(msg); d.Verdict != NeedsApproval {
-		t.Errorf("un mensaje que menciona coyote approve se trató como %s: %s", d.Verdict, d.Reason)
+	for _, c := range []string{`git commit -m "docs: explica coyote approve"`, `git commit -m "feat(ws): coyote ws run corre el plan"`, `coyote note "la persona corre coyote ws run" --type how`} {
+		if d := ps.Evaluate(claude(t, "Bash", map[string]any{"command": c}, root)); d.Verdict != NeedsApproval {
+			t.Errorf("%s: un texto que menciona el comando se trató como %s: %s", c, d.Verdict, d.Reason)
+		}
 	}
 }
 

@@ -12,9 +12,9 @@ La regla A1 dice que ningún agente ejecuta acciones con efectos sin aprobación
 
 1. **R15.** Un commit, tag, PR o release con atribución a IA, o con la autoría de una herramienta, se bloquea.
 2. **Bloqueos que ninguna aprobación levanta:**
-   - que un agente corra `coyote approve`, `reject`, `revoke`, `auth`, `hooks` o `install`, o que lance otros agentes con `coyote run`, `coyote ws run` o `coyote ws continue`;
+   - que un agente corra `coyote approve`, `reject`, `revoke`, `auth`, `hooks` o `install`, o que lance otros agentes con `coyote run`, `coyote ws run` o `coyote ws continue`, también detrás de un envoltorio o una construcción del shell (`env`, `script`, `bash -c`, `xargs`, `eval`, `timeout`, llaves, `if`, `for`, `$'…'`, `${IFS}`);
    - que escriba en el gate: `.claude/settings*.json`, `.claude/hooks/`, `.cursor/hooks*`, `.git/`, `.coyote/`, `coyote/approvals/`, `coyote/ledger/`, `coyote/project.yaml` (ahí vive la autonomía), la configuración global del IDE, de git o del shell;
-   - que lea o escriba credenciales: `~/.ssh`, `~/.aws`, `~/.config/gh`, `~/.netrc`, la clave local de coyote y parecidas; también recorrer una carpeta que las contiene (`grep -r ~`);
+   - que lea o escriba credenciales: `~/.ssh`, `~/.aws`, `~/.config/gh`, `~/.netrc`, la clave local de coyote y parecidas; también recorrer una carpeta que las contiene (`grep -r ~`) o leer `.git/config` del proyecto, que puede llevar un token en la URL de un remoto;
    - que un subagente declare en un comando un agente distinto del que reporta el IDE.
 3. **Lectura libre.** Las herramientas que solo leen (Read, Grep, Glob, WebFetch, Task, TodoWrite y las MCP cuyo nombre empieza con get, list, search, read, fetch, view, show o describe) y una lista cerrada de comandos de solo lectura pasan sin registro.
 4. **Todo lo demás necesita una aprobación de la acción exacta.**
@@ -103,6 +103,7 @@ El gate falla cerrado: una entrada ilegible, un error o un pánico bloquean las 
 - Lo que hace un comando aprobado es responsabilidad de quien lo aprueba: si apruebas `make x`, corre lo que diga el Makefile.
 - El análisis de solo lectura es conservador y puede pedir aprobación para comandos inocuos (`git config user.name` sin `--get`).
 - Los bloqueos por texto (rutas del gate o credenciales en un comando) pueden bloquear un mensaje de commit que solo las menciona.
+- El gate lee el texto del comando, no lo que corre por dentro: un script que el agente escribió y la persona aprobó puede llamar a `coyote ws continue`. Por eso `coyote review` muestra el contenido de cada archivo que se aprueba escribir.
 - Las herramientas MCP de lectura se reconocen por su nombre; un servidor MCP mal nombrado queda del lado de la lectura.
 - WebFetch y WebSearch se tratan como lectura. La salida de datos del proyecto por red la controlan los permisos de dominio del IDE.
 - En Cursor, Codex y Copilot el IDE no reporta el subagente: un comando puede declarar otro `--agent`, y la persona lo ve al aprobarlo.

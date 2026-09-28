@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"unicode"
 )
 
 // Kind clasifica una herramienta.
@@ -253,18 +254,52 @@ func (h *Hard) Error() string { return h.Reason }
 func hard(format string, a ...any) *Hard { return &Hard{fmt.Sprintf(format, a...)} }
 
 // coyoteAdmin reconoce a coyote aprobando, revocando, instalando el gate,
-// tocando credenciales o lanzando otro agente (run, ws run, ws continue) cuando está en posición de comando (al inicio o después
-// de ;, &&, ||, |, paréntesis o un envoltorio como sudo, env o go run), lo
-// corra quien lo corra. Un mensaje de commit que solo lo menciona no cuenta.
-var coyoteAdmin = regexp.MustCompile(`(?i)(^|[;&|(\n` + "`" + `]|\$\(|\b(?:sh|bash|zsh|dash|ksh)\s+-c\s+)\s*([A-Za-z_][A-Za-z0-9_]*=\S*\s+)*` +
-	`((sudo|doas|exec|env|nohup|time|command|xargs|nice|ionice|stdbuf|timeout|go\s+run)` +
-	`(\s+(-{1,2}[A-Za-z][\w-]*([= ][^\s;&|]+)?|[A-Za-z_][A-Za-z0-9_]*=\S*|\d+[smhd]?))*\s+)*` +
+// tocando credenciales o lanzando otro agente (run, ws run, ws continue)
+// cuando está en posición de comando: al inicio; después de ;, &, |,
+// paréntesis, llaves, ! o una palabra del shell (then, do, eval…); o como
+// argumento de un envoltorio que corre comandos (sudo, env, xargs, script,
+// bash -c, timeout…). Lo corra quien lo corra. Un mensaje de commit que solo
+// lo menciona no cuenta.
+var coyoteAdmin = regexp.MustCompile(`(?i)(^|[;&|(){}\n!` + "`" + `]|\$\()\s*` +
+	`((then|do|else|elif|if|while|until|eval|exec|time|coproc|builtin|command|nohup|setsid|!)\s+)*` +
+	`([A-Za-z_][A-Za-z0-9_]*=\S*\s+)*` +
+	`((sudo|doas|exec|env|nohup|time|command|builtin|xargs|nice|ionice|stdbuf|timeout|setsid|script|flock|chrt|taskset|unbuffer|caffeinate|go\s+run|sh|bash|zsh|dash|ksh|fish)(\s+\S+)*?\s+)*` +
 	`(\S*/)?coyote(\s+-C\s+\S+)*\s+(approve|reject|revoke|auth|hooks|install|run|ws\s+(run|continue))\b`)
 
-// adminText quita comillas y barras invertidas: el shell las quita antes de
-// correr, y "coyote" run o c\oyote approve son la misma orden.
+// adminText normaliza un comando como lo haría el shell antes de correrlo:
+// $'…' y $"…" son comillas, ${IFS} es un espacio, y las comillas y barras
+// invertidas se van ("coyote" run o c\oyote approve son la misma orden).
 func adminText(cmd string) string {
+	cmd = strings.NewReplacer("${IFS}", " ", "$IFS", " ", "$'", "'", `$"`, `"`).Replace(cmd)
 	return strings.NewReplacer(`\`, "", `"`, "", "'", "").Replace(cmd)
+}
+
+// adminQuoted es la otra lectura: lo que va entre comillas es una sola
+// palabra (coyote -C "mi proyecto" ws run).
+func adminQuoted(cmd string) string {
+	cmd = strings.NewReplacer("${IFS}", " ", "$IFS", " ", "$'", "'", `$"`, `"`).Replace(cmd)
+	var b strings.Builder
+	var quote rune
+	for _, r := range cmd {
+		switch {
+		case r == '\\':
+			continue
+		case quote == 0 && (r == '"' || r == '\''):
+			quote = r
+		case quote != 0 && r == quote:
+			quote = 0
+		case quote != 0 && unicode.IsSpace(r):
+			b.WriteRune('_')
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+// isCoyoteAdmin revisa las dos lecturas del comando.
+func isCoyoteAdmin(cmd string) bool {
+	return coyoteAdmin.MatchString(adminText(cmd)) || coyoteAdmin.MatchString(adminQuoted(cmd))
 }
 
 // shellProtected son textos que en un comando delatan que toca el gate o
@@ -296,7 +331,7 @@ func (ps Paths) hardShell(a Action) *Hard {
 	cmd := strings.NewReplacer("\\\r\n", "", "\\\n", "").Replace(a.Command)
 	// Si el comando se analiza como de solo lectura, coyote solo aparece en
 	// subcomandos de lectura (install --check, por ejemplo).
-	if _, err := analyzeShell(cmd); err != nil && coyoteAdmin.MatchString(adminText(cmd)) {
+	if _, err := analyzeShell(cmd); err != nil && isCoyoteAdmin(cmd) {
 		return hard("un agente no aprueba, rechaza ni revoca, no instala el gate ni credenciales y no lanza otros agentes (coyote run, coyote ws run o continue); eso lo hace la persona en su terminal")
 	}
 	for _, p := range shellProtected {
@@ -452,8 +487,15 @@ func (ps Paths) readTool(a Action) *Hard {
 		if i := strings.IndexAny(p, "*?[{"); i >= 0 {
 			p = path.Dir(p[:i] + "x")
 		}
-		if cred, ok := ps.sensitive(resolve(p, cwd, ps.Home)); ok {
+		abs := resolve(p, cwd, ps.Home)
+		if cred, ok := ps.sensitive(abs); ok {
 			return hard("lee credenciales (%s)", cred)
+		}
+		// La configuración de git del proyecto puede llevar un token en la URL
+		// de un remoto: leerla se bloquea igual que cat .git/config. Buscar en
+		// el proyecto sigue libre (los buscadores no entran a .git).
+		if strings.EqualFold(abs, filepath.Join(ps.Root, ".git", "config")) || strings.EqualFold(abs, filepath.Join(resolve(ps.Root, "/", ps.Home), ".git", "config")) {
+			return hard("lee la configuración de git del proyecto, que puede llevar credenciales")
 		}
 	}
 	return nil
@@ -497,7 +539,7 @@ func (ps Paths) hardOther(a Action) *Hard {
 		allStrings(a.Input[k], &texts)
 	}
 	for _, t := range texts {
-		if coyoteAdmin.MatchString(adminText(t)) {
+		if isCoyoteAdmin(t) {
 			return hard("un agente no aprueba ni instala el gate")
 		}
 		for _, p := range shellProtected {
