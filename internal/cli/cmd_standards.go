@@ -240,9 +240,17 @@ type doctorCheck struct {
 }
 
 func cmdDoctor(a *app, args []string) error {
-	fs := a.flags("doctor", "")
+	fs := a.flags("doctor", "[--ide claude-code|cursor|all]")
+	ide := fs.String("ide", "", "prueba además el gate y la instalación de ese IDE")
 	if _, err := parseArgs(fs, args); err != nil {
 		return err
+	}
+	var ides []string
+	if *ide != "" {
+		var err error
+		if ides, err = ideList(*ide); err != nil {
+			return err
+		}
 	}
 	var checks []doctorCheck
 	add := func(name, state, detail string) { checks = append(checks, doctorCheck{name, state, detail}) }
@@ -337,6 +345,9 @@ func cmdDoctor(a *app, args []string) error {
 	} else {
 		add("coyote en PATH", "ok", "los hooks usan los patrones completos")
 	}
+	for _, x := range ides {
+		a.ideChecks(root, cfg, x, add)
+	}
 	return a.printDoctor(checks)
 }
 
@@ -357,10 +368,13 @@ func claudeSettingsState(root string) (string, string) {
 	}
 	off := s.Attribution.Commit != nil && *s.Attribution.Commit == "" && s.Attribution.PR != nil && *s.Attribution.PR == ""
 	legacyOff := s.IncludeCoAuthoredBy != nil && !*s.IncludeCoAuthoredBy
+	full := strings.Contains(string(data), "coyote-gate.sh")
 	gate := strings.Contains(string(data), "gate attribution")
 	switch {
+	case (off || legacyOff) && full:
+		return "ok", "atribución apagada y gate humano activo (coyote install)"
 	case (off || legacyOff) && gate:
-		return "ok", "atribución apagada y gate PreToolUse activo"
+		return "ok", "atribución apagada y gate de atribución; el gate humano se activa con coyote install --ide claude-code"
 	case off || legacyOff:
 		return "warn", "atribución apagada, pero falta el gate PreToolUse"
 	default:

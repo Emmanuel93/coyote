@@ -9,7 +9,7 @@ rules:
     why: Coyote es independiente de los proyectos donde se usa; el default se generalizó de ellos sin copiar nombres.
     check:
       type: regex_absent
-      paths: ["cmd/**", "internal/**", "templates/**", "standards/**", "examples/**", "embed.go"]
+      paths: ["cmd/**", "internal/**", "templates/**", "standards/**", "examples/**", "agents/**", "skills/**", "embed.go"]
       pattern: '(?i)kredius|fintech-'
     fix: Usa nombres genéricos (acme, demo) y deja lo propio de una organización en su hub
 

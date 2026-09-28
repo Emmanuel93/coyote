@@ -62,8 +62,9 @@ func init() {
 		{"auth", "login | status [--check] | logout", "token de GitHub en el llavero, nunca en archivos", cmdAuth},
 		{"web", "[--addr 127.0.0.1:7410]", "costos por proyecto y por persona en el navegador", cmdWeb},
 		{"generate", "agents [--check]", "genera AGENTS.md desde los documentos coyote", cmdGenerate},
+		{"install", "--ide claude-code|cursor|all [--check]", "instala el gate, los agentes y las skills en el IDE", cmdInstall},
 		{"hooks", "install [--force]", "instala el hook commit-msg", cmdHooks},
-		{"doctor", "", "verifica herramienta, identidad, documentos y estándar", cmdDoctor},
+		{"doctor", "[--ide IDE]", "verifica herramienta, identidad, documentos, estándar y gate", cmdDoctor},
 		{"version", "", "muestra la versión", cmdVersion},
 		{"help", "[comando]", "muestra esta ayuda", cmdHelp},
 	}

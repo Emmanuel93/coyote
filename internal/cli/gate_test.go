@@ -43,7 +43,9 @@ var propRe = regexp.MustCompile(`P-[a-z0-9]{6}`)
 
 func TestGateFlujoDeAprobacion(t *testing.T) {
 	_, root := gateProject(t)
-	bash := func(cmd string) string { return hook(t, root, "Bash", map[string]any{"command": cmd, "description": "x"}, nil) }
+	bash := func(cmd string) string {
+		return hook(t, root, "Bash", map[string]any{"command": cmd, "description": "x"}, nil)
+	}
 
 	// Lectura: pasa sin registro.
 	before := ledgerText(t, root)
@@ -190,7 +192,7 @@ func TestGateFallaCerrado(t *testing.T) {
 	}
 	cases := []struct {
 		dir, stdin, what string
-		want            int
+		want             int
 	}{
 		{root, "no es json", "entrada ilegible", 2},
 		{root, `{"hook_event_name":"PreToolUse","tool_input":{}}`, "sin herramienta", 2},
@@ -247,4 +249,65 @@ func TestGateUsosEnParalelo(t *testing.T) {
 	if allowed != 3 {
 		t.Errorf("con 3 usos pasaron %d llamadas en paralelo", allowed)
 	}
+}
+
+func TestInstallYDoctor(t *testing.T) {
+	base, root := gateProject(t)
+	bin := filepath.Join(base, "bin")
+	if err := os.MkdirAll(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bin, "coyote"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	must(t, run(t, root, "", "install", "--ide", "all", "--check"), 1, "check antes de instalar")
+	dry := run(t, root, "", "install", "--ide", "claude-code", "--dry-run")
+	must(t, dry, 0, "dry-run")
+	if _, err := os.Stat(filepath.Join(root, ".claude", "hooks", "coyote-gate.sh")); err == nil {
+		t.Fatal("--dry-run no debe escribir")
+	}
+	t.Setenv("CLAUDECODE", "1")
+	must(t, run(t, root, "", "install", "--ide", "claude-code"), 1, "instalar desde una sesión de agente")
+	t.Setenv("CLAUDECODE", "")
+	r := run(t, root, "", "install", "--ide", "all")
+	must(t, r, 0, "install all")
+	if !strings.Contains(r.stdout, ".claude/agents/") || !strings.Contains(r.stdout, "14 creado") {
+		t.Errorf("salida de install inesperada:\n%s", r.stdout)
+	}
+	for _, rel := range []string{".claude/settings.json", ".claude/hooks/coyote-gate.sh", ".cursor/hooks.json", ".cursor/hooks/coyote-gate.sh",
+		".claude/agents/coyote-sr-solution-architect.md", ".cursor/agents/coyote-sre.md", ".claude/skills/coyote-patch/SKILL.md",
+		".agents/skills/coyote-context/SKILL.md", "CLAUDE.md", "AGENTS.md"} {
+		if _, err := os.Stat(filepath.Join(root, rel)); err != nil {
+			t.Errorf("falta %s", rel)
+		}
+	}
+	must(t, run(t, root, "", "install", "--ide", "all", "--check"), 0, "check después de instalar")
+	d := run(t, root, "", "doctor", "--ide", "all")
+	must(t, d, 0, "doctor --ide all")
+	for _, want := range []string{"gate: autoaprobación", "gate: credenciales", "gate: atribución", "instalación cursor", "gate humano activo"} {
+		if !strings.Contains(d.stdout, want) {
+			t.Errorf("doctor no reporta %q:\n%s", want, d.stdout)
+		}
+	}
+	if strings.Contains(d.stdout, "✗") {
+		t.Errorf("doctor reporta fallas:\n%s", d.stdout)
+	}
+	// Un agente del proyecto se instala junto a los de la herramienta.
+	if err := os.MkdirAll(filepath.Join(root, "coyote", "agents"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "coyote", "agents", "tienda-pagos.md"),
+		[]byte("---\nname: tienda-pagos\ndescription: experto en el flujo de cobro\nmodel: sonnet\nmax_turns: 4\ntools: [Read, Grep]\nskills: [coyote-context]\n---\nConoce el cobro.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	must(t, run(t, root, "", "install", "--ide", "claude-code", "--check"), 1, "check con un agente nuevo")
+	must(t, run(t, root, "", "install", "--ide", "claude-code"), 0, "reinstalar")
+	if _, err := os.Stat(filepath.Join(root, ".claude", "agents", "tienda-pagos.md")); err != nil {
+		t.Error("el agente del proyecto no se instaló")
+	}
+	// Con el gate instalado, lo que un agente escribe en su configuración se bloquea.
+	in := hook(t, root, "Edit", map[string]any{"file_path": filepath.Join(root, ".claude", "hooks", "coyote-gate.sh"), "old_string": "exit 2", "new_string": "exit 0"}, nil)
+	must(t, run(t, root, in, "gate", "check"), 2, "editar el hook del gate")
 }
