@@ -1,0 +1,23 @@
+{
+  "id": "P-0002",
+  "gate": "G2",
+  "release": "v0.2.0",
+  "workstream": "W-0002",
+  "decision": "approved",
+  "approver": "@eramirezhdez",
+  "date": "2026-09-28",
+  "reviewed_commit": "1bf32e6",
+  "authorizes": [
+    "etiquetar v0.2.0 y generar los binarios",
+    "validar el token con una sola lectura a la API (coyote auth status --check), que la persona corre en su Mac",
+    "credenciales con gh y el llavero del sistema; la OAuth App del device flow se decide después",
+    "confirmar los supuestos D2, D4, D15, D16 y D18",
+    "arrancar v0.3: agentes, aprobaciones por hash y hooks de IDE"
+  ],
+  "conditions": [
+    "el push lo hace la persona con sus propias credenciales",
+    "no se indexan repos de la organización hasta que la persona los elija"
+  ],
+  "response": "continua, en respuesta al reporte de G2; se tomaron las opciones recomendadas del reporte",
+  "evidence": "docs/releases/v0.2.0.md"
+}

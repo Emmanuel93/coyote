@@ -42,3 +42,6 @@
 2026-09-28T06:08Z|@eramirezhdez/coyote-reviewer|W-0002|coyote|rev|seguridad|revisión adversarial de v0.2: 14 hallazgos, todos corregidos con pruebas|doc:docs/releases/v0.2.0.md|-|-|ok
 2026-09-28T06:08Z|@eramirezhdez/coyote-dev|W-0002|coyote|fix|remote|cierra los hallazgos de la revisión de v0.2|-|-|-|ok
 2026-09-28T06:09Z|@eramirezhdez/coyote-scribe|W-0002|coyote|doc|release|reporte de v0.2.0 para el gate G2|-|-|-|ok
+2026-09-28T06:27Z|@eramirezhdez|W-0002|coyote|apr|release|G2 aprobado: v0.2.0, credenciales con gh y llavero, arranque de v0.3|apr:P-0002 doc:docs/releases/v0.2.0.md|-|-|ok
+2026-09-28T06:27Z|@eramirezhdez|W-0002|coyote|close|release|W-0002 cerrado: v0.2.0 construida, revisada y aprobada|doc:coyote/workstreams/W-0002-remote-context/close.md apr:P-0002|-|-|ok
+2026-09-28T06:27Z|@eramirezhdez/coyote-scribe|W-0002|coyote|doc|release|aprobación de G2 para v0.2.0|-|-|-|ok

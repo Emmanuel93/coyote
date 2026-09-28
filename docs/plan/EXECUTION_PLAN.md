@@ -1,6 +1,6 @@
 # Plan de ejecución — Coyote
 
-Estado: v0.1.0 aprobada en G1 (P-0001) · v0.2 construida y verificada, esperando el gate G2 · actualizado 2026-09-28
+Estado: v0.2.0 aprobada en G2 (P-0002) · v0.3 en planeación · actualizado 2026-09-28
 
 Este plan ejecuta la propuesta aprobada ("Plan de construcción — Framework Coyote"). Cada release se razona con la plantilla de cinco partes que usarán los agentes de Coyote (problema, restricciones, opciones, decisión, riesgos) y cierra con un gate humano: nada se etiqueta, se publica ni toca otros proyectos sin autorización explícita.
 
@@ -92,9 +92,9 @@ Este plan ejecuta la propuesta aprobada ("Plan de construcción — Framework Co
 | T14 | Ritmo humano y credenciales | Evitar que GitHub trate la cuenta como bot y no dejar secretos en disco | Token bucket persistido, `auth login/status/logout`, cliente con `Retry-After`; pruebas con servidor local | Hecho |
 | T15 | Repos del proyecto, `push` y `pull` | Colaborar como con git, con los gates antes de publicar | `repo add/list`, contexto remoto sin bajar código, push con lint y atribución, pull con resumen | Hecho |
 | T16 | Web FinOps v0 | Ver consumo y costo por proyecto y por persona | `coyote web` con vistas proyecto>usuario y usuario>proyecto, modelos y tokens | Hecho |
-| T17 | Verificación y G2 | Evidencia antes de autorizar el uso del token | Pruebas, demo, revisión adversarial, `docs/releases/v0.2.0.md` | En gate G2: 14 hallazgos corregidos |
+| T17 | Verificación y G2 | Evidencia antes de autorizar el uso del token | Pruebas, demo, revisión adversarial, `docs/releases/v0.2.0.md` | Hecho: 14 hallazgos corregidos; G2 aprobado (P-0002) |
 
-G2 autoriza: usar tu token contra GitHub (primero solo lectura), registrar o no una OAuth App para el device flow, e indexar en solo lectura los repos de la organización que elijas.
+G2 autorizó (P-0002): etiquetar v0.2.0, validar tu token con una sola lectura a la API, seguir con `gh` y el llavero (la OAuth App se decide después), confirmar D2, D4, D15, D16 y D18, y arrancar v0.3. Los repos de la organización no se indexan hasta que los elijas.
 
 ## v0.3 a v1.0
 
@@ -104,14 +104,14 @@ Siguen el orden de la propuesta. Cada una recibirá su razonamiento completo al 
 
 | Decisión | Supuesto usado en la ejecución | Por qué | Se confirma en |
 | --- | --- | --- | --- |
-| D2 nube | Sin servidores; GitHub como backend | Menor costo y nada que operar para el MVP | G2 |
-| D18 índice local | En memoria con caché en `.coyote/`; SQLite después (ADR-0007) | Sin dependencias nuevas; git es la fuente de verdad | G2 |
-| D4 embeddings | Ninguno en v0.2 (BM25 local); locales cuando lleguen | No sacar código a terceros sin autorización | G2 |
+| D2 nube | Sin servidores; GitHub como backend | Menor costo y nada que operar para el MVP || Confirmado en G2 |
+| D18 índice local | En memoria con caché en `.coyote/`; SQLite después (ADR-0007) | Sin dependencias nuevas; git es la fuente de verdad || Confirmado en G2 |
+| D4 embeddings | Ninguno en v0.2 (BM25 local); locales cuando lleguen | No sacar código a terceros sin autorización || Confirmado en G2 |
 | D6 aprobación R2–R3 | Pull request de GitHub | Deja rastro con identidad y revisión | G3 |
 | D10 visibilidad de costos | Cada persona ve lo suyo, admins todo | Menor exposición por defecto | G4 |
 | D12 hub | `kredius`, sin crearlo hasta G5 | Aislamiento | G5 |
 | D13 nombres de archivo | `README.coyote.md` y `CONTEXT.coyote.md` | Coherente con `README.md` y `AGENTS.md` | Confirmado en G1 |
 | D14 alcance de R15 | Commits, PRs, comentarios, docs, releases y autoría del commit | Es lo que pediste | Confirmado en G1 |
-| D15 web | Plantillas Go embebidas, solo lectura y solo en 127.0.0.1 | Un solo binario, sin superficie de red | G2 |
-| D16 tokens | Entorno, `gh auth token` o llavero del sistema; device flow con OAuth App (ADR-0008) | No dejar secretos en disco | G2 |
+| D15 web | Plantillas Go embebidas, solo lectura y solo en 127.0.0.1 | Un solo binario, sin superficie de red || Confirmado en G2 |
+| D16 tokens | Entorno, `gh auth token` o llavero del sistema; device flow con OAuth App (ADR-0008) | No dejar secretos en disco || Confirmado en G2 |
 | D19 autonomía por defecto | `manual` | Nada con efectos sin aprobación mientras no haya evidencia | G3 |

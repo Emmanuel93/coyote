@@ -1,6 +1,6 @@
 # Cierre W-0002 — v0.2 remote + context
 
-Responsable del resultado: @eramirezhdez (modo manual). Se cierra con la decisión de G2.
+Responsable del resultado: @eramirezhdez (modo manual). Cerrado con la aprobación de G2 (`coyote/approvals/P-0002.json`).
 
 ## Resultado
 
