@@ -14,7 +14,7 @@ var (
 	declRe     = regexp.MustCompile(`^\s*(?:(?:public|protected|private|abstract|final|static|sealed|open|internal|data|inner)\s+)*(class|interface|record|enum|object)\b`)
 	feignRe    = regexp.MustCompile(`@FeignClient\b`)
 	// WebClient y RestTemplate: .uri("/x"), .path("/x"), getForObject("/x"…
-	uriCallRe = regexp.MustCompile(`\.(uri|path)\(\s*"([^"]*)"`)
+	uriCallRe = regexp.MustCompile(`\.(uri|path)\(\s*("|(?:[A-Z]\w*\.)?[A-Z_][A-Z0-9_]*\s*\+)`)
 	restTplRe = regexp.MustCompile(`\.(getForObject|getForEntity|postForObject|postForEntity|postForLocation|put|delete|patchForObject|exchange)\(\s*("([^"]*)"|[A-Za-z_][A-Za-z0-9_.]*\s*\+\s*"([^"]*)")`)
 	verbRe    = regexp.MustCompile(`\.(get|post|put|delete|patch)\(\s*\)|HttpMethod\.(GET|POST|PUT|DELETE|PATCH)|\.method\(\s*HttpMethod\.(GET|POST|PUT|DELETE|PATCH)`)
 	// Kafka
@@ -428,7 +428,7 @@ func springEntries(text, repo, mod, file string, cx javaCtx) []Entry {
 	// Llamadas salientes: WebClient o RestClient (.uri/.path), sus métodos
 	// envoltorio (get(…), post(…)) y RestTemplate.
 	callSeen := map[string]bool{}
-	addCall := func(at int, method, raw string) {
+	addCall := func(at int, method, raw string, uncertain bool) {
 		norm := NormPath(raw)
 		if norm == "" {
 			return
@@ -439,12 +439,18 @@ func springEntries(text, repo, mod, file string, cx javaCtx) []Entry {
 			return
 		}
 		callSeen[k] = true
-		out = append(out, Entry{Repo: repo, Module: mod, Role: Calls, Method: method, Path: norm, Raw: raw, File: file, Line: line})
+		out = append(out, Entry{Repo: repo, Module: mod, Role: Calls, Method: method, Path: norm, Raw: raw, File: file, Line: line, Unresolved: uncertain})
+	}
+	// firstArg arma la ruta del primer argumento de la llamada cuyo nombre
+	// termina en i, con sus concatenaciones.
+	firstArg := func(i int) (string, bool) {
+		args, _ := balanced(text, i)
+		return concatPath(topLevel(args)[0], resolve)
 	}
 	for _, loc := range uriCallRe.FindAllStringSubmatchIndex(text, -1) {
-		raw := text[loc[4]:loc[5]]
+		raw, uncertain := firstArg(loc[3])
 		if text[loc[2]:loc[3]] == "uri" {
-			addCall(loc[0], verbBefore(text, loc[0]), raw)
+			addCall(loc[0], verbBefore(text, loc[0]), raw, uncertain)
 			continue
 		}
 		// .path(…) cuenta solo dentro de una llamada saliente: .uri(u -> u.path(…)),
@@ -454,38 +460,29 @@ func springEntries(text, repo, mod, file string, cx javaCtx) []Entry {
 			continue
 		}
 		if method, ok := callVerb(text, loc[0]); ok {
-			addCall(loc[0], method, raw)
+			addCall(loc[0], method, raw, uncertain)
 		}
 	}
 	if clientRe.MatchString(text) {
 		for _, loc := range helperCallRe.FindAllStringSubmatchIndex(text, -1) {
 			args, _ := balanced(text, loc[3])
 			for _, part := range topLevel(args) {
-				if m := stringLit.FindStringSubmatch(strings.TrimSpace(part)); m != nil && strings.HasPrefix(strings.TrimSpace(part), `"`) && strings.HasPrefix(m[1], "/") {
-					addCall(loc[0], strings.ToUpper(text[loc[2]:loc[3]]), m[1])
+				if p := strings.TrimSpace(part); strings.HasPrefix(p, `"/`) {
+					raw, uncertain := concatPath(p, resolve)
+					addCall(loc[0], strings.ToUpper(text[loc[2]:loc[3]]), raw, uncertain)
 					break
 				}
 			}
 		}
 	}
 	for _, loc := range restTplRe.FindAllStringSubmatchIndex(text, -1) {
-		raw := ""
-		switch {
-		case loc[6] >= 0:
-			raw = text[loc[6]:loc[7]]
-		case loc[8] >= 0:
-			raw = text[loc[8]:loc[9]]
-		}
-		norm := NormPath(raw)
-		if norm == "" {
-			continue
-		}
+		raw, uncertain := firstArg(loc[3])
 		method := map[string]string{"getForObject": "GET", "getForEntity": "GET", "postForObject": "POST", "postForEntity": "POST",
 			"postForLocation": "POST", "put": "PUT", "delete": "DELETE", "patchForObject": "PATCH"}[text[loc[2]:loc[3]]]
 		if method == "" {
 			method = verbIn(text, loc[3]) // exchange: el HttpMethod de sus propios argumentos
 		}
-		out = append(out, Entry{Repo: repo, Module: mod, Role: Calls, Method: method, Path: norm, Raw: raw, File: file, Line: lineOf(text, loc[0])})
+		addCall(loc[0], method, raw, uncertain)
 	}
 	// Kafka: listeners y productores.
 	for _, loc := range listenerRe.FindAllStringIndex(text, -1) {

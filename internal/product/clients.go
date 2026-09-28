@@ -50,6 +50,15 @@ func tsCalls(text, repo, mod, file string) []Entry {
 		if !looksLikeAPIPath(raw) {
 			continue
 		}
+		open := strings.LastIndex(text[:loc[4]], "(")
+		if open >= loc[0] {
+			// '/cuentas/' + id + '/libro': la ruta completa del primer argumento.
+			if parts := splitTop(jsArgs(text, open), ','); len(parts) > 0 {
+				if full, _ := concatPath(parts[0], nil); full != "" {
+					raw = strings.Replace(full, "{base}", "${base}", 1)
+				}
+			}
+		}
 		norm := NormPath(raw)
 		if norm == "" || Trivial(norm) {
 			continue
@@ -64,7 +73,7 @@ func tsCalls(text, repo, mod, file string) []Entry {
 		if method == "" {
 			// El método va en las opciones de esta misma llamada, nunca en la siguiente.
 			args := ""
-			if open := strings.LastIndex(text[:loc[4]], "("); open >= loc[0] {
+			if open >= loc[0] {
 				args = jsArgs(text, open)
 			}
 			if m := tsMethodRe.FindStringSubmatch(args); m != nil {

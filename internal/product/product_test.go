@@ -913,3 +913,33 @@ func TestAfinidadEntreBFF(t *testing.T) {
 		t.Errorf("una ruta sin segmentos fijos no se enlaza: %v", to["svc"])
 	}
 }
+
+func TestRutasConcatenadas(t *testing.T) {
+	java := `class Cuentas {
+    static final String BASE = "/api/v1/cuentas";
+    private final WebClient webClient;
+    Object libro(String id) { return get("/api/v1/cuentas/" + id + "/libro", Object.class); }
+    Object uno(String id) { return webClient.get().uri("/api/v1/saldos/" + id).retrieve(); }
+    Object viejo(String id) { return rest.getForObject(baseUrl + "/api/v1/viejo/" + id, Object.class); }
+    Object todas() { return webClient.get().uri(BASE + "/todas").retrieve(); }
+    private <T> T get(String path, Class<T> type) { return webClient.get().uri(path).retrieve().bodyToMono(type).block(); }
+}`
+	got := map[string]string{}
+	for _, e := range springEntries(java, "svc", ".", "Cuentas.java", javaCtx{resolve: resolver("Cuentas.java", java, func() constTable {
+		c := constTable{}
+		c.add("Cuentas.java", java)
+		return c
+	}())}) {
+		got[e.Method+" "+e.Path] = e.Raw
+	}
+	for _, want := range []string{"GET /api/v1/cuentas/{}/libro", "GET /api/v1/saldos/{}", "GET /api/v1/viejo/{}", "GET /api/v1/cuentas/todas"} {
+		if _, ok := got[want]; !ok {
+			t.Errorf("falta %s: %v", want, got)
+		}
+	}
+	ts := "export const libro = (id: string) => request('/cuentas/' + id + '/libro');\n"
+	calls := tsCalls(ts, "web", ".", "api.ts")
+	if len(calls) != 1 || calls[0].Path != "/cuentas/{}/libro" || calls[0].Method != "GET" {
+		t.Errorf("concatenación en TypeScript: %+v", calls)
+	}
+}

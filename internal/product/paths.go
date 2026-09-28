@@ -102,3 +102,60 @@ func MatchScore(consumer, provider string) int {
 	}
 	return score
 }
+
+// splitTop parte una expresión por un separador de primer nivel, respetando
+// cadenas ('…', "…", `…`) y paréntesis, llaves y corchetes.
+func splitTop(expr string, sep byte) []string {
+	var parts []string
+	depth, last := 0, 0
+	for i := 0; i < len(expr); i++ {
+		switch c := expr[i]; {
+		case c == '\'' || c == '"' || c == '`':
+			for i++; i < len(expr) && expr[i] != c; i++ {
+				if expr[i] == '\\' {
+					i++
+				}
+			}
+		case c == '(' || c == '[' || c == '{':
+			depth++
+		case c == ')' || c == ']' || c == '}':
+			depth--
+		case c == sep && depth == 0:
+			parts = append(parts, expr[last:i])
+			last = i + 1
+		}
+	}
+	return append(parts, expr[last:])
+}
+
+// concatPath arma la ruta de una expresión que concatena cadenas y
+// variables: "/cuentas/" + id + "/libro" es /cuentas/{}/libro. Una constante
+// que se puede resolver aporta su valor; lo que va antes de la primera cadena
+// es la base (el host). uncertain indica una constante de ruta sin resolver:
+// la ruta que queda puede no ser la real.
+func concatPath(expr string, resolve func(string) (string, bool)) (path string, uncertain bool) {
+	var b strings.Builder
+	for n, part := range splitTop(strings.TrimSpace(expr), '+') {
+		part = strings.TrimSpace(part)
+		switch {
+		case len(part) >= 2 && strings.ContainsRune(`'"`+"`", rune(part[0])) && part[len(part)-1] == part[0]:
+			b.WriteString(part[1 : len(part)-1])
+		case resolve != nil && constName.MatchString(part):
+			if v, ok := resolve(part); ok {
+				b.WriteString(v)
+				continue
+			}
+			uncertain = true
+			fallthrough
+		default:
+			if n == 0 {
+				b.WriteString("{base}")
+			} else {
+				b.WriteString("{}")
+			}
+		}
+	}
+	return b.String(), uncertain
+}
+
+var constName = regexp.MustCompile(`^(?:[A-Z]\w*\.)?[A-Z_][A-Z0-9_]*$`)
