@@ -1,0 +1,18 @@
+# Formato preliminar de workstream (el motor que lo ejecuta llega en v0.4).
+id: W-0003
+title: v0.3 gate
+owner: "@eramirezhdez"
+autonomy: manual
+risk: R2
+reasoning: docs/plan/EXECUTION_PLAN.md#v03-gate--razonamiento
+authorized_by: coyote/approvals/P-0002.json
+gate: G3                    # piloto en seco, gate activo en el repo de coyote y en proyectos elegidos
+steps:
+  - { id: T18, does: plan razonado y ADR-0009, ADR-0010, agent: coyote-sr-solution-architect, output: [docs/plan/EXECUTION_PLAN.md, coyote/decisions/] }
+  - { id: T19, does: gate por hash, agent: coyote-devsecops, output: internal/gate }
+  - { id: T20, does: cola y registros de aprobación, agent: coyote-dev, output: [internal/approval, internal/cli] }
+  - { id: T21, does: agentes y skills, agent: coyote-architect, output: [agents/, skills/] }
+  - { id: T22, does: install y doctor por IDE, agent: coyote-dev, output: [internal/install, internal/cli] }
+  - { id: T23, does: identidad de agente y autonomía, agent: coyote-devsecops, output: [internal/identity, internal/cli] }
+  - { id: T24, does: verificación y reporte de G3, agent: coyote-reviewer, output: docs/releases/v0.3.0.md, gate: human }
+close: { summary: close.md }

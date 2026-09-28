@@ -1,6 +1,6 @@
 # Plan de ejecución — Coyote
 
-Estado: v0.2.0 aprobada en G2 (P-0002) · v0.3 en planeación · actualizado 2026-09-28
+Estado: v0.2.0 aprobada en G2 (P-0002) · v0.3 en construcción · actualizado 2026-09-28
 
 Este plan ejecuta la propuesta aprobada ("Plan de construcción — Framework Coyote"). Cada release se razona con la plantilla de cinco partes que usarán los agentes de Coyote (problema, restricciones, opciones, decisión, riesgos) y cierra con un gate humano: nada se etiqueta, se publica ni toca otros proyectos sin autorización explícita.
 
@@ -96,7 +96,55 @@ Este plan ejecuta la propuesta aprobada ("Plan de construcción — Framework Co
 
 G2 autorizó (P-0002): etiquetar v0.2.0, validar tu token con una sola lectura a la API, seguir con `gh` y el llavero (la OAuth App se decide después), confirmar D2, D4, D15, D16 y D18, y arrancar v0.3. Los repos de la organización no se indexan hasta que los elijas.
 
-## v0.3 a v1.0
+## v0.3 gate — razonamiento
+
+**Problema.** La regla A1 hoy es una promesa. Un agente en Claude Code o Cursor puede correr comandos, editar archivos o llamar herramientas MCP sin una aprobación registrada. El ledger guarda el agente que cada comando declara, sin verificarlo. No hay agentes ni skills que instalar, cada IDE se configura a mano y el modo de autonomía de `project.yaml` no tiene efecto.
+
+**Restricciones.**
+- El control vive donde el agente actúa: el hook previo del IDE. En Claude Code, `PreToolUse` corre antes de los permisos, dentro de los subagentes y aun con `bypassPermissions`. En Cursor, `preToolUse` cubre comandos, ediciones y MCP. Nada depende del prompt.
+- Se aprueba la acción exacta por su hash, con caducidad de 24 horas como máximo y usos contados. Sin comodines.
+- Aprueba una persona. Un agente no puede aprobar, editar el gate ni fabricar un registro.
+- Falla cerrado: si coyote no está instalado o falla, la acción no corre.
+- Leer y buscar no piden aprobación. Si cada `ls` pidiera una, la gente apagaría el gate; la fatiga de aprobaciones es el primer riesgo de la propuesta.
+- Sin dependencias ni red nuevas, sin tocar otros proyectos, y con C1 y R15.
+
+**Opciones para el gate.**
+- A. Instrucciones en los prompts de los agentes. Un agente con una instrucción inyectada las ignora.
+- B. Listas de comandos permitidos por patrón. Aprueban acciones que nadie vio, y la propuesta prohíbe los comodines.
+- C. Hash de la acción exacta en el hook del IDE, con una cola de propuestas, aprobación desde la terminal de la persona, registros firmados con una clave local, usos contados en el ledger y una lista cerrada de comandos de solo lectura que no necesitan aprobación.
+
+**Opciones para agentes e IDEs.** Escribir a mano los archivos de cada IDE, o mantener una sola definición por agente que `coyote install` traduce al formato de cada IDE.
+
+**Decisión.**
+- Gate: **C** (ADR-0009). El hash cubre lo que decide el efecto: en Bash, el comando y la carpeta; en Write, la ruta y el contenido; en Edit, la ruta y los textos viejo y nuevo; en lo demás, el nombre y la entrada completa. Si el agente cambia la descripción, el hash no cambia; si cambia un carácter del comando, sí.
+- Siempre bloqueado, aun con aprobación: que un agente apruebe o revoque, que edite el gate (hooks y configuración del IDE, `.git/`, `coyote/approvals/`, `.coyote/`) y que lea o escriba credenciales.
+- Agentes: una definición por agente en la herramienta, los 14 de la propuesta, más los del proyecto en `coyote/agents/`. Como pide la propuesta, exploran y proponen sin Bash, Write ni Edit; lo que cambia el código lo aplica la sesión principal y pasa por el gate (ADR-0010).
+- IDEs: `coyote install --ide claude-code` y `--ide cursor`. Ambos son de nivel 1: su hook previo cubre comandos, ediciones y MCP. Los demás IDEs llegan en v0.5.
+- Identidad: el ledger toma el agente que reporta el IDE (`agent_type` en Claude Code), no el que declara el comando. Un nombre fuera del roster se rechaza, y un comando que declara un agente distinto al que reporta el IDE se bloquea.
+- Autonomía: solo `manual` en v0.3. `supervised` y `autonomous` se aceptan en `project.yaml`, pero el gate aplica `manual` hasta que v0.4 traiga su motor: nunca más laxo que lo construido.
+
+**Riesgos.**
+- Fatiga de aprobaciones. Mitigación: lectura libre, aprobar la cola completa con `--all`, aprobaciones con varios usos durante 24 horas como máximo, y el flujo de parche: el agente propone un diff y se aprueba una sola vez.
+- Un comando "de solo lectura" que en realidad escribe o ejecuta. Mitigación: lista cerrada con banderas prohibidas por comando, sin redirecciones, sustituciones ni variables, y pruebas adversariales.
+- Que un IDE cambie el formato de sus hooks. Mitigación: pruebas con entradas reales de cada IDE y `coyote doctor --ide`, que prueba el gate en tu máquina.
+- Un proyecto con gate no se puede usar sin coyote instalado. Es la consecuencia buscada; el mensaje dice cómo instalarlo.
+- Aprobar sin leer. Mitigación: `coyote review` muestra el comando o el diff, quién lo pidió y desde qué agente.
+
+### Tareas de v0.3
+
+| ID | Tarea | Razonamiento | Aceptación | Estado |
+| --- | --- | --- | --- | --- |
+| T18 | Plan y ADR-0009, ADR-0010 | El gate cambia cómo trabajan los agentes; se razona antes del código | Esta sección, los ADRs y el workstream W-0003 | Hecho |
+| T19 | Gate por hash | Es el núcleo de A1: sin él, lo demás es declarativo | `gate check` con entradas de Claude Code, Cursor, Codex y Copilot; lectura libre; rutas protegidas; falla cerrado | Pendiente |
+| T20 | Cola de aprobaciones | La persona necesita ver y decidir rápido, con rastro | `approvals`, `review`, `approve`, `reject`, `revoke`; registros firmados; usos, caducidad y revocación en el ledger | Pendiente |
+| T21 | Agentes y skills | Una definición sirve a todos los IDEs | 14 agentes y skills `coyote-*` con esquema de salida y R15; los del proyecto en `coyote/agents` y `coyote/skills` | Pendiente |
+| T22 | `install` y `doctor --ide` | Configurar un IDE debe ser un comando, verificable en CI | Claude Code y Cursor; configuración fusionada sin pisar la tuya; `--check` | Pendiente |
+| T23 | Identidad y autonomía | El ledger debe decir qué agente actuó, sin depender de lo que declara | Roster, identidad del IDE en el ledger, sesiones de agente sin poder aprobar | Pendiente |
+| T24 | Verificación y G3 | Evidencia antes de activar el gate en proyectos reales | 24 pruebas de gate o más, demo de punta a punta, revisión adversarial y `docs/releases/v0.3.0.md` | Pendiente |
+
+G3 autoriza: el piloto en seco sobre un dominio real en solo lectura, activar el gate en el repo de coyote y en los proyectos que elijas, y los supuestos D6, D11, D19, D20, D21 y D22.
+
+## v0.4 a v1.0
 
 Siguen el orden de la propuesta. Cada una recibirá su razonamiento completo al cerrar la anterior, con lo aprendido en su gate; así el plan no fija hoy lo que conviene decidir con evidencia.
 
@@ -107,7 +155,8 @@ Siguen el orden de la propuesta. Cada una recibirá su razonamiento completo al 
 | D2 nube | Sin servidores; GitHub como backend | Menor costo y nada que operar para el MVP || Confirmado en G2 |
 | D18 índice local | En memoria con caché en `.coyote/`; SQLite después (ADR-0007) | Sin dependencias nuevas; git es la fuente de verdad || Confirmado en G2 |
 | D4 embeddings | Ninguno en v0.2 (BM25 local); locales cuando lleguen | No sacar código a terceros sin autorización || Confirmado en G2 |
-| D6 aprobación R2–R3 | Pull request de GitHub | Deja rastro con identidad y revisión | G3 |
+| D6 aprobación R2–R3 | CLI con registro firmado en v0.3; pull request con `coyote gate pr` en CI después | La CLI funciona sin red; el PR agrega revisión de equipo | G3 |
+| D11 IDE del piloto | Claude Code | Es el de nivel 1 con hooks más completos | G3 |
 | D10 visibilidad de costos | Cada persona ve lo suyo, admins todo | Menor exposición por defecto | G4 |
 | D12 hub | `kredius`, sin crearlo hasta G5 | Aislamiento | G5 |
 | D13 nombres de archivo | `README.coyote.md` y `CONTEXT.coyote.md` | Coherente con `README.md` y `AGENTS.md` | Confirmado en G1 |
@@ -115,3 +164,6 @@ Siguen el orden de la propuesta. Cada una recibirá su razonamiento completo al 
 | D15 web | Plantillas Go embebidas, solo lectura y solo en 127.0.0.1 | Un solo binario, sin superficie de red || Confirmado en G2 |
 | D16 tokens | Entorno, `gh auth token` o llavero del sistema; device flow con OAuth App (ADR-0008) | No dejar secretos en disco || Confirmado en G2 |
 | D19 autonomía por defecto | `manual` | Nada con efectos sin aprobación mientras no haya evidencia | G3 |
+| D20 lectura sin aprobación | Lista cerrada de comandos de solo lectura en la herramienta; sin patrones propios del proyecto | Leer no tiene efectos y evita la fatiga | G3 |
+| D21 validez de una aprobación | Solo en la máquina donde se dio (firma con clave local), 24 h como máximo | Un registro copiado o fabricado no sirve | G3 |
+| D22 gate sin coyote | Falla cerrado: el IDE no ejecuta herramientas en un proyecto con gate | Un gate que se apaga solo no es gate | G3 |
