@@ -11,8 +11,25 @@ import (
 
 	"github.com/Emmanuel93/coyote/internal/ccfdoc"
 	"github.com/Emmanuel93/coyote/internal/fsx"
+	"github.com/Emmanuel93/coyote/internal/inject"
 	"github.com/Emmanuel93/coyote/internal/standards"
 )
+
+// flagged revisa las entradas que van a AGENTS.md: ese archivo es una
+// instrucción para los agentes, así que una entrada con forma de orden para
+// un agente no entra (ADR-0023). No hay bandera para forzarla.
+func flagged(file string, doc *ccfdoc.Doc) []string {
+	if doc == nil {
+		return nil
+	}
+	var out []string
+	for _, e := range doc.Entries {
+		if f, ok := inject.First(strings.Join(e.Fields, "\n")); ok {
+			out = append(out, fmt.Sprintf("%s:%d (%s: %s)", file, e.Line, f.Rule, f.Label))
+		}
+	}
+	return out
+}
 
 // Marker abre todo AGENTS.md generado por coyote.
 const Marker = "<!-- generado por coyote: no editar; edita README.coyote.md, CONTEXT.coyote.md o coyote/standards/rules.yaml y corre coyote generate agents -->"
@@ -21,6 +38,10 @@ const Marker = "<!-- generado por coyote: no editar; edita README.coyote.md, CON
 func Generate(root string, st *standards.Standard, autonomy string) (string, error) {
 	readme := load(root, ccfdoc.ReadmeFile)
 	context := load(root, ccfdoc.ContextFile)
+	if bad := append(flagged(ccfdoc.ReadmeFile, readme), flagged(ccfdoc.ContextFile, context)...); len(bad) > 0 {
+		return "", fmt.Errorf("AGENTS.md no se genera: %d entradas tienen forma de orden para un agente y AGENTS.md es una instrucción; reescríbelas (ADR-0023): %s",
+			len(bad), strings.Join(bad, "; "))
+	}
 	name := filepath.Base(root)
 	profile := ""
 	if readme != nil {

@@ -12,6 +12,7 @@ import (
 	"github.com/Emmanuel93/coyote/internal/fsx"
 	"github.com/Emmanuel93/coyote/internal/github"
 	"github.com/Emmanuel93/coyote/internal/infra"
+	"github.com/Emmanuel93/coyote/internal/inject"
 	"github.com/Emmanuel93/coyote/internal/product"
 	"github.com/Emmanuel93/coyote/internal/project"
 	"github.com/Emmanuel93/coyote/internal/safetext"
@@ -79,6 +80,15 @@ func gatePR(a *app, args []string) error {
 	// mismo agregando secrets.allow. Cada ruta lleva las del proyecto coyote
 	// que la contiene, también en una subcarpeta.
 	in.Secrets = scanAdded(added, baseRules(dir, p.pr.BaseSHA, p.self), func(f string) (string, bool) { return product.FileAt(dir, right, f) })
+	// ADR-0023: instrucciones de agentes con cualquier mayúscula, órdenes para
+	// un agente en lo que el PR agrega a documentos y un ledger reescrito.
+	left, _, err := product.RangeSides(dir, p.pr.BaseSHA+"..."+p.pr.HeadSHA)
+	if err != nil {
+		return fail(1, "%v", err)
+	}
+	in.Files = append(in.Files, agentRisks(changed, in.Files)...)
+	in.Files = append(in.Files, injectionRisks(added, func(f string) (string, bool) { return product.FileAt(dir, right, f) })...)
+	in.Files = append(in.Files, ledgerRisks(dir, left, right, changed)...)
 	var plan *infra.PlanSummary
 	if *planFile != "" {
 		f, err := os.Open(*planFile)
@@ -488,3 +498,98 @@ func sloRisks(dir, base, head string, changed []string) []ci.FileRisk {
 	}
 	return out
 }
+
+// agentRisks suma como R2 los archivos de instrucciones de agentes que las
+// reglas por ruta no vieron por sus mayúsculas: en un disco que no las
+// distingue, agents.md es el AGENTS.md que lee el IDE (ADR-0023).
+func agentRisks(changed []string, have []ci.FileRisk) []ci.FileRisk {
+	seen := map[string]bool{}
+	for _, f := range have {
+		if f.Why == ci.WhyAgentInstructions {
+			seen[f.Path] = true
+		}
+	}
+	var out []ci.FileRisk
+	for _, f := range changed {
+		if inject.InstructionFile(f) && !seen[f] {
+			out = append(out, ci.FileRisk{Path: f, Risk: ci.R2, Why: ci.WhyAgentInstructions})
+		}
+	}
+	return out
+}
+
+// injectionRisks marca como R2 un documento o una instrucción de agentes al
+// que el PR le agrega texto con forma de orden para un agente. Las líneas
+// seguidas se leen juntas: una orden partida en dos líneas también cuenta.
+func injectionRisks(added []product.AddedFile, whole func(string) (string, bool)) []ci.FileRisk {
+	var out []ci.FileRisk
+	for _, f := range added {
+		if !inject.Document(f.Path) {
+			continue
+		}
+		type run struct {
+			first int
+			text  string
+		}
+		var runs []run
+		if f.Whole {
+			if text, ok := whole(f.Path); ok {
+				runs = append(runs, run{1, text})
+			}
+		}
+		for i, l := range f.Lines {
+			if i > 0 && l.Line == f.Lines[i-1].Line+1 {
+				runs[len(runs)-1].text += "\n" + l.Text
+				continue
+			}
+			runs = append(runs, run{l.Line, l.Text})
+		}
+		var first inject.Finding
+		n := 0
+		for _, r := range runs {
+			for _, x := range inject.Scan(r.text) {
+				if n == 0 {
+					first = x
+					first.Line += r.first - 1
+				}
+				n++
+			}
+		}
+		if n > 0 {
+			why := fmt.Sprintf("posible orden para un agente en la línea %d (%s)", first.Line, first.Rule)
+			if n > 1 {
+				why += fmt.Sprintf(" y %d marcas más", n-1)
+			}
+			out = append(out, ci.FileRisk{Path: f.Path, Risk: ci.R2, Why: why})
+		}
+	}
+	return out
+}
+
+// ledgerRisks marca como R3 un PR que cambia o borra líneas del ledger: el
+// ledger solo agrega (docs/specs/ccf-v1.md). Se compara contra el merge-base,
+// así lo que la base agregó después no cuenta.
+func ledgerRisks(dir, left, right string, changed []string) []ci.FileRisk {
+	var out []ci.FileRisk
+	for _, f := range changed {
+		if !strings.HasPrefix(f, "coyote/ledger/") && !strings.Contains(f, "/coyote/ledger/") {
+			continue
+		}
+		old, hadOld := product.FileAt(dir, left, f)
+		if !hadOld {
+			continue // archivo nuevo: solo agrega
+		}
+		nw, hasNew := product.FileAt(dir, right, f)
+		switch {
+		case !hasNew:
+			out = append(out, ci.FileRisk{Path: f, Risk: ci.R3, Why: "borra un archivo del ledger; el ledger solo agrega"})
+		case !appendOnly(old, nw):
+			out = append(out, ci.FileRisk{Path: f, Risk: ci.R3, Why: "cambia o borra líneas del ledger; el ledger solo agrega"})
+		}
+	}
+	return out
+}
+
+// appendOnly dice si nw solo agrega a old. Un archivo sin salto final sigue
+// valiendo: coyote le agrega el salto antes de la línea nueva.
+func appendOnly(old, nw string) bool { return strings.HasPrefix(nw, old) }

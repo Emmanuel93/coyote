@@ -43,7 +43,15 @@ var DefaultRules = []Rule{
 	{R2, []string{"go.mod", "**/pom.xml", "**/build.gradle", "**/build.gradle.kts", "**/package.json", "**/pubspec.yaml", "**/requirements*.txt", "**/pyproject.toml", "**/Cargo.toml"}, "las dependencias"},
 	{R2, []string{"**/application*.{yml,yaml,properties}", "**/bootstrap*.{yml,yaml,properties}"}, "la configuración del servicio"},
 	{R2, []string{"coyote/slo/**", "**/coyote/slo/**"}, "los SLOs y sus alertas"},
+	// Lo que los agentes leen como instrucción (ADR-0023); gate pr suma los
+	// mismos nombres con otras mayúsculas, que en macOS son el mismo archivo.
+	{R2, []string{"AGENTS.md", "CLAUDE.md", "GEMINI.md", "CONTEXT.coyote.md", "README.coyote.md", ".cursorrules", ".windsurfrules", ".clinerules",
+		".github/copilot-instructions.md", ".github/instructions/**", "**/.github/instructions/**"}, WhyAgentInstructions},
 }
+
+// WhyAgentInstructions es el motivo de riesgo de los archivos que los agentes
+// leen como instrucciones.
+const WhyAgentInstructions = "las instrucciones de los agentes"
 
 // riskFlagRe acepta solo caracteres de patrón: la regla viaja por el shell del workflow.
 var riskFlagRe = regexp.MustCompile(`^(R[23])=([A-Za-z0-9._/*?{},@+-]+)$`)

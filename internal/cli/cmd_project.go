@@ -17,6 +17,7 @@ import (
 	"github.com/Emmanuel93/coyote/internal/fsx"
 	"github.com/Emmanuel93/coyote/internal/gitx"
 	"github.com/Emmanuel93/coyote/internal/identity"
+	"github.com/Emmanuel93/coyote/internal/inject"
 	"github.com/Emmanuel93/coyote/internal/ledger"
 	"github.com/Emmanuel93/coyote/internal/project"
 	"github.com/Emmanuel93/coyote/internal/standards"
@@ -246,6 +247,11 @@ func cmdNote(a *app, args []string) error {
 	entry, err := ccfdoc.FormatEntry(*typ, *scope, text, *ref)
 	if err != nil {
 		return err
+	}
+	// Una nota llega a los agentes como instrucción (AGENTS.md): una con forma
+	// de orden para un agente no se agrega, la escriba quien la escriba (ADR-0023).
+	if f, ok := inject.First(entry); ok {
+		return fail(1, "la nota no se agregó: tiene forma de orden para un agente (%s: %s). CONTEXT.coyote.md llega a los agentes como instrucción; escríbela como un hecho, no como una orden (ADR-0023)", f.Rule, f.Label)
 	}
 	if err := fsx.NoSymlinks(root, *file); err != nil {
 		return fail(1, "%v", err)

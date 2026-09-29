@@ -231,6 +231,16 @@ func revSHA(dir, rev string) string {
 
 // diffSides resuelve los commits a cada lado de un rango de git. right vacío
 // es el árbol de trabajo (un diff contra una sola revisión).
+// RangeSides devuelve los dos commits que compara un rango: el merge-base y
+// head en base...head, o los dos extremos en base..head.
+func RangeSides(dir, diff string) (left, right string, err error) {
+	l, r, worktree := diffSides(dir, diff)
+	if worktree || l == "" || r == "" {
+		return "", "", fmt.Errorf("el rango %q no resuelve a dos commits", diff)
+	}
+	return l, r, nil
+}
+
 func diffSides(dir, diff string) (left, right string, worktree bool) {
 	orHead := func(s string) string {
 		if s == "" {
