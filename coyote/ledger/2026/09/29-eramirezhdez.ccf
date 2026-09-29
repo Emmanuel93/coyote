@@ -37,3 +37,5 @@
 2026-09-29T06:03Z|@eramirezhdez/claude-code|W-0006|coyote|doc|release|aprobación de G6 para v0.6.0|-|-|-|ok
 2026-09-29T06:04Z|@eramirezhdez/claude-code|-|coyote|rel|release|v0.6.0 etiquetada en la rama v0.6 y binarios generados|tag:v0.6.0 sha:5d20669|-|-|ok
 2026-09-29T06:04Z|@eramirezhdez/claude-code|W-0006|coyote|chore|release|registra el release v0.6.0 en el ledger|-|-|-|ok
+2026-09-29T06:04Z|@eramirezhdez/claude-code|-|coyote|apr|release|G6 aprobado: v0.6.0 en su rama, gate en IDEs y v0.7|-|-|-|ok
+2026-09-29T06:04Z|@eramirezhdez/claude-code|W-0006|coyote|chore|release|registra la aprobación de G6 en el ledger|-|-|-|ok
