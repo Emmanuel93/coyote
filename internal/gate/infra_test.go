@@ -160,4 +160,18 @@ func TestInfraGateSegundaRevision(t *testing.T) {
 	if d := bash("curl -s https://am.prod.example/api/v2/silences"); d.Verdict == Block {
 		t.Errorf("leer silencios no se bloquea: %s", d.Reason)
 	}
+	// Una variable en un argumento que no es el verbo no vuelve efecto un diagnóstico.
+	for _, c := range []string{`kubectl logs deploy/api --context gke_tienda-prod -n "$NS"`, `kubectl describe pod "$POD" --context gke_tienda-prod`,
+		`helm status "$RELEASE" --kube-context gke_tienda-prod`} {
+		if d := bash(c); d.Verdict == Block {
+			t.Errorf("%q no se bloquea: %s", c, d.Reason)
+		}
+	}
+	// El nombre del clon del hub como palabra suelta no es el clon.
+	ps.HubDir, ps.HubPath = filepath.Join(root, "hub"), "hub"
+	for _, c := range []string{"git push github main", "make hub"} {
+		if d := bash(c); d.Verdict == Block {
+			t.Errorf("%q no toca el clon del hub: %s", c, d.Reason)
+		}
+	}
 }

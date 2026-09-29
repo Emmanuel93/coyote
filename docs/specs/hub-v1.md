@@ -37,7 +37,7 @@ hub: { path: ../acme-hub, ref: main }     # o solo la ruta: hub: ../acme-hub
 ```
 
 ```yaml
-# coyote/standards/rules.yaml
+# coyote/standards/rules.yaml (coyote init --hub ya lo escribe así)
 extends: hub
 ```
 
@@ -69,4 +69,6 @@ extends: hub
 
 ## Gate
 
-Un agente del proyecto no escribe nada en el clon del hub: ni `hub.yaml` ni el estándar, ni la carpeta `.git` del clon, que decide qué commit rige (sus refs, `packed-refs`, `config`, alternates). Un comando con efectos que nombra el clon (`git -C ../acme-hub commit`, `cd ../acme-hub && sed -i …`) se bloquea siempre; leer el clon es libre, salvo su configuración de git, que puede llevar un token (docs/specs/gate-v1.md). Un comando que llega al clon por otro camino (`cd ..` y después `cd acme-hub`) no se reconoce y pide aprobación.
+Un agente del proyecto no escribe nada en el clon del hub: ni `hub.yaml` ni el estándar, ni la carpeta `.git` del clon, que decide qué commit rige (sus refs, `packed-refs`, `config`, alternates). Un comando con efectos que nombra el clon fuera de sus datos (`git -C ../acme-hub commit`, `cd ../acme-hub && sed -i …`) se bloquea siempre; un mensaje de commit que lo menciona, o copiar desde el clon al proyecto, no. Leer el clon es libre, salvo su configuración de git, que puede llevar un token (docs/specs/gate-v1.md). Un comando que llega al clon por otro camino (`cd ..` y después `cd acme-hub`) no se reconoce y pide aprobación.
+
+Un proyecto que vive dentro del repo del hub (un monorepo con el hub en la raíz) escribe sus propios archivos: ahí se protegen `coyote/hub.yaml` y `coyote/standards/` del hub y la carpeta de git, que es la misma.

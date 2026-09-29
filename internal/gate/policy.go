@@ -509,26 +509,65 @@ func (ps Paths) protectedIn(cmd string, readOnly bool) (string, bool) {
 	return check(view(cmd, false), true)
 }
 
-// touchesHub dice si un comando nombra el clon del hub: su ruta como la
-// escribe coyote/project.yaml o su ruta absoluta. Uno que llega por otro
-// camino (cd .. y luego cd) no se reconoce y pide aprobación.
+// touchesHub dice si un comando con efectos nombra el clon del hub: su ruta
+// como la escribe coyote/project.yaml (si tiene una barra) o su ruta
+// absoluta, en una palabra que no es un dato (un mensaje de commit o lo que
+// imprime echo no cuentan). Copiar desde el clon al proyecto (cp, rsync,
+// install, scp con el clon solo en el origen) lo lee, no lo escribe. Uno que
+// llega por otro camino (cd .. y luego cd) no se reconoce y pide aprobación.
 func (ps Paths) touchesHub(cmd string) bool {
 	if ps.HubDir == "" {
 		return false
 	}
-	lower := strings.ToLower(cmd)
+	var res []*regexp.Regexp
 	for _, m := range []string{ps.HubPath, ps.HubDir, resolve(ps.HubDir, "/", ps.Home)} {
-		m = strings.TrimRight(strings.ToLower(filepath.ToSlash(filepath.Clean(m))), "/")
-		if m == "" || m == "." || m == ".." || m == "/" {
+		m = strings.TrimRight(filepath.ToSlash(filepath.Clean(m)), "/")
+		if m == "" || !strings.Contains(m, "/") || m == "." || m == ".." || m == "/" {
 			continue
 		}
-		re := regexp.MustCompile(regexp.QuoteMeta(m) + `($|[/\s'";&|)<>])`)
-		if re.MatchString(lower) {
+		res = append(res, regexp.MustCompile(`(?i)(^|[=:])`+regexp.QuoteMeta(m)+`($|/)`))
+	}
+	hit := func(w string) bool {
+		for _, re := range res {
+			if re.MatchString(w) {
+				return true
+			}
+		}
+		return false
+	}
+	for _, seg := range view(cmd, true) {
+		prog, at := mainProg(seg)
+		var args []string
+		if at+1 <= len(seg) {
+			args = seg[at+1:]
+		}
+		hits, last, target := 0, -1, false
+		for i, w := range args {
+			if strings.HasPrefix(w, "-t") || strings.HasPrefix(w, "--target-directory") {
+				target = true
+			}
+			if !strings.HasPrefix(w, "-") {
+				last = i
+			}
+		}
+		for i, w := range seg {
+			if !hit(w) {
+				continue
+			}
+			hits++
+			if copyProgs[prog] && !target && i > at && i-at-1 != last {
+				hits-- // el clon es el origen de una copia
+			}
+		}
+		if hits > 0 {
 			return true
 		}
 	}
 	return false
 }
+
+// copyProgs copian del origen al destino, que va al final.
+var copyProgs = map[string]bool{"cp": true, "rsync": true, "install": true, "scp": true}
 
 // agentFlag extrae el agente que declara un comando de coyote.
 var agentFlag = regexp.MustCompile(`--?agent(?:=|\s+)["']?([A-Za-z0-9._/-]+)`)

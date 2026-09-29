@@ -391,9 +391,17 @@ func gitCheck(args []word) error {
 	sub, rest := args[i].s, args[i+1:]
 	readFlags := denyFlags("--output", "--ext-diff", "--textconv", "-O", "--open-files-in-pager", "--filters")
 	switch sub {
-	case "status", "log", "show", "diff", "whatchanged", "shortlog", "blame", "annotate", "grep",
+	case "diff", "blame", "annotate":
+		// diff --no-index y blame --contents leen cualquier archivo, también
+		// .git/config, que puede llevar un token.
+		if f, ok := hasFlag(rest, "--no-index", "--contents"); ok {
+			return fmt.Errorf("git %s %s lee archivos fuera de git", sub, f)
+		}
+		return readFlags(rest)
+	case "status", "log", "show", "whatchanged", "shortlog", "grep",
 		"rev-parse", "rev-list", "ls-files", "ls-tree", "cat-file", "describe", "name-rev", "merge-base",
-		"for-each-ref", "show-ref", "count-objects", "var", "check-ignore", "check-attr", "version":
+		"for-each-ref", "show-ref", "count-objects", "check-ignore", "check-attr", "version":
+		// Sin var: git var -l vuelca la configuración.
 		return readFlags(rest)
 	case "branch":
 		return listOnly(rest, map[string]bool{"-a": true, "--all": true, "-r": true, "--remotes": true, "-v": true,

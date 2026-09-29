@@ -1,7 +1,7 @@
 # Estándar del proyecto {{.Name}}. Extiende el default de la herramienta
-# (o el del hub de la organización con extends: hub).
+# o, si el proyecto declara hub, el de la organización (ADR-0018).
 version: 1
-extends: coyote:default
+extends: {{if .Hub}}hub{{else}}coyote:default{{end}}
 rules: []
 # Ejemplos:
 # rules:

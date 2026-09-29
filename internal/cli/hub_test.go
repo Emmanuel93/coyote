@@ -152,6 +152,16 @@ func TestGateProtegeLasCarpetasDeGit(t *testing.T) {
 		{"Bash", `{"command":"grep -r url ."}`, "aprobación"},
 		{"Bash", `{"command":"grep -r --exclude-dir=.git url ."}`, "libre"},
 		{"Bash", `{"command":"ls .git"}`, "libre"},
+		// Tercera revisión: nombrar el clon en un dato o copiar desde él no lo cambia.
+		{"Bash", `{"command":"git commit -m \"sync del estándar desde ../acme-hub\""}`, "aprobación"},
+		{"Bash", `{"command":"cp ../acme-hub/domains/README.md docs/dominios.md"}`, "aprobación"},
+		{"Bash", `{"command":"echo \"ver ../acme-hub\" && make test"}`, "aprobación"},
+		{"Bash", `{"command":"cp docs/x.yaml ../acme-hub/coyote/hub.yaml"}`, "bloqueado"},
+		// git que vuelca la configuración o lee archivos fuera de git.
+		{"Bash", `{"command":"git var -l"}`, "aprobación"},
+		{"Bash", `{"command":"git diff --no-index /dev/null .git//config"}`, "aprobación"},
+		{"Bash", `{"command":"git blame --contents .git//config -- README.md"}`, "aprobación"},
+		{"Bash", `{"command":"git diff HEAD~1 -- README.md"}`, "libre"},
 	}
 	for _, c := range cases {
 		if got := decide(root, c.tool, c.input); got != c.want {
@@ -397,5 +407,41 @@ func TestElHubNoSeEsquiva(t *testing.T) {
 	write(t, shop, "coyote/project.yaml", pinned)
 	if r := run(t, shop, "", "hub", "status"); r.code == 0 || !strings.Contains(r.stdout+r.stderr, "no es una rama") {
 		t.Fatalf("una etiqueta no completa una ref:\n%s%s", r.stdout, r.stderr)
+	}
+}
+
+// TestInitConHubYProyectoDentroDelHub: coyote init --hub deja un proyecto que
+// pasa su propio lint (extends: hub), y un proyecto dentro del repo del hub
+// (un monorepo) puede escribir sus archivos.
+func TestInitConHubYProyectoDentroDelHub(t *testing.T) {
+	base := setup(t)
+	must(t, run(t, base, "", "hub", "init", "acme-hub", "--org", "acme"), 0, "hub init")
+	hubDir := filepath.Join(base, "acme-hub")
+	git(t, hubDir, "add", "-A")
+	git(t, hubDir, "commit", "-qm", "chore(hub): inicio")
+	must(t, run(t, base, "", "init", "shop", "--type", "backend", "--purpose", "API de la tienda demo", "--hub", "../acme-hub"), 0, "init con hub")
+	shop := filepath.Join(base, "shop")
+	if rules := readFile(t, filepath.Join(shop, "coyote/standards/rules.yaml")); !strings.Contains(rules, "extends: hub") {
+		t.Fatalf("init --hub extiende el hub:\n%s", rules)
+	}
+	if r := run(t, shop, "", "standards", "lint"); strings.Contains(r.stdout, "S2") {
+		t.Fatalf("un proyecto recién creado con hub no falla S2:\n%s", r.stdout)
+	}
+	// Un proyecto dentro del repo del hub.
+	must(t, run(t, hubDir, "", "init", "proj", "--type", "backend", "--purpose", "Proyecto dentro del hub", "--hub", ".."), 0, "init dentro del hub")
+	proj := filepath.Join(hubDir, "proj")
+	decide := func(target string) string {
+		in := fmt.Sprintf(`{"hook_event_name":"PreToolUse","tool_name":"Write","tool_input":{"file_path":%q,"content":"x"},"cwd":%q}`, target, proj)
+		r := run(t, proj, in, "gate", "check", "--ide", "claude-code")
+		if strings.Contains(r.stderr, "bloqueado siempre") {
+			return "bloqueado"
+		}
+		return "no bloqueado"
+	}
+	if got := decide(filepath.Join(proj, "src", "main.go")); got != "no bloqueado" {
+		t.Errorf("un archivo del proyecto dentro del hub: %s", got)
+	}
+	if got := decide(filepath.Join(hubDir, "coyote", "hub.yaml")); got != "bloqueado" {
+		t.Errorf("el hub.yaml del repo que contiene al proyecto: %s", got)
 	}
 }

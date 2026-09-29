@@ -81,10 +81,10 @@ const (
 // dynamicRes reconocen un programa cuyo subcomando llega al correr: por
 // xargs, por los argumentos de una función o de set -- ("$@"), por un alias
 // o por una variable o sustitución en el lugar del subcomando. coyote no
-// sabe qué corre (docs/specs/gate-v1.md). Con anyWord, cualquier palabra
-// después del programa cuenta: amtool silence ${x:-add} lleva el verbo en la
-// segunda.
-func dynamicRes(progs string, anyWord bool) []*regexp.Regexp {
+// sabe qué corre (docs/specs/gate-v1.md). Con groups, también cuenta el
+// verbo de un grupo (amtool silence ${x:-add}); una variable en otro
+// argumento (kubectl logs -n "$NS") no cambia qué hace el comando.
+func dynamicRes(progs string, groups bool) []*regexp.Regexp {
 	// El programa como palabra entera: terraform.tfvars o notas-terraform.md
 	// no son el programa.
 	name := `(?:^|[\s/=])(?:` + progs + `)(?:[-_:@][^\s'"]*)?`
@@ -94,8 +94,10 @@ func dynamicRes(progs string, anyWord bool) []*regexp.Regexp {
 		regexp.MustCompile(`(?i)\balias\s+[^=\s]+=["']?(?:[\w./-]*/)?(?:` + progs + `)(?:[-_:@][^\s'"]*)?(?:\s|$|["';])`),
 		regexp.MustCompile(`(?i)` + name + `(?:\s+-\S+)*\s+["']?(?:\$|` + "`" + `)`),
 	}
-	if anyWord {
-		out = append(out, regexp.MustCompile(`(?i)`+name+`(?:\s+\S+)*?\s+["']?(?:\$|`+"`"+`)`))
+	if groups {
+		// El verbo en la segunda palabra: amtool silence ${x:-add},
+		// mimirtool rules $v, kubectl rollout $v.
+		out = append(out, regexp.MustCompile(`(?i)`+name+`(?:\s+-\S+)*\s+(?:silence|silences|rules|alertmanager|alert|config|rollout|plugin)(?:\s+-\S+)*\s+["']?(?:\$|`+"`"+`)`))
 	}
 	return out
 }

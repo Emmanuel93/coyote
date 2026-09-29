@@ -14,6 +14,7 @@ import (
 	"github.com/Emmanuel93/coyote/internal/ccf"
 	"github.com/Emmanuel93/coyote/internal/fsx"
 	"github.com/Emmanuel93/coyote/internal/gate"
+	"github.com/Emmanuel93/coyote/internal/hub"
 	"github.com/Emmanuel93/coyote/internal/identity"
 	"github.com/Emmanuel93/coyote/internal/infra"
 	"github.com/Emmanuel93/coyote/internal/ledger"
@@ -174,9 +175,15 @@ func (a *app) newGateRun(act gate.Action) (*gateRun, error) {
 		// él, tampoco en su carpeta de git, que decide qué commit rige
 		// (ADR-0018).
 		dir := cfg.Hub.Dir(root)
-		paths.Global = append(paths.Global, dir)
-		paths.GitDirs = append(paths.GitDirs, gate.GitDirsOf(dir)...)
-		paths.HubDir, paths.HubPath = dir, cfg.Hub.Path
+		if hub.Inside(dir, root) {
+			// Un proyecto dentro del repo del hub (un monorepo): el resto del
+			// clon es el propio proyecto; se protegen el hub.yaml y el estándar.
+			paths.Global = append(paths.Global, filepath.Join(dir, "coyote", "hub.yaml"), filepath.Join(dir, "coyote", "standards"))
+		} else {
+			paths.Global = append(paths.Global, dir)
+			paths.GitDirs = append(paths.GitDirs, gate.GitDirsOf(dir)...)
+			paths.HubDir, paths.HubPath = dir, cfg.Hub.Path
+		}
 	}
 	paths.Secrets = cfg.Secrets
 	paths.Infra, _, paths.InfraErr = infra.Load(root)

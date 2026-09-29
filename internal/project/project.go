@@ -359,23 +359,25 @@ func Init(o InitOptions) (*InitResult, error) {
 	}
 	res.Actions = append(res.Actions, Action{".gitignore", status})
 
-	st, err := standards.Load(dir, o.Now)
-	if err != nil {
-		return nil, err
-	}
 	cfg, err := Load(dir)
 	if err != nil {
 		return nil, err
 	}
-	content, err := agentsmd.Generate(dir, st, cfg.Autonomy)
-	if err != nil {
-		return nil, err
+	// Un hub que todavía no se puede leer (sin commit, sin clon) no impide
+	// crear el proyecto: AGENTS.md sale cuando el estándar se pueda armar.
+	if st, err := standards.Load(dir, o.Now); err != nil {
+		res.Warnings = append(res.Warnings, fmt.Sprintf("AGENTS.md sin generar: %v; corre coyote generate agents cuando se pueda leer", err))
+	} else {
+		content, err := agentsmd.Generate(dir, st, cfg.Autonomy)
+		if err != nil {
+			return nil, err
+		}
+		status, err = agentsmd.Write(dir, content, false)
+		if err != nil {
+			res.Warnings = append(res.Warnings, err.Error())
+		}
+		res.Actions = append(res.Actions, Action{"AGENTS.md", status})
 	}
-	status, err = agentsmd.Write(dir, content, false)
-	if err != nil {
-		res.Warnings = append(res.Warnings, err.Error())
-	}
-	res.Actions = append(res.Actions, Action{"AGENTS.md", status})
 
 	if !o.NoHooks && gitx.IsRepo(dir) {
 		p, status, err := InstallHook(dir, false, true)

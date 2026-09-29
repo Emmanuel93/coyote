@@ -364,13 +364,13 @@ func TestGateProyectoIlegibleYEscapes(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Lo que escribió el agente no redibuja la terminal de quien revisa.
-	evil := "rm -rf /datos \x1b[2K\r$ git status  ‮"
+	evil := "rm -rf /datos \x1b[2K\r$ git status  \u202e"
 	r := run(t, root, hook(t, root, "Bash", map[string]any{"command": evil}, nil), "gate", "check")
 	must(t, r, 2, "comando con escapes")
 	id := propRe.FindString(r.stderr)
 	for _, args := range [][]string{{"review", id}, {"approvals"}, {"review"}} {
 		out := run(t, root, "", args...)
-		if strings.ContainsAny(out.stdout, "\x1b\r‮") {
+		if strings.ContainsAny(out.stdout, "\x1b\r\u202e") {
 			t.Errorf("%v imprimió caracteres de control:\n%q", args, out.stdout)
 		}
 	}
