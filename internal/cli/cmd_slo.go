@@ -3,10 +3,13 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path/filepath"
 
 	"github.com/Emmanuel93/coyote/internal/fsx"
+	"github.com/Emmanuel93/coyote/internal/gitx"
+	"github.com/Emmanuel93/coyote/internal/project"
 	"github.com/Emmanuel93/coyote/internal/slo"
 	"github.com/Emmanuel93/coyote/internal/web"
 )
@@ -56,7 +59,7 @@ func (a *app) sloCheck(args []string) error {
 	if _, err := parseArgs(fs, args); err != nil {
 		return err
 	}
-	root, _, err := a.project()
+	root, err := a.sloRoot()
 	if err != nil {
 		return err
 	}
@@ -154,7 +157,7 @@ func (a *app) sloRules(args []string) error {
 	if err != nil {
 		return err
 	}
-	root, _, err := a.project()
+	root, err := a.sloRoot()
 	if err != nil {
 		return err
 	}
@@ -227,4 +230,24 @@ func (a *app) sloRules(args []string) error {
 		return fail(1, "las reglas no están al día; corre coyote slo rules")
 	}
 	return nil
+}
+
+// sloRoot es la raíz del proyecto coyote o, en un repo del producto que no
+// lo es, la raíz del repo git: los SLOs viven junto al servicio.
+func (a *app) sloRoot() (string, error) {
+	root, _, err := a.project()
+	if err == nil {
+		return root, nil
+	}
+	if !errors.Is(err, project.ErrNotProject) {
+		return "", err
+	}
+	wd, werr := a.workdir()
+	if werr != nil {
+		return "", werr
+	}
+	if top, gerr := gitx.TopLevel(wd); gerr == nil && top != "" {
+		return top, nil
+	}
+	return "", err
 }

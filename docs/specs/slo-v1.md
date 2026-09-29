@@ -2,7 +2,7 @@
 
 Estado: nuevo en v0.7.0 · Implementación: `internal/slo`, `coyote slo check|rules`, regla R19, `coyote gate pr`, gate de comandos de alertas, sección `/slo` de la web · Decisión: ADR-0020
 
-Un servicio declara sus SLOs en `coyote/slo/<servicio>.yaml`. coyote los valida, genera sus reglas de Prometheus y, en un PR, dice si el cambio relaja un SLO. coyote no habla con Mimir ni con Prometheus: cargar las reglas lo hacen la persona o un pipeline.
+Un servicio declara sus SLOs en `coyote/slo/<servicio>.yaml`, en su proyecto coyote o en la raíz de su repo aunque ese repo no sea un proyecto coyote (un repo del producto). coyote los valida, genera sus reglas de Prometheus y, en un PR, dice si el cambio relaja un SLO. coyote no habla con Mimir ni con Prometheus: cargar las reglas lo hacen la persona o un pipeline.
 
 ## Archivo
 
@@ -73,6 +73,7 @@ Cada alerta lleva `slo_severity` (`page` o `ticket`), las etiquetas del archivo 
 | Apagar la page, o cambiar su nombre o sus etiquetas (a quién le llega) | R3 |
 | Cambiar las etiquetas de todo el archivo | R3 |
 | Un archivo que no valida | R3 |
+| Reglas generadas que no salen de su archivo (editadas a mano o sin regenerar), que faltan o que no tienen archivo | R3 |
 | Agregar un archivo o un SLO, subir un objetivo, prender la page | R2 |
 | Apagar el ticket o cambiar sus etiquetas, cambiar el runbook o el periodo | R2 |
 

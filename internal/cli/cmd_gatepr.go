@@ -371,14 +371,32 @@ func baseRules(dir, base, name string) func(string) (secrets.Rules, string) {
 // sloRisks compara cada archivo de SLOs que toca el PR con el de la base.
 func sloRisks(dir, base, head string, changed []string) []ci.FileRisk {
 	var out []ci.FileRisk
+	checked := map[string]bool{}
 	for _, f := range changed {
-		if !slo.IsSpecPath(f) {
+		if slo.IsSpecPath(f) {
+			oldText, hadOld := product.FileAt(dir, base, f)
+			newText, hasNew := product.FileAt(dir, head, f)
+			for _, c := range slo.Compare(oldText, hadOld, newText, hasNew) {
+				out = append(out, ci.FileRisk{Path: f, Risk: c.Risk, Why: c.Why})
+			}
+		} else if !slo.IsRulesPath(f) {
 			continue
 		}
-		oldText, hadOld := product.FileAt(dir, base, f)
-		newText, hasNew := product.FileAt(dir, head, f)
-		for _, c := range slo.Compare(oldText, hadOld, newText, hasNew) {
-			out = append(out, ci.FileRisk{Path: f, Risk: c.Risk, Why: c.Why})
+		// Las reglas que se cargan tienen que salir del SLO que se revisa, en
+		// el commit del PR.
+		spec, rules := slo.Pair(f)
+		if checked[spec] {
+			continue
+		}
+		checked[spec] = true
+		specText, hasSpec := product.FileAt(dir, head, spec)
+		rulesText, hasRules := product.FileAt(dir, head, rules)
+		if c, bad := slo.CheckGenerated(specText, hasSpec, rulesText, hasRules); bad {
+			path := rules
+			if !hasRules {
+				path = spec
+			}
+			out = append(out, ci.FileRisk{Path: path, Risk: c.Risk, Why: c.Why})
 		}
 	}
 	return out

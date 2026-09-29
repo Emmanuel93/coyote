@@ -97,12 +97,32 @@ func TestGatePRConSLORelajado(t *testing.T) {
 			t.Errorf("reporte sin %q:\n%s", want, r.stdout)
 		}
 	}
-	// Subir el objetivo es R2.
+	// Subir el objetivo, con sus reglas regeneradas, es R2.
 	write(t, svc, "coyote/slo/pedidos-service.yaml", strings.Replace(sloPedidos, "objective: 99.9", "objective: 99.95", 1))
-	git(t, svc, "commit", "-qam", "feat(slo): más exigente")
+	write(t, svc, "coyote/runbooks/pedidos-disponibilidad.md", "# Pedidos\n")
+	must(t, run(t, svc, "", "slo", "rules"), 0, "slo rules en servicios")
+	git(t, svc, "add", "-A")
+	git(t, svc, "commit", "-qm", "feat(slo): más exigente")
 	up := strings.TrimSpace(git(t, svc, "rev-parse", "HEAD"))
 	r = run(t, base, "", "gate", "pr", "--repo", "servicios="+svc, "--self", "servicios", "--base", headSHA, "--head", up, "--event", "")
 	if !strings.Contains(r.stdout, "R2") || strings.Contains(r.stdout, "### coyote: R3") {
 		t.Fatalf("subir el objetivo es R2:\n%s", r.stdout)
+	}
+	// Editar a mano las reglas generadas, sin tocar el SLO, es R3: puede apagar la page.
+	rules := readFile(t, filepath.Join(svc, "coyote/slo/prometheus/pedidos-service.yaml"))
+	write(t, svc, "coyote/slo/prometheus/pedidos-service.yaml", strings.ReplaceAll(rules, "(14.4 *", "(1440 *"))
+	git(t, svc, "commit", "-qam", "chore(slo): menos ruido")
+	edited := strings.TrimSpace(git(t, svc, "rev-parse", "HEAD"))
+	r = run(t, base, "", "gate", "pr", "--repo", "servicios="+svc, "--self", "servicios", "--base", up, "--head", edited, "--event", "")
+	if !strings.Contains(r.stdout, "### coyote: R3") || !strings.Contains(r.stdout, "no salen de su archivo de SLOs") {
+		t.Fatalf("reglas editadas a mano:\n%s", r.stdout)
+	}
+	// Borrar las reglas deja al SLO sin alertas: R3.
+	git(t, svc, "rm", "-q", "coyote/slo/prometheus/pedidos-service.yaml")
+	git(t, svc, "commit", "-qm", "chore(slo): sin reglas")
+	gone := strings.TrimSpace(git(t, svc, "rev-parse", "HEAD"))
+	r = run(t, base, "", "gate", "pr", "--repo", "servicios="+svc, "--self", "servicios", "--base", edited, "--head", gone, "--event", "")
+	if !strings.Contains(r.stdout, "### coyote: R3") || !strings.Contains(r.stdout, "faltan las reglas generadas") {
+		t.Fatalf("reglas borradas:\n%s", r.stdout)
 	}
 }

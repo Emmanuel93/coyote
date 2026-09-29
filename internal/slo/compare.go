@@ -127,3 +127,45 @@ func shortErr(err error) string {
 	}
 	return s
 }
+
+// IsRulesPath dice si una ruta es un archivo de reglas generadas.
+func IsRulesPath(p string) bool {
+	dir, file := path.Split(p)
+	return (dir == RulesDir+"/" || strings.HasSuffix(dir, "/"+RulesDir+"/")) && path.Ext(file) == ".yaml"
+}
+
+// Pair devuelve, para una ruta de SLOs o de reglas generadas, las dos rutas
+// del servicio: su archivo de SLOs y sus reglas.
+func Pair(p string) (spec, rules string) {
+	dir, file := path.Split(p)
+	name := strings.TrimSuffix(strings.TrimSuffix(file, ".yaml"), ".yml")
+	if IsRulesPath(p) {
+		base := strings.TrimSuffix(dir, "prometheus/")
+		return base + name + ".yaml", p
+	}
+	return p, dir + "prometheus/" + name + ".yaml"
+}
+
+// CheckGenerated revisa, en un mismo commit, que las reglas generadas de un
+// servicio salgan de su archivo de SLOs. Unas reglas editadas a mano pueden
+// apagar una alerta sin tocar el SLO que se revisa.
+func CheckGenerated(specText string, hasSpec bool, rulesText string, hasRules bool) (Change, bool) {
+	switch {
+	case !hasSpec && !hasRules:
+		return Change{}, false
+	case !hasSpec:
+		return Change{"R3", "reglas de alertas sin su archivo de SLOs: no salen de ningún SLO revisado"}, true
+	}
+	s, err := Parse([]byte(specText))
+	if err != nil {
+		return Change{}, false // Compare ya lo marca cuando el archivo cambia
+	}
+	if !hasRules {
+		return Change{"R3", fmt.Sprintf("faltan las reglas generadas de %s: sus alertas no se cargan; corre coyote slo rules", s.Service)}, true
+	}
+	want, err := Rules(s)
+	if err != nil || string(want) != rulesText {
+		return Change{"R3", fmt.Sprintf("las reglas de %s no salen de su archivo de SLOs: se editaron a mano o no se regeneraron (coyote slo rules)", s.Service)}, true
+	}
+	return Change{}, false
+}
