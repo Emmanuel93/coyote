@@ -79,6 +79,10 @@ El riesgo del plan es del cambio entero: lo aprueba un dueño de lo que cambió 
 
 **Secretos (R18).** Lo que agrega el PR pasa por el escáner de secretos, como dato y sin ejecutar nada: los archivos de secretos nuevos por su nombre, las líneas agregadas y, completos, los archivos que git lista sin hunks. Un PR que agrega secretos queda en R3 y no pasa con ninguna aprobación: el secreto ya está en GitHub y hay que rotarlo. El comentario dice archivo, línea y tipo, nunca el valor (docs/specs/secrets-v1.md).
 
+**SLOs.** Un archivo de `coyote/slo/` es R2 por su ruta. `gate pr` lo compara con el de la rama base, como dato, y sube a R3 lo que relaja un SLO: bajar un objetivo, quitar un SLO, cambiar qué cuenta como error, apagar la alerta page o cambiar a quién le llega (docs/specs/slo-v1.md).
+
+**gitleaks.** Con `--gitleaks reporte.json`, los hallazgos de gitleaks sobre los commits del PR se suman al reporte como R3, cada uno con archivo, línea, regla y commit; del reporte nunca se lee el valor. Los archivos con hallazgos piden la aprobación de su dueño. Sin el reporte, `gate pr` falla: sin reporte no hay revisión. Ver [Paso de gitleaks](#paso-de-gitleaks).
+
 **Revisión.** Un cambio R2 o R3 pide la aprobación de un dueño de lo que cambia:
 
 - **Qué se revisa:** los archivos de riesgo por ruta y los archivos cuyas interfaces cambian.
@@ -106,6 +110,24 @@ features:
 - **La política sale de la bandera.** `coyote install --ci github` toma de ella la política de los workflows, y `--policy` manda sobre la bandera con un aviso.
 - **Al prenderla, se regeneran los workflows.** `install --ci github --check` avisa que están desactualizados y cada workflow pasa a `fail`. Después se marca el chequeo como requerido en la protección de la rama.
 - **Banderas desconocidas.** Una bandera que coyote no conoce es un error de `project.yaml`.
+
+### Paso de gitleaks
+
+Es opcional (ADR-0021). Se prende en el proyecto del producto y se regeneran los workflows:
+
+```yaml
+features:
+  gitleaks: true   # el pipeline escanea los commits del PR con gitleaks
+```
+
+El workflow agrega un paso antes de `gate pr`:
+
+- **Binario fijado.** Descarga gitleaks 8.30.1 para Linux x64 de su release en GitHub y verifica el sha256 que trae coyote. Subir de versión es un cambio de coyote con su prueba.
+- **Solo los commits del PR.** Escanea `base..head` con `--log-opts` y verifica antes que los dos commits existan. gitleaks sale con 0 aunque git falle y no revise nada; por eso el paso falla si gitleaks registra un error.
+- **Configuración de la base.** Usa `.gitleaks.toml` y `.gitleaksignore` de la rama base (sin `.gitleaks.toml`, las reglas de gitleaks por defecto). Escanea la carpeta `.git` del repo: gitleaks busca `.gitleaksignore` en la carpeta que escanea, y en el árbol de trabajo sería el del PR. Ignora los comentarios `gitleaks:allow` que agregue el PR.
+- **Sin valores.** Corre con `--redact` y solo escribe el reporte en la carpeta temporal del job, que no se publica.
+
+Un falso positivo lo aprueba un dueño en el PR y se agrega a `.gitleaksignore` en la rama base, con su propio PR. No se usa la acción de gitleaks: pide licencia en cuentas de organización y toma la configuración del código que revisa.
 
 ### Probar sin tocar la rama principal
 

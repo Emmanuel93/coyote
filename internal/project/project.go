@@ -92,6 +92,7 @@ type Config struct {
 // KnownFeatures son las banderas que coyote entiende y de qué dependen.
 var KnownFeatures = map[string]string{
 	"pr_enforcement": "gate pr bloquea el merge hasta que aprueba un dueño; necesita que GitHub exija el chequeo, que en repos privados pide un plan de pago",
+	"gitleaks":       "el pipeline escanea los commits del PR con gitleaks, fijado por hash y con la configuración de la rama base (ADR-0021); descarga el binario de GitHub en cada corrida",
 }
 
 // Feature informa si una bandera está prendida. Una que no está vale false.

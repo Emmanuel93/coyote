@@ -31,6 +31,10 @@ type GateInput struct {
 	// plan, ADR-0017), si el pipeline lo generó.
 	PlanRisk string
 	PlanWhy  string
+	// Leaks son los hallazgos de gitleaks en los commits del PR (ADR-0021);
+	// LeaksTotal cuenta también los que no se guardaron.
+	Leaks      []Leak
+	LeaksTotal int
 }
 
 // GateResult es la decisión: el riesgo, si pide revisión y si ya la tiene.
@@ -100,6 +104,10 @@ func DecideGate(in GateInput) GateResult {
 	if n := len(in.Secrets); n > 0 {
 		res.Risk = R3
 		res.Why = append(res.Why, fmt.Sprintf("R3 por %s en el cambio (R18)", pluralWord(n, "secreto", "secretos")))
+	}
+	if n := max(in.LeaksTotal, len(in.Leaks)); n > 0 {
+		res.Risk = R3
+		res.Why = append(res.Why, fmt.Sprintf("R3 por %s de gitleaks en los commits del PR", pluralWord(n, "hallazgo", "hallazgos")))
 	}
 	res.Required = Rank(res.Risk) >= 2
 	if !res.Required {

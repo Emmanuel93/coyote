@@ -497,7 +497,8 @@ func (a *app) installCI(kind, policy, ref, coyoteRepo string, check, dry bool) e
 	stale := 0
 	for i, self := range repos {
 		others := append(append([]install.CIRepo{}, repos[:i]...), repos[i+1:]...)
-		wf, err := install.GitHubWorkflow(install.CIOptions{Self: self, Others: others, CoyoteRepo: coyoteRepo, CoyoteRef: ref, Policy: policy, Risk: cfg.RiskRules()})
+		wf, err := install.GitHubWorkflow(install.CIOptions{Self: self, Others: others, CoyoteRepo: coyoteRepo, CoyoteRef: ref, Policy: policy,
+			Risk: cfg.RiskRules(), Gitleaks: cfg.Feature("gitleaks")})
 		if err != nil {
 			return fail(1, "%v", err)
 		}

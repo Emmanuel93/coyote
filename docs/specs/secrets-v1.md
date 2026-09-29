@@ -111,6 +111,7 @@ Un archivo en UTF-16 con BOM (lo que escribe PowerShell 5) se revisa como texto,
 ## Límites
 
 - El escáner reconoce formas conocidas. Un secreto de forma libre, como una contraseña corta en un `application.yml`, no se reconoce por patrón. La defensa principal es no dejar leer los archivos de secretos y declararlos en `secrets.files`.
+- Para más patrones en el PR, el pipeline puede correr gitleaks (`features.gitleaks`, ADR-0021): fijado por hash, con la configuración de la rama base y su reporte en `gate pr` (docs/specs/ci-v1.md).
 - Una búsqueda recursiva de una herramienta del IDE (Grep) depende de que respete `.gitignore`: los archivos de secretos deben estar ignorados, y R18 lo revisa.
 - `docker compose up`, `npm run dev` o un programa que carga `.env` por dentro no nombran el archivo: piden la aprobación normal y la persona ve el comando.
 - `gate pr` toma `secrets.files` y `secrets.allow` del `coyote/project.yaml` de la rama base, el del proyecto que contiene cada ruta: un PR no se dispensa a sí mismo.

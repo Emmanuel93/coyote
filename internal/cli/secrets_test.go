@@ -2,9 +2,12 @@ package cli
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/Emmanuel93/coyote/internal/install"
 )
 
 // Secretos de prueba armados por partes (R18 del propio repo).
@@ -262,5 +265,97 @@ func TestSecretsListVacio(t *testing.T) {
 	_, root := gateProject(t)
 	if r := run(t, root, "", "secrets", "list", "--json"); r.code != 0 || strings.TrimSpace(r.stdout) != "[]" {
 		t.Errorf("sin archivos de secretos, --json da []: %d %q", r.code, r.stdout)
+	}
+}
+
+func TestGatePRConGitleaks(t *testing.T) {
+	base := setup(t)
+	productoDemo(t, base)
+	svc := filepath.Join(base, "servicios")
+	sha := strings.TrimSpace(git(t, svc, "rev-parse", "HEAD"))
+	report := filepath.Join(base, "gitleaks.json")
+	write(t, base, "gitleaks.json", `[{"RuleID":"generic-api-key","StartLine":12,"Match":"REDACTED","Secret":"clave-que-no-debe-salir","File":"services/pedidos-service/src/main/resources/application.yml","Commit":"`+sha+`"}]`)
+	r := run(t, base, "", "gate", "pr", "--repo", "servicios="+svc, "--self", "servicios", "--base", sha, "--head", sha, "--event", "", "--gitleaks", report)
+	must(t, r, 0, "gate pr con gitleaks en warn")
+	for _, want := range []string{"### coyote: R3", "1 hallazgo de gitleaks", "**gitleaks.**", "application.yml", "| 12 |", "generic-api-key", "gitleaks encontró un posible secreto"} {
+		if !strings.Contains(r.stdout, want) {
+			t.Errorf("reporte sin %q:\n%s", want, r.stdout)
+		}
+	}
+	if strings.Contains(r.stdout, "clave-que-no-debe-salir") {
+		t.Fatalf("el reporte no muestra el valor:\n%s", r.stdout)
+	}
+	must(t, run(t, base, "", "gate", "pr", "--repo", "servicios="+svc, "--self", "servicios", "--base", sha, "--head", sha, "--event", "", "--gitleaks", report, "--policy", "fail"), 1, "fail espera a un dueño")
+	// Sin reporte no hay revisión: falla cerrado.
+	r = run(t, base, "", "gate", "pr", "--repo", "servicios="+svc, "--self", "servicios", "--base", sha, "--head", sha, "--event", "", "--gitleaks", filepath.Join(base, "no-existe.json"))
+	if r.code == 0 || !strings.Contains(r.stderr, "no puedo leer el reporte de gitleaks") {
+		t.Fatalf("sin reporte: %d\n%s", r.code, r.stderr)
+	}
+	write(t, base, "gitleaks.json", "[]")
+	r = run(t, base, "", "gate", "pr", "--repo", "servicios="+svc, "--self", "servicios", "--base", sha, "--head", sha, "--event", "", "--gitleaks", report)
+	if r.code != 0 || strings.Contains(r.stdout, "gitleaks") {
+		t.Fatalf("sin hallazgos no hay sección:\n%s", r.stdout)
+	}
+}
+
+// TestGitleaksDeVerdad corre el paso del workflow tal cual, con gitleaks
+// descargado de GitHub y verificado por hash, sobre un PR que intenta
+// exentarse. Necesita red: corre con COYOTE_GITLEAKS_E2E=1.
+func TestGitleaksDeVerdad(t *testing.T) {
+	if os.Getenv("COYOTE_GITLEAKS_E2E") != "1" {
+		t.Skip("COYOTE_GITLEAKS_E2E no está en 1")
+	}
+	base := setup(t)
+	productoDemo(t, base)
+	ws := filepath.Join(base, "ws")
+	tmp := filepath.Join(base, "runner")
+	if err := os.MkdirAll(filepath.Join(ws, "repos"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(tmp, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	svc := filepath.Join(ws, "repos", "servicios")
+	git(t, base, "clone", "-q", filepath.Join(base, "servicios"), svc)
+	// La base permite los fixtures de pruebas; el PR agrega un token, otro con
+	// gitleaks:allow, uno en fixtures y su propia configuración para apagarlo todo.
+	write(t, svc, ".gitleaks.toml", "[extend]\nuseDefault = true\n[allowlist]\npaths = [\"fixtures/\"]\n")
+	git(t, svc, "add", "-A")
+	git(t, svc, "commit", "-qm", "chore: configuración de gitleaks")
+	baseSHA := strings.TrimSpace(git(t, svc, "rev-parse", "HEAD"))
+	tok := func(s string) string { return "ghp_" + strings.Repeat(s, 36/len(s)) }
+	write(t, svc, "conf/app.txt", "github_token = \""+tok("aB3dE5gH7jK9")+"\"\n")
+	write(t, svc, "conf/otro.txt", "token = \""+tok("Zx8Cv6Bn4Mq2")+"\" # gitleaks:allow\n")
+	write(t, svc, "fixtures/f.txt", "token = \""+tok("Pw2Lk4Jh6Gf8")+"\"\n")
+	git(t, svc, "add", "-A")
+	git(t, svc, "commit", "-qm", "feat: configuración")
+	write(t, svc, ".gitleaks.toml", "[extend]\nuseDefault = true\n[allowlist]\npaths = [\".*\"]\n")
+	write(t, svc, ".gitleaksignore", "x:conf/app.txt:github-pat:1\n")
+	git(t, svc, "add", "-A")
+	git(t, svc, "commit", "-qm", "chore: se exenta")
+	headSHA := strings.TrimSpace(git(t, svc, "rev-parse", "HEAD"))
+
+	script := filepath.Join(base, "gitleaks.sh")
+	write(t, base, "gitleaks.sh", install.GitleaksScript("servicios"))
+	cmd := exec.Command("bash", script)
+	cmd.Env = append(os.Environ(), "RUNNER_TEMP="+tmp, "GITHUB_WORKSPACE="+ws, "BASE="+baseSHA, "HEAD="+headSHA)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("el paso de gitleaks falló: %v\n%s", err, out)
+	}
+	r := run(t, base, "", "gate", "pr", "--repo", "servicios="+svc, "--self", "servicios", "--base", baseSHA, "--head", headSHA, "--event", "", "--gitleaks", filepath.Join(tmp, "gitleaks.json"))
+	must(t, r, 0, "gate pr")
+	section := r.stdout[strings.Index(r.stdout, "**gitleaks.**"):]
+	section = section[:strings.Index(section, "\n\n**")]
+	if !strings.Contains(section, "2 hallazgos en los commits del PR") || !strings.Contains(section, "conf/app.txt") || !strings.Contains(section, "conf/otro.txt") || strings.Contains(section, "fixtures/f.txt") {
+		t.Fatalf("la configuración del PR no lo apaga y la de la base sí cuenta:\n%s", section)
+	}
+	if strings.Contains(r.stdout, "aB3dE5") || strings.Contains(readFile(t, filepath.Join(tmp, "gitleaks.json")), "aB3dE5") {
+		t.Fatal("ningún valor en el reporte")
+	}
+	// Una base que no está en el repo hace fallar el paso: gitleaks saldría con 0.
+	cmd = exec.Command("bash", script)
+	cmd.Env = append(os.Environ(), "RUNNER_TEMP="+tmp, "GITHUB_WORKSPACE="+ws, "BASE=0123456789abcdef0123456789abcdef01234567", "HEAD="+headSHA)
+	if err := cmd.Run(); err == nil {
+		t.Fatal("una base desconocida hace fallar el paso")
 	}
 }

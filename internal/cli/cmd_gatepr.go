@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -8,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/Emmanuel93/coyote/internal/ci"
+	"github.com/Emmanuel93/coyote/internal/fsx"
 	"github.com/Emmanuel93/coyote/internal/github"
 	"github.com/Emmanuel93/coyote/internal/infra"
 	"github.com/Emmanuel93/coyote/internal/product"
@@ -36,6 +38,7 @@ func gatePR(a *app, args []string) error {
 	comment := fs.Bool("comment", false, "crea o actualiza el comentario de coyote en el PR (usa GITHUB_TOKEN)")
 	summary := fs.String("summary", os.Getenv("GITHUB_STEP_SUMMARY"), "archivo del resumen del job")
 	planFile := fs.String("plan", "", "plan de Terraform en JSON (terraform show -json) que generó el pipeline")
+	leaksFile := fs.String("gitleaks", "", "reporte JSON de gitleaks sobre los commits del PR (ADR-0021)")
 	if _, err := parseArgs(fs, args); err != nil {
 		return err
 	}
@@ -89,6 +92,23 @@ func gatePR(a *app, args []string) error {
 		in.PlanWhy = plan.Headline()
 		if r := plan.Reasons(); len(r) > 0 {
 			in.PlanWhy += "; " + strings.Join(r, ", ")
+		}
+	}
+	if *leaksFile != "" {
+		// Sin reporte no hay revisión: el paso de gitleaks falló o no corrió.
+		data, err := fsx.ReadCapped(*leaksFile, 64<<20)
+		if err != nil {
+			return fail(1, "no puedo leer el reporte de gitleaks: %v", err)
+		}
+		if in.Leaks, in.LeaksTotal, err = ci.ReadGitleaks(bytes.NewReader(data)); err != nil {
+			return fail(1, "%v", err)
+		}
+		seenLeak := map[string]bool{}
+		for _, l := range in.Leaks {
+			if !seenLeak[l.File] {
+				seenLeak[l.File] = true
+				in.Files = append(in.Files, ci.FileRisk{Path: l.File, Risk: ci.R3, Why: "gitleaks encontró un posible secreto"})
+			}
 		}
 	}
 	in.Impact, in.ImpactWhy = impactRisk(p.im, p.self)
@@ -233,6 +253,18 @@ func gateReport(res ci.GateResult, in ci.GateInput, p *prRun, policy string, pla
 				line = fmt.Sprint(f.Line)
 			}
 			fmt.Fprintf(&b, "| `%s` | %s | %s |\n", codeCell(f.Path), line, mdCell(f.Kind))
+		}
+		b.WriteString("\n")
+	}
+	if n := max(in.LeaksTotal, len(in.Leaks)); n > 0 {
+		fmt.Fprintf(&b, "**gitleaks.** %s en los commits del PR; nunca se muestra el valor. Si es un secreto, sácalo y rótalo: ya está en GitHub. Si es un falso positivo, lo aprueba un dueño y se agrega a `.gitleaksignore` en la rama base.\n\n", capFirst(plural(n, "hallazgo", "hallazgos")))
+		b.WriteString("| Archivo | Línea | Regla | Commit |\n|---|---|---|---|\n")
+		for i, l := range in.Leaks {
+			if i == ciMaxRows {
+				fmt.Fprintf(&b, "| … | | | %d más |\n", n-ciMaxRows)
+				break
+			}
+			fmt.Fprintf(&b, "| `%s` | %d | %s | `%s` |\n", codeCell(l.File), l.Line, mdCell(l.Rule), codeCell(l.Commit))
 		}
 		b.WriteString("\n")
 	}

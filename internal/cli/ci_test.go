@@ -200,8 +200,30 @@ func TestInstallCI(t *testing.T) {
 	}
 	r = run(t, root, "", "install", "--ci", "github", "--coyote-ref", "v0.5.0", "--coyote-repo", "acme/coyote")
 	must(t, r, 1, "bandera desconocida")
-	if !strings.Contains(r.stderr, `features: "pagos_premium" no existe (pr_enforcement)`) {
+	if !strings.Contains(r.stderr, `features: "pagos_premium" no existe (gitleaks, pr_enforcement)`) {
 		t.Errorf("bandera desconocida:\n%s", r.stderr)
+	}
+	// gitleaks es opcional: con la bandera, el workflow lo corre fijado por hash
+	// y le pasa su reporte a gate pr; sin ella, no aparece (ADR-0021).
+	if err := os.WriteFile(cfgPath, []byte(strings.Replace(base0, "pr_enforcement: false", "pr_enforcement: false\n  gitleaks: true", 1)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	must(t, run(t, root, "", "install", "--ci", "github", "--coyote-ref", "v0.5.0", "--coyote-repo", "acme/coyote"), 0, "install con gitleaks")
+	wf = readFile(t, filepath.Join(root, "coyote", "ci", "app.yml"))
+	for _, want := range []string{"gitleaks_8.30.1_linux_x64.tar.gz", "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  gitleaks.tgz\" | sha256sum -c -",
+		`"$repo/.git"`, "--ignore-gitleaks-allow", "--redact", `git -C "$repo" show "$BASE:.gitleaks.toml"`, `--gitleaks "$RUNNER_TEMP/gitleaks.json"`} {
+		if !strings.Contains(wf, want) {
+			t.Errorf("el workflow con gitleaks no tiene %q", want)
+		}
+	}
+	must(t, run(t, root, "", "install", "--ci", "github", "--coyote-ref", "v0.5.0", "--coyote-repo", "acme/coyote", "--check"), 0, "vigente con gitleaks")
+	if err := os.WriteFile(cfgPath, []byte(base0), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	must(t, run(t, root, "", "install", "--ci", "github", "--coyote-ref", "v0.5.0", "--coyote-repo", "acme/coyote", "--check"), 1, "apagar gitleaks deja el workflow viejo")
+	must(t, run(t, root, "", "install", "--ci", "github", "--coyote-ref", "v0.5.0", "--coyote-repo", "acme/coyote"), 0, "reinstalar sin gitleaks")
+	if strings.Contains(readFile(t, filepath.Join(root, "coyote", "ci", "app.yml")), "gitleaks") {
+		t.Error("sin la bandera, el workflow no corre gitleaks")
 	}
 	// Con la bandera apagada, --policy fail se permite con un aviso.
 	if err := os.WriteFile(cfgPath, []byte(base0), 0o644); err != nil {

@@ -36,6 +36,46 @@ type CIOptions struct {
 	CoyoteRef  string   // etiqueta de la versión, p. ej. v0.5.0
 	Policy     string   // warn o fail
 	Risk       []string // reglas de riesgo del proyecto: R2=patrón o R3=patrón
+	Gitleaks   bool     // escanea los commits del PR con gitleaks (features.gitleaks, ADR-0021)
+}
+
+// gitleaks fijado por versión y hash: subirlo es un cambio de coyote con su
+// prueba (ADR-0021). El hash es el del tarball de Linux x64 del release.
+const (
+	GitleaksVersion = "8.30.1"
+	gitleaksURL     = "https://github.com/gitleaks/gitleaks/releases/download/v" + GitleaksVersion + "/gitleaks_" + GitleaksVersion + "_linux_x64.tar.gz"
+	gitleaksSHA256  = "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+)
+
+// GitleaksScript es el paso que corre gitleaks sobre los commits del PR. El
+// repo del PR se lee por su carpeta .git: gitleaks busca .gitleaksignore en
+// la carpeta que escanea y en un árbol de trabajo lo leería del propio PR.
+// La configuración y las excepciones salen de la rama base, los
+// gitleaks:allow del PR no cuentan y un error de git hace fallar el paso:
+// gitleaks sale con 0 aunque no haya podido leer los commits.
+func GitleaksScript(self string) string {
+	return `set -eu
+cd "$RUNNER_TEMP"
+curl -sSfL --retry 3 -o gitleaks.tgz ` + gitleaksURL + `
+echo "` + gitleaksSHA256 + `  gitleaks.tgz" | sha256sum -c -
+tar -xzf gitleaks.tgz gitleaks
+repo="$GITHUB_WORKSPACE/repos/` + self + `"
+git -C "$repo" cat-file -e "$BASE^{commit}"
+git -C "$repo" cat-file -e "$HEAD^{commit}"
+mkdir -p gitleaks-base
+if ! git -C "$repo" show "$BASE:.gitleaks.toml" > gitleaks-base/gitleaks.toml 2>/dev/null; then
+  printf '[extend]\nuseDefault = true\n' > gitleaks-base/gitleaks.toml
+fi
+git -C "$repo" show "$BASE:.gitleaksignore" > gitleaks-base/.gitleaksignore 2>/dev/null || rm -f gitleaks-base/.gitleaksignore
+status=0
+./gitleaks git "$repo/.git" --log-opts="$BASE..$HEAD" --config gitleaks-base/gitleaks.toml --gitleaks-ignore-path gitleaks-base \
+  --ignore-gitleaks-allow --redact --no-banner --no-color --report-format json --report-path gitleaks.json --exit-code 0 2> gitleaks.log || status=$?
+cat gitleaks.log >&2
+if [ "$status" -ne 0 ] || grep -Eq '^[^ ]+ (ERR|FTL) ' gitleaks.log; then
+  echo "gitleaks no pudo revisar los commits del PR" >&2
+  exit 1
+fi
+`
 }
 
 var (
@@ -145,6 +185,20 @@ func GitHubWorkflow(o CIOptions) (string, error) {
 	w("          GOSUMDB: \"off\"")
 	w("          CGO_ENABLED: \"0\"")
 	w("        run: go build -trimpath -o \"$RUNNER_TEMP/coyote\" ./cmd/coyote")
+	if o.Gitleaks {
+		w("      - name: gitleaks %s en los commits del PR, con la configuración de la rama base", GitleaksVersion)
+		w("        env:")
+		w("          BASE: ${{ github.event.pull_request.base.sha }}")
+		w("          HEAD: ${{ github.event.pull_request.head.sha }}")
+		w("        run: |")
+		for _, line := range strings.Split(strings.TrimSuffix(GitleaksScript(o.Self.Name), "\n"), "\n") {
+			if line == "" {
+				w("")
+				continue
+			}
+			w("          %s", line)
+		}
+	}
 	w("      - name: Riesgo, impacto y revisión")
 	w("        env:")
 	w("          GITHUB_TOKEN: ${{ github.token }}")
@@ -157,6 +211,9 @@ func GitHubWorkflow(o CIOptions) (string, error) {
 	}
 	for _, r := range o.Risk {
 		w("          --risk '%s'", r)
+	}
+	if o.Gitleaks {
+		w("          --gitleaks \"$RUNNER_TEMP/gitleaks.json\"")
 	}
 	w("          --self %s --policy %s --comment", o.Self.Name, o.Policy)
 	return b.String(), nil
