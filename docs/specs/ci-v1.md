@@ -71,6 +71,8 @@ risk:
 
 **Riesgo por impacto.** Romper a un consumidor es R3. Llegar a otro repo del producto es R2.
 
+**Plan de Terraform.** En un repo de infraestructura, el pipeline puede generar el plan y pasarlo con `--plan plan.json`: su riesgo se suma al del PR y el comentario lleva la tabla de recursos, sin valores (docs/specs/infra-v1.md). Generarlo necesita credenciales de la nube en el pipeline; coyote no las pide.
+
 **Secretos (R18).** Lo que agrega el PR pasa por el escáner de secretos, como dato y sin ejecutar nada: los archivos de secretos nuevos por su nombre, las líneas agregadas y, completos, los archivos que git lista sin hunks. Un PR que agrega secretos queda en R3 y no pasa con ninguna aprobación: el secreto ya está en GitHub y hay que rotarlo. El comentario dice archivo, línea y tipo, nunca el valor (docs/specs/secrets-v1.md).
 
 **Revisión.** Un cambio R2 o R3 pide la aprobación de un dueño de lo que cambia:

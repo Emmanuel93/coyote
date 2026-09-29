@@ -10,7 +10,7 @@ El default se derivó de repos reales construidos desde el dominio: conserva lo 
 - R5 (MUST). El código no contiene respaldos, volcados ni salidas de agentes; la evidencia pesada va en git-lfs del proyecto.
 - R10 (SHOULD). El README tiene dos pantallas; el detalle vive en `coyote/` y en el hub, y se cita.
 - R12 (MUST). Las exclusiones de indexado están en `.coyoteignore`; no hay datos personales en `coyote/`.
-- R13 (MUST, perfil infra). La infraestructura existe como código en su repo con `coyote/infra.yaml` vigente; ningún `apply` corre fuera de un ambiente con revisor.
+- R13 (MUST, perfil infra). La infraestructura existe como código en su repo con `coyote/infra.yaml` vigente: ambientes con presupuesto y política de apply, stacks con estado remoto y versiones fijadas (`coyote infra check`). Ningún agente aplica; un ambiente `reviewed` solo lo aplica la persona o un pipeline con revisor.
 - R14 (MUST). Todo proyecto tiene `README.md`, `README.coyote.md` y `CONTEXT.coyote.md` válidos; CI los publica en cada merge.
 
 ## 2. Cambios

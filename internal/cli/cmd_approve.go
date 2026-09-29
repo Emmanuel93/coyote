@@ -15,6 +15,7 @@ import (
 	"github.com/Emmanuel93/coyote/internal/fsx"
 	"github.com/Emmanuel93/coyote/internal/gate"
 	"github.com/Emmanuel93/coyote/internal/identity"
+	"github.com/Emmanuel93/coyote/internal/infra"
 	"github.com/Emmanuel93/coyote/internal/ledger"
 	"github.com/Emmanuel93/coyote/internal/project"
 	"github.com/Emmanuel93/coyote/internal/standards"
@@ -65,9 +66,12 @@ func (a *app) approvalCtx() (*approvalCtx, error) {
 	if err != nil {
 		return nil, err
 	}
+	paths := gate.NewPaths(root, gate.Home(), state)
+	paths.Secrets = cfg.Secrets
+	paths.Infra, _, paths.InfraErr = infra.Load(root)
 	return &approvalCtx{root: root, cfg: cfg, person: identity.Resolve(root),
 		store: &approval.Store{Root: root, Project: cfg.Name, Key: key, Now: a.now},
-		paths: gate.NewPaths(root, gate.Home(), state)}, nil
+		paths: paths}, nil
 }
 
 func (c *approvalCtx) statuses() ([]approval.Status, map[string]error, error) {
@@ -393,7 +397,13 @@ func cmdApprove(a *app, args []string) error {
 		return nil
 	}
 	for _, p := range props {
-		r, err := c.store.Approve(p, c.person.Actor(""), *uses, *dur, *ws)
+		n := *uses
+		// Un cambio de infraestructura se aprueba de a un uso (ADR-0017).
+		if n > 1 && p.Kind == gate.KindShell.String() && gate.InfraEffect(p.Command) {
+			n = 1
+			fmt.Fprintf(a.stdout, "%s cambia infraestructura: se aprueba para un solo uso.\n", p.ID)
+		}
+		r, err := c.store.Approve(p, c.person.Actor(""), n, *dur, *ws)
 		if err != nil {
 			return fmt.Errorf("%s: %w", p.ID, err)
 		}

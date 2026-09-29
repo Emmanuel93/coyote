@@ -90,7 +90,9 @@ rules:
     level: MUST
     scope: repo
     profiles: [infra]
-    check: { type: file_exists, files: [coyote/infra.yaml] }
+    why: El inventario dice qué ambientes y stacks hay, con qué presupuesto y quién puede aplicar; el gate lo usa para no dejar que un agente toque un ambiente con revisor.
+    check: { type: infra }
+    fix: coyote infra propose > coyote/infra.yaml, completa presupuestos y dueños, y corre coyote infra check
 
   - id: R14
     title: README.md, README.coyote.md y CONTEXT.coyote.md válidos

@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/Emmanuel93/coyote/internal/infra"
 	"github.com/Emmanuel93/coyote/internal/secrets"
 )
 
@@ -112,6 +113,10 @@ type Paths struct {
 	Global    []string // configuración fuera del proyecto que desarma el gate (absolutas)
 	// Secrets son las reglas de archivos de secretos del proyecto (ADR-0016).
 	Secrets secrets.Rules
+	// Infra es el inventario de la infraestructura (ADR-0017); InfraErr, si
+	// existe pero no se puede leer.
+	Infra    *infra.Inventory
+	InfraErr error
 }
 
 // NewPaths arma las listas para root. stateDir es donde coyote guarda sus claves.
@@ -128,7 +133,7 @@ func NewPaths(root, home, stateDir string) Paths {
 	}
 	// Lo que desarma el gate de cualquier IDE: sus hooks y la configuración que
 	// los apaga o aprueba sola.
-	p.Protected = []string{".git", ".coyote", "coyote/approvals", "coyote/ledger", "coyote/project.yaml", ".claude/settings.json",
+	p.Protected = []string{".git", ".coyote", "coyote/approvals", "coyote/ledger", "coyote/project.yaml", "coyote/infra.yaml", ".claude/settings.json",
 		".claude/settings.local.json", ".claude/hooks", ".cursor/hooks.json", ".cursor/hooks",
 		".codex/hooks.json", ".codex/hooks", ".codex/config.toml", ".gemini/settings.json", ".gemini/hooks",
 		".github/hooks", ".windsurf/hooks.json", ".windsurf/hooks", ".devin/hooks.json", ".devin/hooks.v1.json",
@@ -414,11 +419,38 @@ func (ps Paths) hardShell(a Action) *Hard {
 	if what, ok := ps.secretWord(cmd, cwd); ok {
 		return hard("el comando toca %s: un agente no lee ni escribe archivos de secretos; pide los nombres con coyote secrets list", what)
 	}
+	if h := ps.hardInfra(neutralize(cmd)); h != nil {
+		return h
+	}
 	if a.AgentType != "" {
 		for _, m := range agentFlag.FindAllStringSubmatch(cmd, -1) {
 			if !sameAgent(m[1], a.AgentType) {
 				return hard("el comando declara el agente %s, pero el IDE reporta %s", m[1], a.AgentType)
 			}
+		}
+	}
+	return nil
+}
+
+// hardInfra aplica el gate por ambiente (ADR-0017): un agente nunca aplica
+// infraestructura como código, ni corre los comandos de apply del
+// inventario, ni cambia un ambiente que se aplica con revisor.
+func (ps Paths) hardInfra(cmd string) *Hard {
+	if what, ok := infra.ApplyCommand(cmd); ok {
+		return hard("un agente nunca aplica infraestructura (%s): lo corre la persona en su terminal o un pipeline con revisor", what)
+	}
+	if ps.InfraErr != nil && infra.Effect(cmd) {
+		return hard("el comando cambia infraestructura y coyote/infra.yaml no se puede leer (%v): corrígelo antes", ps.InfraErr)
+	}
+	if ps.Infra == nil {
+		return nil
+	}
+	if c, ok := ps.Infra.DeclaredApply(cmd); ok {
+		return hard("%q aplica infraestructura según coyote/infra.yaml: lo corre la persona o un pipeline con revisor", c)
+	}
+	if infra.Effect(cmd) {
+		if env, ok := ps.Infra.EnvFor(cmd); ok && ps.Infra.Environments[env].Apply == infra.Reviewed {
+			return hard("el comando cambia el ambiente %s, que solo aplica la persona o un pipeline con revisor (coyote/infra.yaml)", env)
 		}
 	}
 	return nil

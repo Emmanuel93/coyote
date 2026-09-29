@@ -17,6 +17,7 @@ import (
 	"github.com/Emmanuel93/coyote/internal/ccfdoc"
 	"github.com/Emmanuel93/coyote/internal/gitx"
 	"github.com/Emmanuel93/coyote/internal/glob"
+	"github.com/Emmanuel93/coyote/internal/infra"
 	"github.com/Emmanuel93/coyote/internal/secrets"
 	"github.com/Emmanuel93/coyote/internal/tokens"
 )
@@ -131,6 +132,7 @@ func init() {
 	Register("attribution", checkAttribution)
 	Register("script", checkScript)
 	Register("secrets", checkSecrets)
+	Register("infra", checkInfra)
 }
 
 // Lint aplica todas las reglas activas con check al proyecto.
@@ -597,6 +599,28 @@ func checkSecrets(ctx *Context, c Check) []Finding {
 		for _, fd := range secrets.Scan(f, text) {
 			out = append(out, Finding{Path: f, Line: fd.Line, Msg: fd.Kind + " (" + fd.Hint + "): muévelo a una variable de entorno o al gestor de secretos y rótalo"})
 		}
+	}
+	return out
+}
+
+// checkInfra revisa el inventario de la infraestructura contra el repo (R13,
+// ADR-0017): que exista, que sea válido y que coincida con los stacks, los
+// ambientes, el estado remoto y los presupuestos. Los avisos cuentan como SHOULD.
+func checkInfra(ctx *Context, c Check) []Finding {
+	inv, ok, err := infra.Load(ctx.Root)
+	switch {
+	case !ok:
+		return []Finding{{Path: infra.Path, Msg: "falta el inventario de la infraestructura; propónlo con coyote infra propose"}}
+	case err != nil:
+		return []Finding{{Path: infra.Path, Msg: err.Error()}}
+	}
+	var out []Finding
+	for _, f := range infra.Check(ctx.Root, inv, ctx.Files) {
+		fd := Finding{Path: infra.Path, Msg: f.Where + ": " + f.Msg}
+		if f.Level != infra.Error {
+			fd.Level = "SHOULD"
+		}
+		out = append(out, fd)
 	}
 	return out
 }

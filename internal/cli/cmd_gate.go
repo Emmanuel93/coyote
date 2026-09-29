@@ -15,6 +15,7 @@ import (
 	"github.com/Emmanuel93/coyote/internal/fsx"
 	"github.com/Emmanuel93/coyote/internal/gate"
 	"github.com/Emmanuel93/coyote/internal/identity"
+	"github.com/Emmanuel93/coyote/internal/infra"
 	"github.com/Emmanuel93/coyote/internal/ledger"
 	"github.com/Emmanuel93/coyote/internal/project"
 	"github.com/Emmanuel93/coyote/internal/userdir"
@@ -169,6 +170,7 @@ func (a *app) newGateRun(act gate.Action) (*gateRun, error) {
 	}
 	paths := gate.NewPaths(root, gate.Home(), state)
 	paths.Secrets = cfg.Secrets
+	paths.Infra, _, paths.InfraErr = infra.Load(root)
 	return &gateRun{a: a, act: act, root: root, cfg: cfg, paths: paths,
 		person: identity.Resolve(root), agent: agent}, nil
 }

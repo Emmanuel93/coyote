@@ -13,13 +13,14 @@ La regla A1 dice que ningún agente ejecuta acciones con efectos sin aprobación
 1. **R15.** Un commit, tag, PR o release con atribución a IA, o con la autoría de una herramienta, se bloquea.
 2. **Bloqueos que ninguna aprobación levanta:**
    - que un agente corra `coyote approve`, `reject`, `revoke`, `auth`, `hooks` o `install`, o que lance otros agentes con `coyote run`, `coyote ws run` o `coyote ws continue`. No importa qué lo invoque: el gate busca la palabra `coyote` seguida del subcomando en cada segmento (`watch`, `xargs`, `find -exec`…). También sigue las variables que guardan `coyote` y lee como comando el texto que el shell ejecutaría (`bash -c`, `eval`, `script -c`, `$(…)`, un `echo … | bash`). Un mensaje de commit, un título o un patrón de `grep` que solo lo mencionan no cuentan;
-   - que escriba en el gate: `.git/`, `.coyote/`, `coyote/approvals/`, `coyote/ledger/`, `coyote/project.yaml` (ahí vive la autonomía), la configuración global del IDE, de git o del shell, y los hooks o la configuración que los apaga en cada IDE:
+   - que escriba en el gate: `.git/`, `.coyote/`, `coyote/approvals/`, `coyote/ledger/`, `coyote/project.yaml` (ahí vive la autonomía), `coyote/infra.yaml`, la configuración global del IDE, de git o del shell, y los hooks o la configuración que los apaga en cada IDE:
      - `.claude/settings*.json` y `.claude/hooks/`; `.cursor/hooks*`;
      - `.codex/hooks*` y `.codex/config.toml`; `.gemini/settings.json` y `.gemini/hooks/`; `.github/hooks/`;
      - `.windsurf/hooks*`, `.devin/hooks*` y `.devin/config*.json`; `.junie/config.json`, `.kiro/hooks/` y `.clinerules/hooks/`;
      - en `.vscode/settings.json`, las opciones que apagan los hooks de VS Code o aprueban herramientas solas (`chat.useHooks`, `chat.hookFilesLocations`, `chat.tools.*autoApprove`);
    - el canario de `coyote doctor` (`coyote doctor canary <código>`): se niega a propósito para medir el nivel del IDE (ADR-0015);
    - que lea o escriba credenciales: `~/.ssh`, `~/.aws`, `~/.config/gh`, `~/.netrc`, la clave local de coyote y parecidas; también recorrer una carpeta que las contiene (`grep -r ~`) o leer `.git/config` del proyecto, que puede llevar un token en la URL de un remoto;
+   - que aplique infraestructura: `terraform apply` o `destroy` y los demás cambios de estado, los comandos de apply de `coyote/infra.yaml` y cualquier cambio a un ambiente `reviewed`; el inventario tampoco lo escribe un agente (docs/specs/infra-v1.md, ADR-0017);
    - que lea o escriba un archivo de secretos del proyecto (`.env`, tfstate, llaves, keystores, kubeconfig, cuentas de servicio), que escriba un secreto literal o que corra un comando que imprime o crea credenciales (`gcloud auth print-access-token`, `kubectl get secret`, `terraform output`, `env` a secas…); el detalle está en docs/specs/secrets-v1.md (ADR-0016);
    - que un subagente declare en un comando un agente distinto del que reporta el IDE.
 3. **Lectura libre.** Las herramientas que solo leen (Read, Grep, Glob, WebFetch, Task, TodoWrite y las MCP cuyo nombre empieza con get, list, search, read, fetch, view, show o describe) y una lista cerrada de comandos de solo lectura pasan sin registro.
@@ -74,7 +75,7 @@ Cada aprobación es `coyote/approvals/<id>.json`:
   "ts": "2026-09-28T07:10:00Z", "expires": "2026-09-28T08:10:00Z", "uses": 3, "mac": "hmac-sha256:…" }
 ```
 
-- Vale de 1 a 100 usos y 24 horas como máximo; por defecto, un uso durante una hora.
+- Vale de 1 a 100 usos y 24 horas como máximo; por defecto, un uso durante una hora. Un comando que cambia infraestructura se aprueba siempre de a un uso.
 - `mac` es un HMAC-SHA256 con una clave local de la persona (0600, en su directorio de configuración, fuera del repo). `root` es una huella de la carpeta del proyecto. Un registro modificado, copiado de otra máquina, de otro proyecto o de otra copia del mismo proyecto no valida.
 - El registro nunca se reescribe. Los usos son los eventos `gate` con estado `ok` y `apr:<id>` en el ledger; una revocación es un evento `rej` con `apr:<id>`. Un lock en `.coyote/gate.lock` impide gastar el mismo uso dos veces.
 - Las aprobaciones de gate de release (`P-0001`, `P-0002`) no son de acción y el gate las ignora.

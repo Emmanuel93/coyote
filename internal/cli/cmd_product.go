@@ -14,6 +14,7 @@ import (
 	"github.com/Emmanuel93/coyote/internal/ccf"
 	"github.com/Emmanuel93/coyote/internal/ccfdoc"
 	"github.com/Emmanuel93/coyote/internal/fsx"
+	"github.com/Emmanuel93/coyote/internal/infra"
 	"github.com/Emmanuel93/coyote/internal/identity"
 	"github.com/Emmanuel93/coyote/internal/ledger"
 	"github.com/Emmanuel93/coyote/internal/product"
@@ -521,6 +522,43 @@ func cmdExtract(a *app, args []string) error {
 		if p.Omitted > 0 && !*toStdout {
 			fmt.Fprintf(a.stdout, "%s: %d entradas no cupieron en el tope; están en %s/%s.map\n", sc.Repo, p.Omitted, mapDir, sc.Repo)
 		}
+		// Un repo de infraestructura como código recibe su inventario (R13, ADR-0017).
+		dir := ""
+		for _, src := range sources {
+			if src.Name == sc.Repo {
+				dir = src.Dir
+			}
+		}
+		if dir == "" {
+			continue
+		}
+		if _, isInfra := infra.Detect(dir); isInfra {
+			inv, err := infra.Propose(dir)
+			if err != nil {
+				return fail(1, "%s: %v", sc.Repo, err)
+			}
+			origin := sc.Repo
+			if sc.SHA != "" {
+				origin += "@" + sc.SHA
+			}
+			content := inv.YAML(origin)
+			relPath := reposDir + "/" + sc.Repo + "/infra.yaml"
+			if *toStdout {
+				fmt.Fprintf(a.stdout, "==> %s <==\n%s\n", relPath, content)
+				continue
+			}
+			status, err := a.writeInfraProposal(root, relPath, content, *force, *check)
+			if err != nil {
+				return err
+			}
+			if status == "creado" || status == "actualizado" {
+				stale++
+				if *check {
+					status = "no está al día"
+				}
+			}
+			fmt.Fprintf(a.stdout, "%s: %s (revísalo con coyote -C <repo> infra check --file %s)\n", relPath, status, relPath)
+		}
 	}
 	if *check && stale > 0 {
 		return fail(1, "hay propuestas que no están al día: corre coyote extract")
@@ -529,6 +567,26 @@ func cmdExtract(a *app, args []string) error {
 		fmt.Fprintln(a.stdout, "revisa las propuestas; para llevarlas a un repo, cópialas en su raíz con un PR de ese repo")
 	}
 	return nil
+}
+
+// writeInfraProposal escribe el inventario propuesto de un repo. Si ya existe
+// y cambió, no se pisa sin --force: la persona completa presupuestos y dueños.
+func (a *app) writeInfraProposal(root, relPath, content string, force, check bool) (string, error) {
+	if err := fsx.NoSymlinks(root, relPath); err != nil {
+		return "", fail(1, "%v", err)
+	}
+	old, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(relPath)))
+	switch {
+	case err == nil && string(old) == content:
+		return "sin cambios", nil
+	case err == nil && !force:
+		return "existe y tiene cambios: no se reemplaza (usa --force)", nil
+	case check && err == nil:
+		return "actualizado", nil
+	case check:
+		return "creado", nil
+	}
+	return writeProductFile(root, relPath, content)
 }
 
 // writeProposal escribe una propuesta sin pisar lo que la persona editó. Si

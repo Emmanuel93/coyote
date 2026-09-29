@@ -48,6 +48,7 @@ func init() {
 		{"attribution", "check [rutas] | scrub [archivo]", "detecta o quita atribución a herramientas de IA", cmdAttribution},
 		{"gate", "check [--ide IDE] < hook.json", "gate humano para los hooks previos de los IDEs (ADR-0009)", cmdGate},
 		{"secrets", "list | scan [--staged | --range base...head]", "archivos de secretos y sus nombres, sin valores; secretos escritos en el repo (ADR-0016)", cmdSecrets},
+		{"infra", "check | plan <plan.json> | propose", "inventario de la infraestructura (R13), su revisión y el plan de Terraform (ADR-0017)", cmdInfra},
 		{"approvals", "[--all] [--json]", "cola de propuestas y aprobaciones vigentes", cmdApprovals},
 		{"review", "[id...]", "muestra el comando o el diff que se aprobaría", cmdReview},
 		{"approve", "<id>... | --all | --bash CMD [--uses N] [--for 1h]", "aprueba acciones exactas (solo una persona, en su terminal)", cmdApprove},

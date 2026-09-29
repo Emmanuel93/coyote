@@ -8,6 +8,7 @@ import (
 
 	"github.com/Emmanuel93/coyote/internal/ci"
 	"github.com/Emmanuel93/coyote/internal/github"
+	"github.com/Emmanuel93/coyote/internal/infra"
 	"github.com/Emmanuel93/coyote/internal/product"
 	"github.com/Emmanuel93/coyote/internal/secrets"
 )
@@ -31,6 +32,7 @@ func gatePR(a *app, args []string) error {
 	policy := fs.String("policy", "warn", "warn: reporta el riesgo y a quién le toca revisar; fail: el chequeo falla hasta que aprueba un dueño")
 	comment := fs.Bool("comment", false, "crea o actualiza el comentario de coyote en el PR (usa GITHUB_TOKEN)")
 	summary := fs.String("summary", os.Getenv("GITHUB_STEP_SUMMARY"), "archivo del resumen del job")
+	planFile := fs.String("plan", "", "plan de Terraform en JSON (terraform show -json) que generó el pipeline")
 	if _, err := parseArgs(fs, args); err != nil {
 		return err
 	}
@@ -63,6 +65,23 @@ func gatePR(a *app, args []string) error {
 		return fail(1, "%v", err)
 	}
 	in.Secrets = scanAdded(added, secrets.Rules{}, func(f string) (string, bool) { return product.FileAt(dir, right, f) })
+	var plan *infra.PlanSummary
+	if *planFile != "" {
+		f, err := os.Open(*planFile)
+		if err != nil {
+			return fail(1, "no puedo leer el plan: %v", err)
+		}
+		plan, err = infra.ReadPlan(f)
+		f.Close()
+		if err != nil {
+			return fail(1, "%v", err)
+		}
+		in.PlanRisk = plan.Risk
+		in.PlanWhy = plan.Headline()
+		if r := plan.Reasons(); len(r) > 0 {
+			in.PlanWhy += "; " + strings.Join(r, ", ")
+		}
+	}
 	in.Impact, in.ImpactWhy = impactRisk(p.im, p.self)
 	seen := map[string]bool{}
 	for _, h := range p.im.Touched {
@@ -89,7 +108,7 @@ func gatePR(a *app, args []string) error {
 	}
 	res := ci.DecideGate(in)
 	res.Notes = append(notes, res.Notes...)
-	report := gateReport(res, in, p, *policy)
+	report := gateReport(res, in, p, *policy, plan)
 	a.publishReport(report, *summary, *comment, p.pr)
 	if *policy == "fail" && len(in.Secrets) > 0 {
 		return fail(1, "coyote: el PR agrega secretos (R18); sácalos y rótalos")
@@ -161,7 +180,7 @@ func (a *app) prReviews(pr ci.PR) ([]ci.Review, func(team, user string) (bool, e
 
 // gateReport arma el comentario: el veredicto del gate, el riesgo y quién
 // revisa, y después el impacto en el producto.
-func gateReport(res ci.GateResult, in ci.GateInput, p *prRun, policy string) string {
+func gateReport(res ci.GateResult, in ci.GateInput, p *prRun, policy string, plan *infra.PlanSummary) string {
 	var b strings.Builder
 	b.WriteString(ci.Marker + "\n")
 	switch {
@@ -237,6 +256,9 @@ func gateReport(res ci.GateResult, in ci.GateInput, p *prRun, policy string) str
 			b.WriteString("- " + n + "\n")
 		}
 		b.WriteString("\n")
+	}
+	if plan != nil {
+		b.WriteString(planMarkdown(plan))
 	}
 	fmt.Fprintf(&b, "**Impacto.** %s.\n\n", capFirst(impactVerdict(p.im, p.self)))
 	b.WriteString(impactBody(p.im, p.m, len(p.sources), policy))

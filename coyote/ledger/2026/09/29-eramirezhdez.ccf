@@ -14,3 +14,6 @@
 2026-09-29T02:09Z|@eramirezhdez/coyote-devsecops|W-0006|coyote|note|secrets|inv: un agente no lee ni escribe archivos de secretos ni corre…|doc:CONTEXT.coyote.md|-|-|ok
 2026-09-29T02:09Z|@eramirezhdez/coyote-devsecops|W-0006|coyote|note|secrets|gap: el escáner solo reconoce formas conocidas; una contraseña de forma libre…|doc:CONTEXT.coyote.md|-|-|ok
 2026-09-29T02:09Z|@eramirezhdez/coyote-devsecops|W-0006|coyote|feat|secrets|secretos del proyecto y comandos de credenciales en el gate, escáner y…|-|-|-|ok
+2026-09-29T02:18Z|@eramirezhdez/coyote-infra|W-0006|coyote|note|infra|inv: un agente nunca aplica infraestructura; un ambiente reviewed solo lo aplica…|doc:CONTEXT.coyote.md|-|-|ok
+2026-09-29T02:18Z|@eramirezhdez/coyote-infra|W-0006|coyote|note|infra|dec: coyote infra plan lee el plan en JSON sin copiarlo y…|doc:CONTEXT.coyote.md|-|-|ok
+2026-09-29T02:18Z|@eramirezhdez/coyote-infra|W-0006|coyote|feat|infra|inventario, revisión, plan de Terraform y gate por ambiente (ADR-0017)|-|-|-|ok

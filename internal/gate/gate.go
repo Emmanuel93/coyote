@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+
+	"github.com/Emmanuel93/coyote/internal/infra"
 )
 
 // Verdict es lo que decide la política antes de buscar aprobaciones.
@@ -67,11 +69,18 @@ func (ps Paths) Evaluate(a Action) Decision {
 		return d
 	}
 	d.Verdict = NeedsApproval
+	if d.Kind == KindShell && infra.Effect(neutralize(a.Command)) {
+		d.Reason = "cambia infraestructura: se aprueba de a un uso"
+	}
 	if d.Reason == "" {
 		d.Reason = fmt.Sprintf("%s con efectos", d.Kind)
 	}
 	return d
 }
+
+// InfraEffect dice si un comando cambia infraestructura: su aprobación vale
+// para un solo uso (ADR-0017).
+func InfraEffect(cmd string) bool { return infra.Effect(neutralize(cmd)) }
 
 // Respond escribe la respuesta en el formato del IDE y devuelve el código de
 // salida del hook. En todos, 2 bloquea. Cursor además espera JSON; Copilot lee

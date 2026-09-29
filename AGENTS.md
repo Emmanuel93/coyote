@@ -58,6 +58,8 @@ CLI en Go para contexto versionado, gates humanos, estándar por capas y costo t
 - [dec] gate: nivel de IDE medido con un canario que el gate siempre niega; nivel 2 o 3 cae en R17 (ADR-0015)
 - [inv] secrets: un agente no lee ni escribe archivos de secretos ni corre comandos que imprimen credenciales, aun con aprobación (ADR-0016)
 - [gap] secrets: el escáner solo reconoce formas conocidas; una contraseña de forma libre se protege declarando su archivo en secrets.files (docs/specs/secrets-v1.md)
+- [inv] infra: un agente nunca aplica infraestructura; un ambiente reviewed solo lo aplica la persona o un pipeline con revisor (ADR-0017)
+- [dec] infra: coyote infra plan lee el plan en JSON sin copiarlo y solo reporta direcciones, tipos y acciones (docs/specs/infra-v1.md)
 
 ## Reglas obligatorias (MUST)
 

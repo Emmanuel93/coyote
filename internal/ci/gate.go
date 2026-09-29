@@ -27,6 +27,10 @@ type GateInput struct {
 	// Secrets son los secretos que el cambio agrega (R18): el PR no pasa con
 	// ellos, aunque lo apruebe un dueño.
 	Secrets []secrets.Finding
+	// PlanRisk y PlanWhy vienen del plan de Terraform del PR (coyote infra
+	// plan, ADR-0017), si el pipeline lo generó.
+	PlanRisk string
+	PlanWhy  string
 }
 
 // GateResult es la decisión: el riesgo, si pide revisión y si ya la tiene.
@@ -88,6 +92,10 @@ func DecideGate(in GateInput) GateResult {
 	if Rank(in.Impact) >= 2 {
 		res.Risk = Max(res.Risk, in.Impact)
 		res.Why = append(res.Why, in.Impact+" por impacto: "+in.ImpactWhy)
+	}
+	if Rank(in.PlanRisk) >= 2 {
+		res.Risk = Max(res.Risk, in.PlanRisk)
+		res.Why = append(res.Why, in.PlanRisk+" por el plan de Terraform: "+in.PlanWhy)
 	}
 	if n := len(in.Secrets); n > 0 {
 		res.Risk = R3
