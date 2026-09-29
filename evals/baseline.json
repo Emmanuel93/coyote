@@ -1,0 +1,9 @@
+{
+  "golden": "evals/golden.v1.jsonl",
+  "budget": 2000,
+  "questions": 30,
+  "recall_at_k": 83.3,
+  "mrr": 68.9,
+  "pack_coverage": 93.3,
+  "updated": "2026-09-29"
+}

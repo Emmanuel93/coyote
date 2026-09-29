@@ -1,0 +1,31 @@
+# Golden v1 de coyote (ADR-0025): una pregunta por línea con las fuentes que deben aparecer.
+{"id": "g01", "q": "¿cómo aprueba una persona una acción que un agente dejó en la cola?", "expect": ["doc:docs/specs/gate-v1.md", "adr:ADR-0009"]}
+{"id": "g02", "q": "¿qué campos tiene cada línea del ledger?", "expect": ["doc:docs/specs/ccf-v1.md"]}
+{"id": "g03", "q": "¿puede un agente leer el archivo .env del proyecto?", "expect": ["adr:ADR-0016", "doc:docs/specs/secrets-v1.md"]}
+{"id": "g04", "q": "¿quién puede aplicar terraform en un ambiente reviewed?", "expect": ["adr:ADR-0017", "doc:docs/specs/infra-v1.md"]}
+{"id": "g05", "q": "¿cómo se mide si un IDE respeta el gate de verdad?", "expect": ["adr:ADR-0015", "doc:docs/specs/install-v1.md"]}
+{"id": "g06", "q": "¿qué modelo y qué topes le da el router a cada agente en una corrida?", "expect": ["doc:docs/specs/run-v1.md", "adr:ADR-0012"]}
+{"id": "g07", "q": "¿qué diferencia hay entre supervised y autonomous en un workstream?", "expect": ["adr:ADR-0014", "doc:docs/specs/workstream-v1.md"]}
+{"id": "g08", "q": "¿en qué rama tiene que correr un loop autónomo?", "expect": ["doc:docs/specs/workstream-v1.md"]}
+{"id": "g09", "q": "¿quién tiene que revisar un PR que cambia CODEOWNERS o el pipeline?", "expect": ["doc:docs/specs/ci-v1.md"]}
+{"id": "g10", "q": "¿cómo se relaja una regla del estándar en un proyecto?", "expect": ["doc:docs/specs/standards-v1.md"]}
+{"id": "g11", "q": "¿qué hace coyote con una marca de coautoría de una herramienta de IA en un commit?", "expect": ["doc:docs/specs/attribution-v1.md", "adr:ADR-0005"]}
+{"id": "g12", "q": "¿dónde se guarda el token de GitHub de la persona?", "expect": ["adr:ADR-0008", "doc:docs/specs/remote-v1.md"]}
+{"id": "g13", "q": "¿por qué coyote no tiene más dependencias que go-yaml?", "expect": ["adr:ADR-0004"]}
+{"id": "g14", "q": "¿cómo se calcula qué rompe un cambio en los otros repos del producto?", "expect": ["doc:docs/specs/product-v1.md", "adr:ADR-0011"]}
+{"id": "g15", "q": "¿cómo evita coyote web que otro usuario de la máquina vea los costos?", "expect": ["adr:ADR-0022", "doc:docs/specs/web-v1.md"]}
+{"id": "g16", "q": "¿quién ve el gasto de cada persona en la web?", "expect": ["adr:ADR-0019", "doc:docs/specs/web-v1.md"]}
+{"id": "g17", "q": "¿de qué commit se lee el estándar de la organización en el hub?", "expect": ["adr:ADR-0018", "doc:docs/specs/hub-v1.md"]}
+{"id": "g18", "q": "¿cómo se generan las alertas de burn rate de un SLO?", "expect": ["adr:ADR-0020", "doc:docs/specs/slo-v1.md"]}
+{"id": "g19", "q": "¿qué riesgo tiene un PR que baja el objetivo de un SLO?", "expect": ["doc:docs/specs/slo-v1.md"]}
+{"id": "g20", "q": "¿cómo corre gitleaks en el pipeline sin que el autor del PR lo pueda apagar?", "expect": ["adr:ADR-0021", "doc:docs/specs/ci-v1.md"]}
+{"id": "g21", "q": "¿qué verifica coyote audit sobre la integridad del ledger?", "expect": ["doc:docs/specs/audit-v1.md", "adr:ADR-0024"]}
+{"id": "g22", "q": "¿cómo se evita que una nota con órdenes llegue a AGENTS.md?", "expect": ["adr:ADR-0023", "doc:docs/specs/context-v1.md"]}
+{"id": "g23", "q": "¿en qué orden llena el presupuesto un paquete de contexto?", "expect": ["doc:docs/specs/context-v1.md"]}
+{"id": "g24", "q": "¿dónde guarda su caché el índice local y cómo se reconstruye?", "expect": ["adr:ADR-0007", "doc:docs/specs/context-v1.md"]}
+{"id": "g25", "q": "¿cómo estima coyote los tokens de un paquete?", "expect": ["adr:ADR-0006"]}
+{"id": "g26", "q": "¿qué promete la versión 1.x sobre los formatos y los comandos?", "expect": ["adr:ADR-0026"]}
+{"id": "g27", "q": "¿cómo se verifica que un binario de coyote sale de su etiqueta?", "expect": ["adr:ADR-0027"]}
+{"id": "g28", "q": "¿cómo traduce coyote install los agentes al formato de cada IDE?", "expect": ["adr:ADR-0010", "doc:docs/specs/install-v1.md"]}
+{"id": "g29", "q": "¿por qué las operaciones de git usan el binario del sistema?", "expect": ["adr:ADR-0002", "ctx:git"]}
+{"id": "g30", "q": "¿cuál es el tope de tokens de CONTEXT.coyote.md y qué pasa al llenarse?", "expect": ["doc:docs/specs/ccf-doc-v1.md"]}

@@ -30,9 +30,10 @@ deciders: "@eramirezhdez"
   Compara contra la línea base versionada (`evals/baseline.json`) y falla si una métrica baja más de 2 puntos porcentuales. `--update-baseline` la reescribe, y ese cambio se revisa en el PR como cualquier otro.
 - **En la CI de coyote.** `make check` corre `coyote eval`.
 - **Expansión de un salto.** El paquete suma los fragmentos que citan sus mejores resultados (ADRs, documentos y specs enlazados), con menor prioridad y dentro del presupuesto. Se queda solo si mejora la cobertura del golden sin bajar las otras métricas.
-- **Juez de fidelidad.** `coyote eval --judge` responde cada pregunta con el paquete y pide a un agente que califique si la respuesta se sostiene en las fuentes. Corre con `coyote run`, con los topes del proyecto y cuando la persona lo decide. Nunca corre en la CI.
+- **Juez de fidelidad.** Un agente respondería cada pregunta con el paquete y otro calificaría si la respuesta se sostiene en las fuentes. Correría con `coyote run`, con los topes del proyecto y cuando la persona lo decida, nunca en la CI. Queda para v1.1: el plan de v1.0 lo cortaba primero si el tiempo apretaba, y medir antes la recuperación ya encontró el problema más grande (ver Consecuencias).
 
 ## Consecuencias
+- La primera medida del golden de coyote encontró que el paquete con consulta casi nunca traía las fuentes esperadas: 1.7 % de cobertura. Las entradas de `CONTEXT.coyote.md` llenaban el presupuesto antes de los ADRs y los documentos. Con la sección "Lo más relevante para la consulta" después de las invariantes, la cobertura subió a 86.7 %. Con la expansión de un salto llegó a 93.3 %.
 - Un cambio que empeora la recuperación falla en el PR sin gastar un dólar.
 - El golden de coyote mide coyote. Cada proyecto necesita el suyo, y escribirlo es trabajo de su equipo.
 - Las métricas sin modelo miden si la fuente llega al agente, no si el agente la usa bien. Eso lo mide el juez.

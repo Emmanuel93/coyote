@@ -530,6 +530,9 @@ func coyoteCheck(args []word) error {
 	case "audit":
 		// Leer el reporte es libre; dejarlo en coyote/audit/ escribe.
 		return denyFlags("--write", "-write")(rest)
+	case "eval":
+		// Medir es libre; reescribir la línea base, no.
+		return denyFlags("--update-baseline", "-update-baseline")(rest)
 	case "standards":
 		switch first {
 		case "lint":

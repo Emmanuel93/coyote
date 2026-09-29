@@ -81,3 +81,4 @@
 2026-09-29T18:27Z|@eramirezhdez/coyote-librarian|W-0008|coyote|note|audit|dec: coyote audit arma el reporte del mes desde el ledger, las…|doc:CONTEXT.coyote.md|-|-|ok
 2026-09-29T18:27Z|@eramirezhdez/coyote-librarian|W-0008|coyote|feat|audit|coyote audit, reporte del mes desde el ledger, las aprobaciones y git…|-|-|-|ok
 2026-09-29T18:28Z|@eramirezhdez/coyote-librarian|W-0008|coyote|chore|audit|gofmt de la prueba de coyote audit|-|-|-|ok
+2026-09-29T18:33Z|@eramirezhdez/coyote-qa|W-0008|coyote|feat|eval|golden de 30 preguntas, coyote eval en la CI y paquete con…|-|-|-|ok

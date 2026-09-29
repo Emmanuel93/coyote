@@ -65,6 +65,7 @@ func init() {
 		{"get", "context [repo] [--scope S] [--query Q] [--budget N]", "paquete de contexto acotado para un agente", cmdGet},
 		{"ask", "\"pregunta\" [--scope S] [--repo R]", "busca en el contexto del proyecto con referencias", cmdAsk},
 		{"index", "[--rebuild]", "arma el índice local y muestra su tamaño", cmdIndex},
+		{"eval", "[--golden G] [--baseline B] [--update-baseline] [-v]", "mide el contexto con el golden del proyecto, sin modelos; falla si empeora (ADR-0025)", cmdEval},
 		{"repo", "add <nombre> [url] [--path P] | list | fetch [nombre]", "repos del proyecto y sus documentos", cmdRepo},
 		{"map", "[--check] [--json]", "mapa de interfaces del producto: quién expone y quién usa cada endpoint y tópico", cmdMap},
 		{"extract", "[repo...] [--stdout] [--check]", "propone README.coyote.md y CONTEXT.coyote.md de cada repo desde su código", cmdExtract},

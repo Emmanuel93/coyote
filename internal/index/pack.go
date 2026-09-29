@@ -2,6 +2,7 @@ package index
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -61,6 +62,7 @@ type Pack struct {
 	Sections []Section
 	Omitted  int
 	Built    time.Time
+	seen     map[string]bool // fragmentos ya incluidos: un fragmento sale una vez
 }
 
 // tiers define el orden en que se llena el presupuesto: primero lo que no se
@@ -128,6 +130,20 @@ func (ix *Index) Pack(repo string, o PackOptions) *Pack {
 			sort.SliceStable(cands, func(a, b int) bool { return rank[cands[a].Ref()] > rank[cands[b].Ref()] })
 		}
 		p.add(t.title, cands, func(c Chunk) string { return lineFor(c) })
+		// Con consulta, lo que mejor la responde va justo después de las
+		// invariantes, antes de que el resto del contexto llene el
+		// presupuesto (lo midió el golden, ADR-0025).
+		if i == 1 && o.Query != "" {
+			var top []Chunk
+			for _, h := range ix.Search(strings.TrimSpace(o.Query+" "+o.Scope), SearchOptions{Limit: 12}) {
+				if h.Kind != KindEvent && relevant(h.Chunk) && len(top) < 6 {
+					top = append(top, h.Chunk)
+				}
+			}
+			p.add("Lo más relevante para la consulta", top, lineFor)
+			// Un salto: los documentos y ADRs que citan esos fragmentos (C6.2).
+			p.add("Citado por lo anterior", ix.cited(top, rank, 4), lineFor)
+		}
 	}
 	// Producto multi-repo: las interfaces relevantes del mapa.
 	if q := strings.TrimSpace(o.Query + " " + o.Scope); q != "" {
@@ -160,10 +176,56 @@ func (ix *Index) Pack(repo string, o PackOptions) *Pack {
 	return p
 }
 
+// citeRe encuentra lo que un fragmento cita: un ADR o un documento del repo.
+var citeRe = regexp.MustCompile(`ADR-\d{4}|(?:docs|coyote)/[A-Za-z0-9_./-]+\.md`)
+
+// cited devuelve, de cada documento o ADR que citan los fragmentos, su
+// fragmento más relevante para la consulta (o el primero), hasta max.
+func (ix *Index) cited(from []Chunk, rank map[string]float64, max int) []Chunk {
+	var out []Chunk
+	seen := map[string]bool{}
+	for _, c := range from {
+		seen[c.Path] = true
+	}
+	for _, c := range from {
+		for _, ref := range citeRe.FindAllString(c.Title+" "+c.Text, -1) {
+			if len(out) == max {
+				return out
+			}
+			var best *Chunk
+			for i := range ix.Chunks {
+				d := &ix.Chunks[i]
+				if d.Kind == KindEvent || !(d.Path == ref || strings.HasPrefix(ref, "ADR-") && d.Kind == KindADR && strings.Contains(d.Path, ref)) {
+					continue
+				}
+				if seen[d.Path] {
+					best = nil
+					break
+				}
+				if best == nil || rank[d.Ref()] > rank[best.Ref()] {
+					best = d
+				}
+			}
+			if best != nil {
+				seen[best.Path] = true
+				out = append(out, *best)
+			}
+		}
+	}
+	return out
+}
+
 func (p *Pack) add(title string, cands []Chunk, format func(Chunk) string) {
 	var items []Item
 	headCost := tokens.Estimate("## " + title)
+	if p.seen == nil {
+		p.seen = map[string]bool{}
+	}
 	for _, c := range cands {
+		key := c.Kind + "\x00" + c.Ref()
+		if p.seen[key] {
+			continue
+		}
 		line := format(c)
 		flag := Flag(c)
 		if flag != "" {
@@ -179,6 +241,7 @@ func (p *Pack) add(title string, cands []Chunk, format func(Chunk) string) {
 			continue
 		}
 		p.Used += extra
+		p.seen[key] = true
 		items = append(items, Item{Chunk: c, Line: line, Tokens: cost, Flag: flag})
 	}
 	if len(items) > 0 {
@@ -338,6 +401,18 @@ func (p *Pack) frameLine() string {
 // real (encabezado, fechas, referencias y pie incluidos) y quita desde el final,
 // que es lo menos prioritario, hasta que quepa.
 func (p *Pack) fit(format func(*Pack) string) string {
+	out, _ := p.fitted(format)
+	return out
+}
+
+// Fitted devuelve las secciones que caben en el presupuesto, tal como las
+// entrega Markdown.
+func (p *Pack) Fitted() []Section {
+	_, q := p.fitted((*Pack).markdown)
+	return q.Sections
+}
+
+func (p *Pack) fitted(format func(*Pack) string) (string, *Pack) {
 	q := *p
 	q.Sections = make([]Section, len(p.Sections))
 	for i, s := range p.Sections {
@@ -348,7 +423,7 @@ func (p *Pack) fit(format func(*Pack) string) string {
 		out := format(&q)
 		if n := tokens.Estimate(out); n <= q.Budget || len(q.Sections) == 0 {
 			p.Used, p.Omitted = n, q.Omitted
-			return out
+			return out, &q
 		}
 		last := &q.Sections[len(q.Sections)-1]
 		last.Items = last.Items[:len(last.Items)-1]

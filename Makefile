@@ -28,6 +28,7 @@ lint: build
 	./bin/coyote standards lint
 	./bin/coyote generate agents --check
 	./bin/coyote attribution check
+	./bin/coyote eval
 	./bin/coyote -C examples/acme-shop standards lint
 
 check: vet test lint

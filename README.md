@@ -96,7 +96,7 @@ Cada corrida tiene topes de turnos y de dólares. El router baja de modelo al 80
 | `install --ide IDE \| --ci github` | el gate, los agentes y las skills en Claude Code, Cursor, Codex, Gemini CLI, Copilot o Windsurf; o el pipeline de cada repo del producto |
 | `gate check`, `gate pr` | el gate de los hooks del IDE; el de los PR con la revisión de un dueño |
 | `approvals`, `review`, `approve`, `reject`, `revoke`, `propose` | la cola y las decisiones humanas sobre acciones exactas |
-| `get context`, `ask`, `index` | contexto acotado con referencias, sin llamar a ningún modelo |
+| `get context`, `ask`, `index`, `eval` | contexto acotado con referencias, sin llamar a ningún modelo, y su medida con un golden |
 | `secrets list\|scan` | archivos de secretos con los nombres de sus variables, sin valores; secretos escritos en un repo, un commit o un PR |
 | `infra propose\|check\|plan` | inventario de la infraestructura (R13), su revisión contra el repo y el plan de Terraform sin valores |
 | `repo add\|list\|fetch` | repos del proyecto; de otros repos se traen solo sus documentos |
@@ -136,7 +136,7 @@ coyote/
 
 ## Documentación
 
-- Especificaciones: [CCF](docs/specs/ccf-v1.md), [CCF-doc](docs/specs/ccf-doc-v1.md), [estándar](docs/specs/standards-v1.md), [atribución](docs/specs/attribution-v1.md), [contexto](docs/specs/context-v1.md), [remoto](docs/specs/remote-v1.md), [gate](docs/specs/gate-v1.md), [secretos](docs/specs/secrets-v1.md), [infraestructura](docs/specs/infra-v1.md), [instalación](docs/specs/install-v1.md), [producto](docs/specs/product-v1.md), [corridas](docs/specs/run-v1.md), [workstreams](docs/specs/workstream-v1.md), [pipeline](docs/specs/ci-v1.md), [hub](docs/specs/hub-v1.md), [web](docs/specs/web-v1.md), [SLOs](docs/specs/slo-v1.md), [auditoría](docs/specs/audit-v1.md).
+- Especificaciones: [CCF](docs/specs/ccf-v1.md), [CCF-doc](docs/specs/ccf-doc-v1.md), [estándar](docs/specs/standards-v1.md), [atribución](docs/specs/attribution-v1.md), [contexto](docs/specs/context-v1.md), [remoto](docs/specs/remote-v1.md), [gate](docs/specs/gate-v1.md), [secretos](docs/specs/secrets-v1.md), [infraestructura](docs/specs/infra-v1.md), [instalación](docs/specs/install-v1.md), [producto](docs/specs/product-v1.md), [corridas](docs/specs/run-v1.md), [workstreams](docs/specs/workstream-v1.md), [pipeline](docs/specs/ci-v1.md), [hub](docs/specs/hub-v1.md), [web](docs/specs/web-v1.md), [SLOs](docs/specs/slo-v1.md), [auditoría](docs/specs/audit-v1.md), [evaluación](docs/specs/eval-v1.md).
 - Estándar default: [standards/default/STANDARD.md](standards/default/STANDARD.md). Agentes y skills: [agents/](agents/), [skills/](skills/).
 - Decisiones: [coyote/decisions/](coyote/decisions/). Seguridad: [modelo de amenazas](docs/security/threat-model.md). Plan y releases: [docs/plan/](docs/plan/EXECUTION_PLAN.md), [docs/releases/](docs/releases/).
 - Ejemplo completo: [examples/acme-shop](examples/acme-shop/) (proyecto sintético).

@@ -45,7 +45,7 @@ func TestReadOnlyShell(t *testing.T) {
 		"sort go.mod | uniq -c", "jq .version package.json", "diff a.txt b.txt", "cd internal && ls", "tree -L 2",
 		"git -C internal log -1", "sleep 1", "coyote ws status W-0002", "coyote ws check W-0002 --json", "coyote ws status",
 		"coyote hub status", "coyote hub status --json", "coyote slo check", "coyote slo rules --check", "coyote slo rules pagos --stdout",
-		"coyote audit", "coyote audit --month 2026-09 --json",
+		"coyote audit", "coyote audit --month 2026-09 --json", "coyote eval", "coyote eval -v --json",
 	}
 	for _, c := range allow {
 		a := claude(t, "Bash", map[string]any{"command": c, "description": "x"}, root)
@@ -63,7 +63,7 @@ func TestReadOnlyShell(t *testing.T) {
 		"./ls", "/bin/ls", "ls &", "curl https://example.com", "sed -i s/a/b/ x", "awk '{print}' x",
 		"xargs rm < lista", "rg --pre ./x foo", "cat <(ls)", "coyote commit -m 'x'", "coyote ask x --record",
 		"coyote standards lint --scripts", "coyote install --ide cursor", "coyote install --check=false --ide cursor",
-		"coyote slo rules", "coyote slo rules pagos", "coyote hub init ../hub", "coyote audit --write", "coyote audit --month 2026-09 -write",
+		"coyote slo rules", "coyote slo rules pagos", "coyote hub init ../hub", "coyote audit --write", "coyote audit --month 2026-09 -write", "coyote eval --update-baseline",
 		"coyote slo rules --check --check=false", "coyote slo rules --stdout=false", "coyote slo rules --check -- x --check=false",
 		"coyote generate agents --check --check=false", "coyote install --dry-run --dry-run=false --ide cursor",
 		"go test -run X ./...", "go run .", "ls\nrm -rf x", "ls # comentario", "git worktree add x",
