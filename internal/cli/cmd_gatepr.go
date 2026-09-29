@@ -525,6 +525,11 @@ func injectionRisks(added []product.AddedFile, whole func(string) (string, bool)
 	var out []ci.FileRisk
 	for _, f := range added {
 		if !inject.Document(f.Path) {
+			// En el código solo se buscan caracteres ocultos: los que
+			// reordenan el texto (Trojan Source) son R3; los demás, R2.
+			if risk := hiddenRisk(f); risk != nil {
+				out = append(out, *risk)
+			}
 			continue
 		}
 		type run struct {
@@ -593,3 +598,20 @@ func ledgerRisks(dir, left, right string, changed []string) []ci.FileRisk {
 // appendOnly dice si nw solo agrega a old. Un archivo sin salto final sigue
 // valiendo: coyote le agrega el salto antes de la línea nueva.
 func appendOnly(old, nw string) bool { return strings.HasPrefix(nw, old) }
+
+// hiddenRisk revisa las líneas que un PR agrega a un archivo que no es un
+// documento: caracteres invisibles o que reordenan lo que ve quien revisa.
+func hiddenRisk(f product.AddedFile) *ci.FileRisk {
+	var first *ci.FileRisk
+	for _, l := range f.Lines {
+		for _, h := range inject.Hidden(l.Text) {
+			if inject.Reorders(h) {
+				return &ci.FileRisk{Path: f.Path, Risk: ci.R3, Why: fmt.Sprintf("controles de dirección del texto en la línea %d: lo que se revisa no es lo que corre (Trojan Source)", l.Line)}
+			}
+			if first == nil {
+				first = &ci.FileRisk{Path: f.Path, Risk: ci.R2, Why: fmt.Sprintf("%s en la línea %d", h.Label, l.Line)}
+			}
+		}
+	}
+	return first
+}

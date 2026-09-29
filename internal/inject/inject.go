@@ -114,6 +114,19 @@ func Scan(text string) []Finding {
 			add("comentario-oculto", "comentario oculto que le habla a un agente", lines[m[0]])
 		}
 	}
+	for _, h := range Hidden(text) {
+		add(h.Rule, h.Label, h.Line)
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Line < out[j].Line })
+	return out
+}
+
+// Hidden devuelve los caracteres que no se ven y pueden esconder o reordenar
+// texto, uno por clase y línea. Sirve también para el código: los controles
+// de dirección son el ataque Trojan Source (CVE-2021-42574).
+func Hidden(text string) []Finding {
+	var out []Finding
+	seen := map[string]bool{}
 	line := 1
 	for _, r := range text {
 		if r == '\n' {
@@ -121,12 +134,21 @@ func Scan(text string) []Finding {
 			continue
 		}
 		if kind := hidden(r); kind != "" {
-			add("texto-oculto", kind, line)
+			k := kind + "\x00" + strconv.Itoa(line)
+			if !seen[k] {
+				seen[k] = true
+				out = append(out, Finding{Rule: "texto-oculto", Label: kind, Line: line})
+			}
 		}
 	}
-	sort.SliceStable(out, func(i, j int) bool { return out[i].Line < out[j].Line })
 	return out
 }
+
+// Reorders informa si la marca es de controles de dirección del texto: en
+// código, reordenan lo que ve quien revisa sin cambiar lo que compila.
+func Reorders(f Finding) bool { return f.Rule == "texto-oculto" && f.Label == labelBidi }
+
+const labelBidi = "controles de dirección del texto"
 
 // First devuelve la primera marca de text, si hay.
 func First(text string) (Finding, bool) {
@@ -143,7 +165,7 @@ func hidden(r rune) string {
 	case r >= 0xE0000 && r <= 0xE007F:
 		return "etiquetas Unicode invisibles"
 	case r >= 0x202A && r <= 0x202E, r >= 0x2066 && r <= 0x2069, r == 0x200E, r == 0x200F, r == 0x061C:
-		return "controles de dirección del texto"
+		return labelBidi
 	case r == 0x200B, r == 0x2060, r == 0xFEFF, r == 0x180E, r >= 0x2061 && r <= 0x2064, r == 0x3164, r == 0x115F, r == 0x1160:
 		return "caracteres de ancho cero"
 	}

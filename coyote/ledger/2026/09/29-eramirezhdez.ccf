@@ -71,3 +71,4 @@
 2026-09-29T17:23Z|@eramirezhdez/coyote-sr-solution-architect|W-0008|coyote|doc|plan|plan razonado de v1.0 y ADR-0022 a ADR-0027|-|-|-|ok
 2026-09-29T17:27Z|@eramirezhdez/coyote-devsecops|W-0008|coyote|feat|web|clave por sesión en la ruta de cada enlace; sin ella, 404…|-|-|-|ok
 2026-09-29T18:08Z|@eramirezhdez/coyote-security|W-0008|coyote|feat|inject|el contenido de los repos es dato: paquetes enmarcados, clasificador, notas y…|-|-|-|ok
+2026-09-29T18:18Z|@eramirezhdez/coyote-security|W-0008|coyote|test|seguridad|escape del loop autónomo, fuzzing de los lectores y Trojan Source en…|-|-|-|ok
