@@ -1,6 +1,6 @@
 # Plan de ejecución — Coyote
 
-Estado: v0.6.0 aprobada en G6 (P-0006), en la rama `v0.6`; `main` sigue en v0.4.0 · v0.7 en construcción en la rama `v0.7` · actualizado 2026-09-29
+Estado: v0.6.0 aprobada en G6 (P-0006), en la rama `v0.6`; `main` sigue en v0.4.0 · v0.7.0 lista en la rama `v0.7`, esperando G7 · actualizado 2026-09-29
 
 Este plan ejecuta la propuesta aprobada ("Plan de construcción — Framework Coyote"). Cada release se razona con la plantilla de cinco partes que usarán los agentes de Coyote (problema, restricciones, opciones, decisión, riesgos) y cierra con un gate humano: nada se etiqueta, se publica ni toca otros proyectos sin autorización explícita.
 
@@ -536,12 +536,12 @@ G6 autorizaría:
 | ID | Tarea | Razonamiento | Aceptación | Estado |
 | --- | --- | --- | --- | --- |
 | T45 | Plan y ADR-0018 a ADR-0021 | Cuatro frentes; se razonan antes del código | Esta sección, los ADRs y W-0007 | Hecho |
-| T46 | Hub de la organización | La web y el estándar de la organización dependen de él | `hub init`; `hub:` con `path` y `ref` leídos con plomería; `hub.yaml` v1 validado; la capa del estándar desde el commit; `hub status` y `doctor` | Pendiente |
-| T47 | Web v1 y D10 | Ver sin abrir cinco comandos, sin exponer de más | Costos (D10), presupuesto, workstreams, gate y aprobaciones, SLOs y organización; solo lectura, loopback y sin JavaScript | Pendiente |
-| T48 | SLOs y alertas como código | Un SLO sin alertas generadas y revisadas es una promesa | `slo/*.yaml` v1, `slo rules`, `slo check` y R19; `gate pr` con SLOs relajados; comandos de alertas en el gate; `promtool check` y `test` en el entorno de construcción | Pendiente |
-| T49 | gitleaks en el pipeline | Más patrones en el PR sin que el autor lo pueda apagar | `features.gitleaks`, paso fijado por hash con la configuración de la base y `gate pr --gitleaks`; probado con gitleaks real | Pendiente |
-| T50 | Piloto en solo lectura | Evidencia sobre tus proyectos antes de G7 | Hub propuesto para `kredius`, fuera de `Documents` hasta G7; la web v1 sobre el ledger del piloto; los SLOs de Faro con sus reglas y lo que le falta a Faro | Pendiente |
-| T51 | Verificación y G7 | Evidencia antes de crear el hub y tocar Faro | Pruebas, revisión adversarial y `docs/releases/v0.7.0.md` | Pendiente |
+| T46 | Hub de la organización | La web y el estándar de la organización dependen de él | `hub init`; `hub:` con `path` y `ref` leídos con plomería; `hub.yaml` v1 validado; la capa del estándar desde el commit; `hub status` y `doctor` | Hecho |
+| T47 | Web v1 y D10 | Ver sin abrir cinco comandos, sin exponer de más | Costos (D10), presupuesto, workstreams, gate y aprobaciones, SLOs y organización; solo lectura, loopback y sin JavaScript | Hecho |
+| T48 | SLOs y alertas como código | Un SLO sin alertas generadas y revisadas es una promesa | `slo/*.yaml` v1, `slo rules`, `slo check` y R19; `gate pr` con SLOs relajados; comandos de alertas en el gate; `promtool check` y `test` en el entorno de construcción | Hecho |
+| T49 | gitleaks en el pipeline | Más patrones en el PR sin que el autor lo pueda apagar | `features.gitleaks`, paso fijado por hash con la configuración de la base y `gate pr --gitleaks`; probado con gitleaks real | Hecho |
+| T50 | Piloto en solo lectura | Evidencia sobre tus proyectos antes de G7 | Hub propuesto para `kredius`, fuera de `Documents` hasta G7; la web v1 sobre el ledger del piloto; los SLOs de Faro con sus reglas y lo que le falta a Faro | Hecho |
+| T51 | Verificación y G7 | Evidencia antes de crear el hub y tocar Faro | Pruebas, revisión adversarial y `docs/releases/v0.7.0.md` | Hecho; espera G7 |
 
 G7 autorizaría:
 

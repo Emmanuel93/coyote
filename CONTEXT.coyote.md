@@ -39,3 +39,10 @@ gap|secrets|el escáner solo reconoce formas conocidas; una contraseña de forma
 inv|infra|un agente nunca aplica infraestructura; un ambiente reviewed solo lo aplica la persona o un pipeline con revisor|ADR-0017
 dec|infra|coyote infra plan lee el plan en JSON sin copiarlo y solo reporta direcciones, tipos y acciones|docs/specs/infra-v1.md
 dec|gate|el gate lee cada comando como lo correría el shell; los mensajes, patrones y lo que imprime echo son datos|docs/specs/gate-v1.md
+dec|hub|el estándar, los admins y el presupuesto de la organización salen del commit que rige en el clon del hub|ADR-0018
+inv|gate|un agente no escribe en el clon del hub ni en una carpeta de git, ni lee su config|docs/specs/gate-v1.md
+dec|web|cada persona ve su gasto y los totales; el desglose, los admins; la organización, solo los del hub|ADR-0019
+dec|slo|las alertas salen de coyote/slo/<servicio>.yaml; relajar un SLO es R3 y un agente nunca las carga|ADR-0020
+dec|ci|gitleaks es opcional en el pipeline, fijado por hash y con la configuración de la rama base|ADR-0021
+inv|output|la salida de coyote en terminal y web escapa controles y caracteres invisibles|internal/safetext/safetext.go
+gap|web|otro usuario de la misma máquina puede pedir la web por loopback; la clave por sesión es de v1.0|docs/specs/web-v1.md

@@ -2,15 +2,16 @@
 
 Coyote es una CLI en Go para trabajar con agentes de IA en proyectos de software sin perder el control: el contexto del proyecto vive versionado junto al código, cada acción queda registrada con su costo, el estándar del equipo se valida solo y ningún entregable sale firmado por una herramienta de IA.
 
-Estado: **v0.6.0**, aprobada en el gate G6, en la rama `v0.6`. Trae el gate en Codex, Gemini CLI, Copilot y Windsurf con su nivel medido, secretos y credenciales fuera del alcance de los agentes, e infraestructura como código revisada por ambiente. v0.5.0 está en la rama `v0.5` y `main` sigue en v0.4.0 hasta que el ejercicio en ramas termine. Funciona sin red; para GitHub usa tus propias credenciales. El orden está en [docs/plan/EXECUTION_PLAN.md](docs/plan/EXECUTION_PLAN.md).
+Estado: **v0.7.0**, lista para el gate G7 en la rama `v0.7`. Trae el hub de la organización, la web v1 con visibilidad de costos por persona, SLOs y alertas como código, y gitleaks opcional en el pipeline. v0.6.0 está aprobada en G6 en la rama `v0.6`, y `main` sigue en v0.4.0 hasta que el ejercicio en ramas termine. Funciona sin red; para GitHub usa tus propias credenciales. El orden está en [docs/plan/EXECUTION_PLAN.md](docs/plan/EXECUTION_PLAN.md).
 
 ## Qué resuelve
 
 - **Contexto que no se pierde.** Cada repo lleva `README.coyote.md` (qué es y cómo se corre) y `CONTEXT.coyote.md` (invariantes, decisiones, trampas) en un formato compacto con tope de tokens. De ahí se genera `AGENTS.md`, que leen Claude Code, Cursor y los demás IDEs.
 - **Todo queda registrado.** El ledger (`coyote/ledger/`) guarda una línea por evento: quién, qué, tokens de entrada, caché y salida, y costo. Un archivo por día y persona, así git nunca choca.
-- **Un estándar por capas.** El default de la herramienta, el de tu organización y el de cada proyecto se combinan con `extends`. Relajar una regla exige motivo y puede vencer.
+- **Un estándar por capas.** El default de la herramienta, el de tu organización y el de cada proyecto se combinan con `extends`. Relajar una regla exige motivo y puede vencer. El de la organización vive en un hub, un repo con sus admins y su presupuesto, y rige lo que tiene commit.
 - **Nada con efectos sin tu aprobación.** Un gate en el hook de cada IDE deja leer libremente y detiene todo lo demás hasta que apruebas esa acción exacta. Un agente no puede aprobarse, tocar el gate, leer tus credenciales ni los secretos del proyecto (`.env`, tfstate, llaves).
-- **Un cambio se ve contra todo el producto.** El mapa de interfaces de todos los repos dice a quién afecta un cambio. En cada PR, el pipeline pide la revisión de un dueño cuando el riesgo lo amerita.
+- **Un cambio se ve contra todo el producto.** El mapa de interfaces de todos los repos dice a quién afecta un cambio. En cada PR, el pipeline pide la revisión de un dueño cuando el riesgo lo amerita, también si relaja un SLO o si gitleaks encuentra un secreto.
+- **SLOs con alertas que salen de un archivo.** Cada servicio declara sus SLOs; coyote genera sus alertas de Prometheus, revisa que estén al día (R19) y en un PR marca lo que relaja un objetivo o apaga una alerta.
 - **Autoría humana.** Los commits llevan tu identidad de git. Las firmas y trailers que agregan los asistentes se quitan en cinco capas: configuración del IDE, gate del IDE, `coyote commit`, hook `commit-msg` y lint en la CI.
 
 ## Instalar
@@ -36,7 +37,7 @@ coyote log                          # eventos con tokens y costo
 coyote get context --scope pedidos  # lo que un agente necesita saber, acotado
 coyote ask "cuándo se confirma un pedido"
 coyote push                         # revisa autoría y estándar, y publica a ritmo humano
-coyote web                          # costos en http://127.0.0.1:7410
+coyote web                          # costos, presupuesto, workstreams, gate y SLOs en http://127.0.0.1:7410
 ```
 
 `coyote init` nunca sobrescribe: en un repo existente solo agrega lo que falta.
@@ -104,7 +105,9 @@ Cada corrida tiene topes de turnos y de dólares. El router baja de modelo al 80
 | `ws check\|status\|run\|continue` | el plan de un workstream con puntos de control |
 | `close <W>` | consumo de un workstream desde el ledger, con sus pasos |
 | `push`, `pull`, `auth` | publica y trae con autoría y ritmo humano; el token de GitHub vive en el llavero |
-| `web` | costos por proyecto, persona, modelo y agente en `127.0.0.1` |
+| `hub init\|status` | el hub de la organización: su estándar, sus admins, su presupuesto y sus proyectos |
+| `slo check\|rules` | SLOs como código: los valida y genera sus alertas de Prometheus (R19) |
+| `web` | costos (cada persona ve lo suyo y los totales; los admins, todo), presupuesto, workstreams, gate, SLOs y, para los admins del hub, la organización, en `127.0.0.1` |
 
 `coyote help <comando>` muestra las opciones. `-C <ruta>` corre cualquier comando sobre otro directorio.
 
@@ -123,6 +126,8 @@ coyote/
   router.yaml             modelo por agente, pisos por riesgo y topes (opcional)
   map/, repos/, ci/       en un producto: mapa, documentos propuestos y workflows por repo
   approvals/              aprobaciones humanas, firmadas
+  slo/                    SLOs por servicio y sus reglas de Prometheus generadas (prometheus/)
+  hub.yaml                en un hub: organización, admins, presupuesto y proyectos
 .claude/, .cursor/, …     generados por coyote install, según el IDE (.codex/, .gemini/, .github/hooks/, .windsurf/)
 .coyote/                  índice, cola y latido del gate, y locks; nunca se versiona
 ```
@@ -133,7 +138,7 @@ coyote/
 
 ## Documentación
 
-- Especificaciones: [CCF](docs/specs/ccf-v1.md), [CCF-doc](docs/specs/ccf-doc-v1.md), [estándar](docs/specs/standards-v1.md), [atribución](docs/specs/attribution-v1.md), [contexto](docs/specs/context-v1.md), [remoto](docs/specs/remote-v1.md), [gate](docs/specs/gate-v1.md), [secretos](docs/specs/secrets-v1.md), [infraestructura](docs/specs/infra-v1.md), [instalación](docs/specs/install-v1.md), [producto](docs/specs/product-v1.md), [corridas](docs/specs/run-v1.md), [workstreams](docs/specs/workstream-v1.md), [pipeline](docs/specs/ci-v1.md).
+- Especificaciones: [CCF](docs/specs/ccf-v1.md), [CCF-doc](docs/specs/ccf-doc-v1.md), [estándar](docs/specs/standards-v1.md), [atribución](docs/specs/attribution-v1.md), [contexto](docs/specs/context-v1.md), [remoto](docs/specs/remote-v1.md), [gate](docs/specs/gate-v1.md), [secretos](docs/specs/secrets-v1.md), [infraestructura](docs/specs/infra-v1.md), [instalación](docs/specs/install-v1.md), [producto](docs/specs/product-v1.md), [corridas](docs/specs/run-v1.md), [workstreams](docs/specs/workstream-v1.md), [pipeline](docs/specs/ci-v1.md), [hub](docs/specs/hub-v1.md), [web](docs/specs/web-v1.md), [SLOs](docs/specs/slo-v1.md).
 - Estándar default: [standards/default/STANDARD.md](standards/default/STANDARD.md). Agentes y skills: [agents/](agents/), [skills/](skills/).
 - Decisiones: [coyote/decisions/](coyote/decisions/). Plan y releases: [docs/plan/](docs/plan/EXECUTION_PLAN.md), [docs/releases/](docs/releases/).
 - Ejemplo completo: [examples/acme-shop](examples/acme-shop/) (proyecto sintético).

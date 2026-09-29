@@ -58,3 +58,11 @@
 2026-09-29T09:47Z|@eramirezhdez/coyote-security|W-0007|coyote|fix|gate|el clon del hub en datos o como origen no bloquea, git…|-|-|-|ok
 2026-09-29T09:47Z|@eramirezhdez/coyote-devsecops|W-0007|coyote|fix|ci|sin configuración en la base, gitleaks usa sus reglas por defecto sin…|-|-|-|ok
 2026-09-29T09:47Z|@eramirezhdez/coyote-sre|W-0007|coyote|fix|slo|duplicados nuevos, archivos ocultos y ticket único en R3; salida JSON y…|-|-|-|ok
+2026-09-29T09:52Z|@eramirezhdez/coyote-scribe|W-0007|coyote|note|hub|dec: el estándar, los admins y el presupuesto de la organización salen…|doc:CONTEXT.coyote.md|-|-|ok
+2026-09-29T09:52Z|@eramirezhdez/coyote-scribe|W-0007|coyote|note|gate|inv: un agente no escribe en el clon del hub ni en…|doc:CONTEXT.coyote.md|-|-|ok
+2026-09-29T09:52Z|@eramirezhdez/coyote-scribe|W-0007|coyote|note|web|dec: cada persona ve su gasto y los totales; el desglose, los…|doc:CONTEXT.coyote.md|-|-|ok
+2026-09-29T09:52Z|@eramirezhdez/coyote-scribe|W-0007|coyote|note|slo|dec: las alertas salen de coyote/slo/<servicio>.yaml; relajar un SLO es R3 y…|doc:CONTEXT.coyote.md|-|-|ok
+2026-09-29T09:52Z|@eramirezhdez/coyote-scribe|W-0007|coyote|note|ci|dec: gitleaks es opcional en el pipeline, fijado por hash y con…|doc:CONTEXT.coyote.md|-|-|ok
+2026-09-29T09:52Z|@eramirezhdez/coyote-scribe|W-0007|coyote|note|output|inv: la salida de coyote en terminal y web escapa controles y…|doc:CONTEXT.coyote.md|-|-|ok
+2026-09-29T09:52Z|@eramirezhdez/coyote-scribe|W-0007|coyote|note|web|gap: otro usuario de la misma máquina puede pedir la web por…|doc:CONTEXT.coyote.md|-|-|ok
+2026-09-29T10:00Z|@eramirezhdez/coyote-scribe|W-0007|coyote|doc|release|reporte de v0.7.0 para G7, notas de contexto y estado del plan|-|-|-|ok
