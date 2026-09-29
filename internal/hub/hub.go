@@ -5,7 +5,6 @@
 package hub
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -13,6 +12,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 
@@ -20,6 +20,7 @@ import (
 
 	"github.com/Emmanuel93/coyote/internal/fsx"
 	"github.com/Emmanuel93/coyote/internal/product"
+	"github.com/Emmanuel93/coyote/internal/yamlx"
 )
 
 // Rutas dentro del hub y la rama que rige si el proyecto no fija otra.
@@ -135,6 +136,9 @@ func FromProject(root string) (Ref, error) {
 		}
 		return Ref{}, err
 	}
+	if err := yamlx.Check(data); err != nil {
+		return Ref{}, fmt.Errorf("coyote/project.yaml: %w", err)
+	}
 	var p struct {
 		Hub Ref `yaml:"hub"`
 	}
@@ -146,10 +150,11 @@ func FromProject(root string) (Ref, error) {
 
 // Hub es un hub resuelto en un commit.
 type Hub struct {
-	Dir    string // clon local
-	Ref    string // la rama, etiqueta o commit que rige
-	Commit string // el commit que rige
-	Conf   *Conf  // coyote/hub.yaml en ese commit
+	Dir     string // clon local
+	Ref     string // la rama, etiqueta o commit declarado
+	FullRef string // su nombre completo (refs/heads/main) o el commit
+	Commit  string // el commit que rige
+	Conf    *Conf  // coyote/hub.yaml en ese commit
 	// Missing indica que el commit no tiene coyote/hub.yaml: sin admins,
 	// presupuesto ni proyectos.
 	Missing bool
@@ -163,13 +168,30 @@ func (h *Hub) Short() string {
 	return h.Commit
 }
 
+// Kind describe la ref que rige: rama main, etiqueta v3, remota origin/main
+// o commit.
+func (h *Hub) Kind() string {
+	switch {
+	case strings.HasPrefix(h.FullRef, "refs/heads/"):
+		return "rama " + strings.TrimPrefix(h.FullRef, "refs/heads/")
+	case strings.HasPrefix(h.FullRef, "refs/tags/"):
+		return "etiqueta " + strings.TrimPrefix(h.FullRef, "refs/tags/")
+	case strings.HasPrefix(h.FullRef, "refs/remotes/"):
+		return "remota " + strings.TrimPrefix(h.FullRef, "refs/remotes/")
+	}
+	return "commit"
+}
+
 // String describe qué rige: la organización, la ref y el commit.
 func (h *Hub) String() string {
 	org := h.Conf.Org
 	if org == "" {
 		org = filepath.Base(h.Dir)
 	}
-	return fmt.Sprintf("%s (%s@%s)", org, h.Ref, h.Short())
+	if h.Kind() == "commit" {
+		return fmt.Sprintf("%s (commit %s)", org, h.Short())
+	}
+	return fmt.Sprintf("%s (%s@%s)", org, h.Kind(), h.Short())
 }
 
 // Open resuelve el hub de un proyecto. Devuelve nil sin error si el proyecto
@@ -193,11 +215,11 @@ func Open(root string, r Ref) (*Hub, error) {
 	if ref == "" {
 		ref = DefaultRef
 	}
-	commit, err := resolve(dir, ref)
+	commit, full, err := resolve(dir, ref)
 	if err != nil {
-		return nil, fmt.Errorf("hub: %s no tiene %q (%v); haz commit en el hub o fija otra ref en coyote/project.yaml", dir, ref, err)
+		return nil, fmt.Errorf("hub: %s: %v; haz commit en el hub o fija otra ref en coyote/project.yaml", dir, err)
 	}
-	h := &Hub{Dir: dir, Ref: ref, Commit: commit, Conf: &Conf{}}
+	h := &Hub{Dir: dir, Ref: ref, FullRef: full, Commit: commit, Conf: &Conf{}}
 	data, err := h.Read(ConfFile)
 	switch {
 	case errors.Is(err, ErrNotFound):
@@ -229,16 +251,47 @@ func isTopLevel(dir string) bool {
 
 var shaRe = regexp.MustCompile(`^[0-9a-f]{40}([0-9a-f]{24})?$`)
 
-func resolve(dir, ref string) (string, error) {
-	var stderr bytes.Buffer
-	cmd := product.GitRead(dir, "rev-parse", "--verify", "--quiet", ref+"^{commit}")
-	cmd.Stderr = &stderr
-	out, err := cmd.Output()
+func revParse(dir, spec string) (string, bool) {
+	out, err := product.GitRead(dir, "rev-parse", "--verify", "--quiet", spec).Output()
 	sha := strings.TrimSpace(string(out))
-	if err != nil || !shaRe.MatchString(sha) {
-		return "", errors.New("no es una rama, etiqueta ni commit de ese repo")
+	return sha, err == nil && shaRe.MatchString(sha)
+}
+
+// resolve devuelve el commit que rige y el nombre completo de la ref. Una
+// ref corta se busca como rama, etiqueta y rama remota, y si existe en más de
+// uno es un error: git preferiría la etiqueta, y quien pueda empujar una
+// etiqueta llamada main cambiaría lo que rige sin pasar por el PR del hub.
+// Un commit va completo; HEAD y sus parientes no valen, porque dependen de lo
+// que el clon tenga abierto.
+func resolve(dir, ref string) (commit, full string, err error) {
+	if shaRe.MatchString(ref) {
+		sha, ok := revParse(dir, ref+"^{commit}")
+		if !ok {
+			return "", "", fmt.Errorf("el commit %s no está en el clon", ref)
+		}
+		return sha, sha, nil
 	}
-	return sha, nil
+	if ref == "HEAD" || strings.HasSuffix(ref, "_HEAD") || strings.HasSuffix(ref, "/HEAD") {
+		return "", "", fmt.Errorf("ref %q depende de lo que el clon tenga abierto; usa una rama, una etiqueta o un commit completo", ref)
+	}
+	cands := []string{"refs/heads/" + ref, "refs/tags/" + ref, "refs/remotes/" + ref}
+	if strings.HasPrefix(ref, "refs/") {
+		cands = []string{ref}
+	}
+	var found []string
+	for _, c := range cands {
+		if sha, ok := revParse(dir, c+"^{commit}"); ok {
+			found = append(found, c)
+			commit = sha
+		}
+	}
+	switch len(found) {
+	case 0:
+		return "", "", fmt.Errorf("%q no es una rama, etiqueta ni rama remota del clon (un commit va con sus 40 caracteres)", ref)
+	case 1:
+		return commit, found[0], nil
+	}
+	return "", "", fmt.Errorf("%q es ambigua: existe como %s; declara la ref completa (refs/heads/%s) y borra la otra", ref, strings.Join(found, " y "), ref)
 }
 
 // CleanRel valida una ruta dentro del hub: relativa, con barras y sin salir
@@ -262,14 +315,19 @@ func (h *Hub) Read(rel string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("hub %s: no puedo listar %s: %w", h, rel, err)
 	}
-	entry := strings.TrimSuffix(string(out), "\x00")
-	if entry == "" {
+	var entries []string
+	for _, e := range strings.Split(string(out), "\x00") {
+		if e != "" {
+			entries = append(entries, e)
+		}
+	}
+	if len(entries) == 0 {
 		return nil, fmt.Errorf("%s %w", rel, ErrNotFound)
 	}
-	meta, name, ok := strings.Cut(entry, "\t")
+	meta, name, ok := strings.Cut(entries[0], "\t")
 	f := strings.Fields(meta)
-	if !ok || name != rel || len(f) != 4 {
-		return nil, fmt.Errorf("%s %w", rel, ErrNotFound)
+	if len(entries) != 1 || !ok || name != rel || len(f) != 4 {
+		return nil, fmt.Errorf("hub %s: el árbol tiene entradas inesperadas para %s", h, rel)
 	}
 	mode, typ, sha, size := f[0], f[1], f[2], f[3]
 	switch {
@@ -309,7 +367,20 @@ func (h *Hub) ProjectDir(p Project) string {
 
 // Inside informa si el clon del hub vive dentro de root: un hub así lo
 // controla el propio proyecto y no tiene la exención de la capa del hub.
+// Compara las rutas reales: un symlink de afuera hacia el proyecto, o una
+// ruta con otras mayúsculas en un disco que no las distingue, sigue adentro.
 func Inside(root, dir string) bool {
-	r, err := filepath.Rel(filepath.Clean(root), filepath.Clean(dir))
+	r, err := filepath.Rel(canon(root), canon(dir))
 	return err == nil && r != ".." && !strings.HasPrefix(r, ".."+string(filepath.Separator))
+}
+
+func canon(p string) string {
+	if e, err := filepath.EvalSymlinks(p); err == nil {
+		p = e
+	}
+	p = filepath.Clean(p)
+	if runtime.GOOS == "darwin" || runtime.GOOS == "windows" {
+		p = strings.ToLower(p)
+	}
+	return p
 }

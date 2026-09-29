@@ -50,7 +50,7 @@ func TestHubDeLaOrganizacion(t *testing.T) {
 	}
 	r = run(t, shop, "", "standards", "show")
 	must(t, r, 0, "standards show")
-	if !strings.Contains(r.stdout, "hub acme (main@") || !strings.Contains(r.stdout, "ORG1") {
+	if !strings.Contains(r.stdout, "hub acme (rama main@") || !strings.Contains(r.stdout, "ORG1") {
 		t.Fatalf("la capa del hub se ve con su commit:\n%s", r.stdout)
 	}
 	r = run(t, shop, "", "hub", "status", "--json")
@@ -67,7 +67,7 @@ func TestHubDeLaOrganizacion(t *testing.T) {
 		t.Fatalf("hub status: %+v", st)
 	}
 	r = run(t, shop, "", "doctor")
-	if !strings.Contains(r.stdout, "hub") || !strings.Contains(r.stdout, "acme (main@") {
+	if !strings.Contains(r.stdout, "hub") || !strings.Contains(r.stdout, "acme (rama main@") {
 		t.Fatalf("doctor muestra el hub:\n%s", r.stdout)
 	}
 
@@ -86,9 +86,24 @@ func TestHubDeLaOrganizacion(t *testing.T) {
 		t.Fatalf("un hub declarado que no se puede leer es un error:\n%s%s", r.stdout, r.stderr)
 	}
 
-	// init valida lo que escribe.
+	// init valida lo que escribe; la organización solo cuenta en un hub.
 	must(t, run(t, base, "", "init", "otro", "--hub", "https://github.com/acme/hub"), 1, "hub como URL")
 	must(t, run(t, base, "", "hub", "init", "h2", "--org", "acme: x"), 1, "organización inválida")
+	must(t, run(t, base, "", "init", "café", "--type", "backend", "--purpose", "API con nombre acentuado"), 0, "un proyecto con acento no es un hub")
+}
+
+func TestGateProtegeElClonDelHub(t *testing.T) {
+	base := setup(t)
+	must(t, run(t, base, "", "hub", "init", "acme-hub", "--org", "acme"), 0, "hub init")
+	must(t, run(t, base, "", "init", "shop", "--type", "backend", "--purpose", "API de la tienda demo", "--hub", "../acme-hub"), 0, "init")
+	root := filepath.Join(base, "shop")
+	for _, target := range []string{filepath.Join(base, "acme-hub", "coyote", "hub.yaml"), filepath.Join(base, "acme-hub", "coyote", "standards", "rules.yaml")} {
+		in := fmt.Sprintf(`{"hook_event_name":"PreToolUse","tool_name":"Write","tool_input":{"file_path":%q,"content":"x"},"cwd":%q}`, target, root)
+		r := run(t, root, in, "gate", "check", "--ide", "claude-code")
+		if r.code != 2 || !strings.Contains(r.stderr, "bloqueado") {
+			t.Fatalf("escribir %s desde el proyecto: %d\n%s%s", target, r.code, r.stdout, r.stderr)
+		}
+	}
 }
 
 // webPages arranca coyote web y pide varias rutas.

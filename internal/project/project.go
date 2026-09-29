@@ -28,6 +28,7 @@ import (
 	"github.com/Emmanuel93/coyote/internal/ledger"
 	"github.com/Emmanuel93/coyote/internal/secrets"
 	"github.com/Emmanuel93/coyote/internal/standards"
+	"github.com/Emmanuel93/coyote/internal/yamlx"
 )
 
 // ConfigPath es la ruta del archivo de proyecto relativa a la raíz.
@@ -153,6 +154,9 @@ func Load(root string) (*Config, error) {
 // del proyecto si el archivo no lo dice.
 func Parse(data []byte, name string) (*Config, error) {
 	var c Config
+	if err := yamlx.Check(data); err != nil {
+		return nil, fmt.Errorf("%s: %w", ConfigPath, err)
+	}
 	if err := yaml.Unmarshal(data, &c); err != nil {
 		return nil, fmt.Errorf("%s: %w", ConfigPath, err)
 	}
@@ -184,13 +188,17 @@ func (c *Config) Validate() error {
 	if err := c.Hub.Validate(); err != nil {
 		errs = append(errs, err.Error())
 	}
-	for i, a := range c.Admins {
-		h, err := hub.NormalizeHandle(a)
-		if err != nil {
-			errs = append(errs, "admins: "+err.Error())
-			continue
+	if len(c.Admins) > 100 {
+		errs = append(errs, "admins: hasta 100 personas")
+	} else {
+		for i, a := range c.Admins {
+			h, err := hub.NormalizeHandle(a)
+			if err != nil {
+				errs = append(errs, "admins: "+err.Error())
+				continue
+			}
+			c.Admins[i] = h
 		}
-		c.Admins[i] = h
 	}
 	for name := range c.Features {
 		if _, ok := KnownFeatures[name]; !ok {
@@ -275,11 +283,13 @@ func Init(o InitOptions) (*InitResult, error) {
 	if err := (hub.Ref{Path: strings.TrimSpace(o.Hub)}).Validate(); err != nil {
 		return nil, err
 	}
-	if o.Org == "" {
-		o.Org = o.Name
-	}
-	if !hub.ValidOrg(o.Org) {
-		return nil, fmt.Errorf("organización %q inválida: letras, números, punto, guion o guion bajo", o.Org)
+	if o.Type == "hub" {
+		if o.Org == "" {
+			o.Org = o.Name
+		}
+		if !hub.ValidOrg(o.Org) {
+			return nil, fmt.Errorf("organización %q inválida: letras, números, punto, guion o guion bajo; usa --org", o.Org)
+		}
 	}
 	res := &InitResult{Root: dir, Name: o.Name}
 	if !o.NoGit && !gitx.IsRepo(dir) {

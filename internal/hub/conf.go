@@ -1,15 +1,14 @@
 package hub
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
-	"io"
 	"math"
 	"regexp"
 	"strings"
+	"unicode"
 
-	"go.yaml.in/yaml/v3"
+	"github.com/Emmanuel93/coyote/internal/yamlx"
 )
 
 // Conf es coyote/hub.yaml v1: lo que es de la organización y no de un
@@ -55,9 +54,7 @@ const MaxBudgetUSD = 1_000_000
 // escrito dejaría a la organización sin admins sin que nadie lo notara.
 func Parse(data []byte) (*Conf, error) {
 	var c Conf
-	dec := yaml.NewDecoder(bytes.NewReader(data))
-	dec.KnownFields(true)
-	if err := dec.Decode(&c); err != nil && !errors.Is(err, io.EOF) {
+	if err := yamlx.Strict(data, &c); err != nil {
 		return nil, err
 	}
 	if err := c.normalize(); err != nil {
@@ -66,23 +63,50 @@ func Parse(data []byte) (*Conf, error) {
 	return &c, nil
 }
 
+// Topes de hub.yaml: más que cualquier organización real.
+const (
+	maxAdmins   = 100
+	maxProjects = 500
+	maxErrors   = 20
+)
+
+// quote cita un valor en un mensaje, recortado.
+func quote(s string) string {
+	if r := []rune(s); len(r) > 60 {
+		s = string(r[:60]) + "…"
+	}
+	return fmt.Sprintf("%q", s)
+}
+
+func hasControl(s string) bool {
+	for _, r := range s {
+		if unicode.IsControl(r) {
+			return true
+		}
+	}
+	return false
+}
+
 // NormalizeHandle devuelve @persona en minúsculas, con o sin la arroba.
 func NormalizeHandle(s string) (string, error) {
 	h := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(s), "@"))
 	if !handleRe.MatchString(h) {
-		return "", fmt.Errorf("persona inválida %q: usa @usuario como en el ledger", s)
+		return "", fmt.Errorf("persona inválida %s: usa @usuario como en el ledger", quote(s))
 	}
 	return "@" + h, nil
 }
 
 func (c *Conf) normalize() error {
 	var errs []string
+	if len(c.Admins) > maxAdmins || len(c.Projects) > maxProjects {
+		return fmt.Errorf("hub.yaml admite hasta %d admins y %d proyectos", maxAdmins, maxProjects)
+	}
 	if c.Version != 1 {
 		errs = append(errs, fmt.Sprintf("version %d no soportada; usa version: 1", c.Version))
 	}
 	c.Org = strings.TrimSpace(c.Org)
 	if !orgRe.MatchString(c.Org) {
-		errs = append(errs, fmt.Sprintf("org inválido %q: letras, números, punto, guion o guion bajo", c.Org))
+		errs = append(errs, fmt.Sprintf("org inválido %s: letras, números, punto, guion o guion bajo", quote(c.Org)))
 	}
 	seen := map[string]bool{}
 	admins := c.Admins[:0]
@@ -107,15 +131,18 @@ func (c *Conf) normalize() error {
 		c.Projects[i] = p
 		switch {
 		case !projNameRe.MatchString(p.Name):
-			errs = append(errs, fmt.Sprintf("projects: nombre inválido %q", p.Name))
+			errs = append(errs, fmt.Sprintf("projects: nombre inválido %s", quote(p.Name)))
 		case names[strings.ToLower(p.Name)]:
 			errs = append(errs, fmt.Sprintf("projects: %s repetido", p.Name))
 		case p.Repo != "" && !repoRe.MatchString(p.Repo):
-			errs = append(errs, fmt.Sprintf("projects: repo inválido %q; usa owner/nombre", p.Repo))
-		case strings.ContainsAny(p.Path, "\x00\n") || strings.Contains(p.Path, "://"):
+			errs = append(errs, fmt.Sprintf("projects: repo inválido %s; usa owner/nombre", quote(p.Repo)))
+		case hasControl(p.Path) || strings.Contains(p.Path, "://"):
 			errs = append(errs, fmt.Sprintf("projects: %s tiene una ruta inválida; va la ruta del clon local", p.Name))
 		}
 		names[strings.ToLower(p.Name)] = true
+	}
+	if len(errs) > maxErrors {
+		errs = append(errs[:maxErrors], fmt.Sprintf("y %d errores más", len(errs)-maxErrors))
 	}
 	if len(errs) > 0 {
 		return errors.New(strings.Join(errs, "; "))

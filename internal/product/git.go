@@ -58,10 +58,24 @@ func absDir(dir string) string {
 
 // gitEnv es el entorno de git: sin candados opcionales, sin preguntas, sin
 // traer objetos que falten y sin paginador.
+// Las variables GIT_* heredadas se descartan, salvo las que eligen de dónde
+// sale la configuración: GIT_DIR o GIT_WORK_TREE (que git exporta en sus
+// hooks y en los worktrees) harían leer otro repo, y GIT_CONFIG_PARAMETERS o
+// GIT_CONFIG_COUNT meterían configuración.
 func gitEnv() []string {
-	return append(os.Environ(), "GIT_OPTIONAL_LOCKS=0", "GIT_TERMINAL_PROMPT=0", "GIT_NO_REPLACE_OBJECTS=1",
+	env := make([]string, 0, len(os.Environ())+8)
+	for _, kv := range os.Environ() {
+		k, _, _ := strings.Cut(kv, "=")
+		if strings.HasPrefix(k, "GIT_") && !keepGitEnv[k] {
+			continue
+		}
+		env = append(env, kv)
+	}
+	return append(env, "GIT_OPTIONAL_LOCKS=0", "GIT_TERMINAL_PROMPT=0", "GIT_NO_REPLACE_OBJECTS=1",
 		"GIT_NO_LAZY_FETCH=1", "GIT_PAGER=cat", "GIT_ASKPASS=/bin/false", "SSH_ASKPASS=/bin/false")
 }
+
+var keepGitEnv = map[string]bool{"GIT_CONFIG_NOSYSTEM": true, "GIT_CONFIG_GLOBAL": true, "GIT_CONFIG_SYSTEM": true}
 
 // filterOverrides anula los filtros que declara la configuración (del repo y
 // de la persona) para que comparar el árbol de trabajo no los ejecute.

@@ -42,11 +42,16 @@ extends: hub
 ```
 
 - `path` es el clon del hub, relativo al proyecto o con `~`. Una URL no vale: se clona el hub y se pone la ruta del clon.
-- `ref` es una rama, etiqueta o commit; `main` si falta. Fijar un commit o una etiqueta hace que un cambio del hub llegue a un proyecto solo cuando ese proyecto sube su `ref`, en su propio PR.
+- `ref` es una rama, una etiqueta, una rama remota (`origin/main`) o un commit completo; `main` si falta. Fijar un commit o una etiqueta hace que un cambio del hub llegue a un proyecto solo cuando ese proyecto sube su `ref`, en su propio PR.
+  - Una ref corta se busca como rama, etiqueta y rama remota. Si existe en más de uno es un error: git preferiría la etiqueta, y quien pueda empujar una etiqueta llamada `main` cambiaría lo que rige sin pasar por el PR del hub. Con la ref completa (`refs/heads/main`) no hay duda.
+  - Un commit va con sus 40 caracteres. `HEAD` y sus parientes no valen: dependen de lo que el clon tenga abierto.
+  - `doctor`, `status` y el lint dicen qué rige: `acme (rama main@abc1234)`, `acme (etiqueta v3@…)` o `acme (commit abc1234)`.
 
 ## Cómo se lee
 
 - Con git de plomería: `rev-parse` de la ref, `ls-tree` y `cat-file` del commit. Sin hooks, filtros, fsmonitor ni transportes, y sin tocar el árbol de trabajo del clon.
+- Las variables `GIT_*` del entorno se descartan, salvo las que eligen de dónde sale la configuración: `GIT_DIR` o `GIT_WORK_TREE`, que git exporta dentro de sus hooks y en los worktrees, harían leer otro repo.
+- `hub.yaml` es un solo documento YAML, sin anclas ni alias, con hasta 100 admins y 500 proyectos.
 - La carpeta del clon tiene que ser la raíz de su propio repo. Una carpeta dentro de otro repo leería los commits de ese otro.
 - Un symlink, una carpeta o un archivo de más de 1 MiB dentro del hub no se leen.
 - Un `extends` relativo dentro del hub se resuelve en el mismo commit y no puede salir del repo del hub; uno absoluto es un error.
