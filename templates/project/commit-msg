@@ -1,5 +1,6 @@
 #!/bin/sh
-# coyote: commit-msg (R15). Instalado por coyote; quita del mensaje las atribuciones a herramientas de IA.
+# coyote: commit-msg (R15, R18). Instalado por coyote; quita del mensaje las atribuciones a herramientas de IA
+# y detiene un commit que lleva secretos.
 # Usa coyote si lo encuentra: patrones completos, y detiene el commit si una frase lo atribuye a una
 # herramienta o si el autor es una herramienta. Si no, aplica este filtro básico con las mismas reglas.
 msg="$1"
@@ -9,6 +10,10 @@ for c in "${HOME:-/nonexistent}/go/bin/coyote" /opt/homebrew/bin/coyote /usr/loc
   [ -x "$c" ] && bin="$c"
 done
 if [ -n "$bin" ]; then
+  # R18: un commit con secretos se detiene (ADR-0016). Un coyote anterior a
+  # v0.6 no conoce el comando y sale con 2: ese caso no detiene el commit.
+  "$bin" secrets scan --staged --hook
+  [ $? -eq 1 ] && exit 1
   exec "$bin" attribution scrub --in-place --commit-msg "$msg"
 fi
 

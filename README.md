@@ -9,7 +9,7 @@ Estado: **v0.5.0** (aprobada en el gate G5, en la rama `v0.5`): pipeline de impa
 - **Contexto que no se pierde.** Cada repo lleva `README.coyote.md` (qué es y cómo se corre) y `CONTEXT.coyote.md` (invariantes, decisiones, trampas) en un formato compacto con tope de tokens. De ahí se genera `AGENTS.md`, que leen Claude Code, Cursor y los demás IDEs.
 - **Todo queda registrado.** El ledger (`coyote/ledger/`) guarda una línea por evento: quién, qué, tokens de entrada, caché y salida, y costo. Un archivo por día y persona, así git nunca choca.
 - **Un estándar por capas.** El default de la herramienta, el de tu organización y el de cada proyecto se combinan con `extends`. Relajar una regla exige motivo y puede vencer.
-- **Nada con efectos sin tu aprobación.** Un gate en el hook de Claude Code y de Cursor deja leer libremente y detiene todo lo demás hasta que apruebas esa acción exacta. Un agente no puede aprobarse, tocar el gate ni leer tus credenciales.
+- **Nada con efectos sin tu aprobación.** Un gate en el hook de cada IDE deja leer libremente y detiene todo lo demás hasta que apruebas esa acción exacta. Un agente no puede aprobarse, tocar el gate, leer tus credenciales ni los secretos del proyecto (`.env`, tfstate, llaves).
 - **Un cambio se ve contra todo el producto.** El mapa de interfaces de todos los repos dice a quién afecta un cambio. En cada PR, el pipeline pide la revisión de un dueño cuando el riesgo lo amerita.
 - **Autoría humana.** Los commits llevan tu identidad de git. Las firmas y trailers que agregan los asistentes se quitan en cinco capas: configuración del IDE, gate del IDE, `coyote commit`, hook `commit-msg` y lint en la CI.
 
@@ -96,6 +96,7 @@ Cada corrida tiene topes de turnos y de dólares. El router baja de modelo al 80
 | `gate check`, `gate pr` | el gate de los hooks del IDE; el de los PR con la revisión de un dueño |
 | `approvals`, `review`, `approve`, `reject`, `revoke`, `propose` | la cola y las decisiones humanas sobre acciones exactas |
 | `get context`, `ask`, `index` | contexto acotado con referencias, sin llamar a ningún modelo |
+| `secrets list\|scan` | archivos de secretos con los nombres de sus variables, sin valores; secretos escritos en un repo, un commit o un PR |
 | `repo add\|list\|fetch` | repos del proyecto; de otros repos se traen solo sus documentos |
 | `map`, `impact`, `extract`, `ci impact` | mapa de interfaces del producto, impacto de un cambio y documentos propuestos |
 | `run --agent A "tarea"`, `router` | un paso de un agente con Claude Code, con topes, gate y costo |
@@ -131,7 +132,7 @@ coyote/
 
 ## Documentación
 
-- Especificaciones: [CCF](docs/specs/ccf-v1.md), [CCF-doc](docs/specs/ccf-doc-v1.md), [estándar](docs/specs/standards-v1.md), [atribución](docs/specs/attribution-v1.md), [contexto](docs/specs/context-v1.md), [remoto](docs/specs/remote-v1.md), [gate](docs/specs/gate-v1.md), [instalación](docs/specs/install-v1.md), [producto](docs/specs/product-v1.md), [corridas](docs/specs/run-v1.md), [workstreams](docs/specs/workstream-v1.md), [pipeline](docs/specs/ci-v1.md).
+- Especificaciones: [CCF](docs/specs/ccf-v1.md), [CCF-doc](docs/specs/ccf-doc-v1.md), [estándar](docs/specs/standards-v1.md), [atribución](docs/specs/attribution-v1.md), [contexto](docs/specs/context-v1.md), [remoto](docs/specs/remote-v1.md), [gate](docs/specs/gate-v1.md), [secretos](docs/specs/secrets-v1.md), [instalación](docs/specs/install-v1.md), [producto](docs/specs/product-v1.md), [corridas](docs/specs/run-v1.md), [workstreams](docs/specs/workstream-v1.md), [pipeline](docs/specs/ci-v1.md).
 - Estándar default: [standards/default/STANDARD.md](standards/default/STANDARD.md). Agentes y skills: [agents/](agents/), [skills/](skills/).
 - Decisiones: [coyote/decisions/](coyote/decisions/). Plan y releases: [docs/plan/](docs/plan/EXECUTION_PLAN.md), [docs/releases/](docs/releases/).
 - Ejemplo completo: [examples/acme-shop](examples/acme-shop/) (proyecto sintético).

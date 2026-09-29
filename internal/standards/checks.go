@@ -17,6 +17,7 @@ import (
 	"github.com/Emmanuel93/coyote/internal/ccfdoc"
 	"github.com/Emmanuel93/coyote/internal/gitx"
 	"github.com/Emmanuel93/coyote/internal/glob"
+	"github.com/Emmanuel93/coyote/internal/secrets"
 	"github.com/Emmanuel93/coyote/internal/tokens"
 )
 
@@ -88,6 +89,9 @@ type Context struct {
 	// rules.yaml (del proyecto o del hub), así que solo corren cuando la persona
 	// lo pide con coyote standards lint --scripts, nunca desde status o doctor.
 	AllowScripts bool
+	// Secrets son los archivos de secretos propios del proyecto y sus
+	// dispensas (coyote/project.yaml), para el check secrets (R18).
+	Secrets secrets.Rules
 }
 
 // NewContext arma el contexto de lint para el proyecto en root.
@@ -126,6 +130,7 @@ func init() {
 	Register("ccfdoc_valid", checkCCFDoc)
 	Register("attribution", checkAttribution)
 	Register("script", checkScript)
+	Register("secrets", checkSecrets)
 }
 
 // Lint aplica todas las reglas activas con check al proyecto.
@@ -570,6 +575,30 @@ func shallowFinding(root string) (Finding, bool) {
 		return Finding{}, false
 	}
 	return Finding{Path: "historial", Msg: "clon superficial: el historial está incompleto (en CI usa fetch-depth: 0)"}, true
+}
+
+// checkSecrets revisa que ningún archivo del proyecto (los versionados y los
+// nuevos que git no ignora) sea un archivo de secretos ni lleve un secreto
+// escrito (R18, ADR-0016). Un hallazgo nunca muestra el valor.
+func checkSecrets(ctx *Context, c Check) []Finding {
+	var out []Finding
+	for _, f := range ctx.Files {
+		if glob.Any(c.Except, f) || ctx.Secrets.Allowed(f) {
+			continue
+		}
+		if kind, ok := ctx.Secrets.Kind(f); ok {
+			out = append(out, Finding{Path: f, Msg: "archivo de secretos en el repo (" + kind + "): sácalo de git y agrégalo a .gitignore"})
+			continue
+		}
+		text, ok := ctx.readText(f)
+		if !ok {
+			continue
+		}
+		for _, fd := range secrets.Scan(f, text) {
+			out = append(out, Finding{Path: f, Line: fd.Line, Msg: fd.Kind + " (" + fd.Hint + "): muévelo a una variable de entorno o al gestor de secretos y rótalo"})
+		}
+	}
+	return out
 }
 
 func checkScript(ctx *Context, c Check) []Finding {

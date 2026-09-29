@@ -20,6 +20,7 @@ La regla A1 dice que ningún agente ejecuta acciones con efectos sin aprobación
      - en `.vscode/settings.json`, las opciones que apagan los hooks de VS Code o aprueban herramientas solas (`chat.useHooks`, `chat.hookFilesLocations`, `chat.tools.*autoApprove`);
    - el canario de `coyote doctor` (`coyote doctor canary <código>`): se niega a propósito para medir el nivel del IDE (ADR-0015);
    - que lea o escriba credenciales: `~/.ssh`, `~/.aws`, `~/.config/gh`, `~/.netrc`, la clave local de coyote y parecidas; también recorrer una carpeta que las contiene (`grep -r ~`) o leer `.git/config` del proyecto, que puede llevar un token en la URL de un remoto;
+   - que lea o escriba un archivo de secretos del proyecto (`.env`, tfstate, llaves, keystores, kubeconfig, cuentas de servicio), que escriba un secreto literal o que corra un comando que imprime o crea credenciales (`gcloud auth print-access-token`, `kubectl get secret`, `terraform output`, `env` a secas…); el detalle está en docs/specs/secrets-v1.md (ADR-0016);
    - que un subagente declare en un comando un agente distinto del que reporta el IDE.
 3. **Lectura libre.** Las herramientas que solo leen (Read, Grep, Glob, WebFetch, Task, TodoWrite y las MCP cuyo nombre empieza con get, list, search, read, fetch, view, show o describe) y una lista cerrada de comandos de solo lectura pasan sin registro.
 4. **Todo lo demás necesita una aprobación de la acción exacta.**
@@ -35,7 +36,7 @@ Un comando pasa sin aprobación solo si cada segmento (separados por `;`, `&&`, 
 | `sort`, `uniq`, `tree`, `xxd`, `file`, `date`, `rg` | sin las banderas que escriben archivos o corren programas (`-o`, `--pre`, `-C`…) |
 | `git` | subcomandos de lectura (`status`, `log`, `diff`, `show`, `blame`, `grep`, `rev-parse`, `ls-files`…); `branch`, `tag`, `stash` y `reflog` solo para listar; `remote` solo los nombres (las URLs pueden llevar tokens); `config` solo `--get` de claves sin secretos (`user.name`, `user.email`, `init.defaultBranch`…), nunca `--list` ni `--get-regexp`; sin `-c`, `--git-dir`, `--output`, `--ext-diff` ni `--textconv` |
 | `go` | `version` y `env` con variables nombradas sin secretos (`GOPATH`, `GOOS`…); `vet`, `build` y `test` necesitan aprobación porque compilan (cgo corre el compilador de C) |
-| `coyote` | `status`, `log`, `get`, `ask` sin `--record`, `standards`, `attribution check`, `doctor` sin el canario, `approvals`, `review`, `index`, `propose`, `install --check`, `ws status` y `ws check` |
+| `coyote` | `status`, `log`, `get`, `ask` sin `--record`, `standards`, `attribution check`, `doctor` sin el canario, `approvals`, `review`, `index`, `propose`, `install --check`, `ws status`, `ws check`, `secrets list` y `secrets scan` |
 
 Se rechaza cualquier construcción que el análisis no pueda garantizar: sustituciones (`$(...)`, comillas invertidas), variables, asignaciones de entorno, redirecciones a archivos (solo se admiten `/dev/null` y `2>&1`), subshells, segundo plano, heredocs, comentarios, rutas explícitas al programa y comodines sin comillas en programas cuyas banderas importan. Correr pruebas o compilar necesita aprobación: ejecuta código que el agente pudo escribir.
 
@@ -118,7 +119,6 @@ El gate falla cerrado: una entrada ilegible, un error o un pánico bloquean las 
 - Las herramientas MCP de lectura se reconocen por su nombre; un servidor MCP mal nombrado queda del lado de la lectura.
 - WebFetch y WebSearch se tratan como lectura. La salida de datos del proyecto por red la controlan los permisos de dominio del IDE.
 - Solo Claude Code reporta el subagente: en los demás IDEs un comando puede declarar otro `--agent`, y la persona lo ve al aprobarlo.
-- Un archivo de secretos del proyecto (`.env`) se lee libremente; protégelo con los permisos de lectura del IDE.
 - IDEs sin hook previo o con hooks apagados (Zed, el plugin de Junie, un IDE de nivel 3 medido) no están cubiertos en la máquina: lo que llegue a un PR lo revisa `coyote gate pr` (docs/specs/ci-v1.md), y R17 los limita.
 - Si un IDE lee dos hooks de coyote (VS Code con el de Copilot y, con `chat.useClaudeHooks`, el de Claude Code), el gate corre dos veces por acción y una aprobación de un solo uso se gasta en la primera: instala uno solo por IDE.
 - `supervised` y `autonomous` cambian cuándo se detiene el motor de workstreams (ADR-0014), no lo que el gate deja pasar: en los tres modos el gate aplica `manual`.

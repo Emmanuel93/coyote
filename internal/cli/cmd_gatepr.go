@@ -9,6 +9,7 @@ import (
 	"github.com/Emmanuel93/coyote/internal/ci"
 	"github.com/Emmanuel93/coyote/internal/github"
 	"github.com/Emmanuel93/coyote/internal/product"
+	"github.com/Emmanuel93/coyote/internal/secrets"
 )
 
 // coyote gate pr es la aprobación en equipo sin claves compartidas (D6,
@@ -56,6 +57,12 @@ func gatePR(a *app, args []string) error {
 		return fail(1, "%v", err)
 	}
 	in := ci.GateInput{Author: p.pr.Author, HeadSHA: p.pr.HeadSHA, Changed: changed, Files: ci.PathRisks(changed, rules)}
+	// R18: lo que el PR agrega se revisa como dato, sin ejecutar nada.
+	added, right, err := product.AddedText(dir, p.pr.BaseSHA+"..."+p.pr.HeadSHA)
+	if err != nil {
+		return fail(1, "%v", err)
+	}
+	in.Secrets = scanAdded(added, secrets.Rules{}, func(f string) (string, bool) { return product.FileAt(dir, right, f) })
 	in.Impact, in.ImpactWhy = impactRisk(p.im, p.self)
 	seen := map[string]bool{}
 	for _, h := range p.im.Touched {
@@ -84,6 +91,9 @@ func gatePR(a *app, args []string) error {
 	res.Notes = append(notes, res.Notes...)
 	report := gateReport(res, in, p, *policy)
 	a.publishReport(report, *summary, *comment, p.pr)
+	if *policy == "fail" && len(in.Secrets) > 0 {
+		return fail(1, "coyote: el PR agrega secretos (R18); sácalos y rótalos")
+	}
 	if *policy == "fail" && !res.OK {
 		return fail(1, "coyote: %s pide la aprobación de un dueño antes del merge (R17)", res.Risk)
 	}
@@ -155,6 +165,8 @@ func gateReport(res ci.GateResult, in ci.GateInput, p *prRun, policy string) str
 	var b strings.Builder
 	b.WriteString(ci.Marker + "\n")
 	switch {
+	case len(in.Secrets) > 0:
+		fmt.Fprintf(&b, "### coyote: %s, el cambio agrega secretos\n\n", res.Risk)
 	case !res.Required:
 		fmt.Fprintf(&b, "### coyote: %s, sin revisión extra\n\n", res.Risk)
 	case res.OK:
@@ -177,6 +189,22 @@ func gateReport(res ci.GateResult, in ci.GateInput, p *prRun, policy string) str
 				break
 			}
 			fmt.Fprintf(&b, "| `%s` | %s | %s |\n", codeCell(f.Path), f.Risk, mdCell(f.Why))
+		}
+		b.WriteString("\n")
+	}
+	if len(in.Secrets) > 0 {
+		b.WriteString("**Secretos (R18).** El cambio agrega secretos; nunca se muestra el valor. Sácalos del PR y rótalos: ya están en GitHub.\n\n")
+		b.WriteString("| Archivo | Línea | Qué |\n|---|---|---|\n")
+		for i, f := range in.Secrets {
+			if i == ciMaxRows {
+				fmt.Fprintf(&b, "| … | | %d más |\n", len(in.Secrets)-ciMaxRows)
+				break
+			}
+			line := "-"
+			if f.Line > 0 {
+				line = fmt.Sprint(f.Line)
+			}
+			fmt.Fprintf(&b, "| `%s` | %s | %s |\n", codeCell(f.Path), line, mdCell(f.Kind))
 		}
 		b.WriteString("\n")
 	}

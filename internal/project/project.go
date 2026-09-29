@@ -25,6 +25,7 @@ import (
 	"github.com/Emmanuel93/coyote/internal/gitx"
 	"github.com/Emmanuel93/coyote/internal/identity"
 	"github.com/Emmanuel93/coyote/internal/ledger"
+	"github.com/Emmanuel93/coyote/internal/secrets"
 	"github.com/Emmanuel93/coyote/internal/standards"
 )
 
@@ -78,6 +79,9 @@ type Config struct {
 		R2 []string `yaml:"R2,omitempty"`
 		R3 []string `yaml:"R3,omitempty"`
 	} `yaml:"risk,omitempty"`
+	// Secrets suma archivos de secretos propios del proyecto y dispensa falsos
+	// positivos, con motivo (ADR-0016).
+	Secrets secrets.Rules `yaml:"secrets,omitempty"`
 }
 
 // KnownFeatures son las banderas que coyote entiende y de qué dependen.
@@ -174,6 +178,19 @@ func (c *Config) Validate() error {
 	for _, r := range c.RiskRules() {
 		if !riskRuleRe.MatchString(r) || strings.Contains(r, "..") {
 			errs = append(errs, fmt.Sprintf("risk: patrón inválido %q (letras, números y . _ / * ? { } , @ + -)", r[3:]))
+		}
+	}
+	for _, f := range c.Secrets.Files {
+		if strings.TrimSpace(f) == "" || strings.Contains(f, "..") || strings.HasPrefix(f, "/") {
+			errs = append(errs, fmt.Sprintf("secrets.files: patrón inválido %q (relativo al proyecto, sin ..)", f))
+		}
+	}
+	for _, a := range c.Secrets.Allow {
+		switch {
+		case strings.TrimSpace(a.Path) == "" || strings.Contains(a.Path, "..") || strings.HasPrefix(a.Path, "/"):
+			errs = append(errs, fmt.Sprintf("secrets.allow: ruta inválida %q (relativa al proyecto, sin ..)", a.Path))
+		case !standards.Meaningful(a.Reason):
+			errs = append(errs, fmt.Sprintf("secrets.allow: %q necesita un motivo real (reason)", a.Path))
 		}
 	}
 	if len(errs) > 0 {

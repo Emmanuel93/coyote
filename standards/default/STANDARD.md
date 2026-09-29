@@ -24,7 +24,8 @@ El default se derivó de repos reales construidos desde el dominio: conserva lo 
 - R11 (SHOULD). OpenAPI y AsyncAPI son la fuente de tipos entre servicios y clientes.
 - R15 (MUST). Commits, PRs, comentarios, documentos y releases no llevan atribución a herramientas o modelos de IA: ni trailers de coautoría de asistentes, ni pies promocionales, ni enlaces de sesión. La trazabilidad de qué agente hizo qué vive en el ledger. Los patrones están en `attribution.yaml`.
 - R16 (SHOULD). Todo feature parte del modelo de dominio y de sus contratos antes del código.
-- R17 (MUST). Un IDE sin hooks que bloqueen (nivel 2 o 3) no ejecuta tareas de riesgo R2 o R3 fuera de ramas `coyote/` protegidas por `coyote gate pr`.
+- R17 (MUST). Un IDE sin hooks que bloqueen (nivel 2 o 3) no ejecuta tareas de riesgo R2 o R3 fuera de ramas `coyote/` protegidas por `coyote gate pr`. El nivel de cada IDE se mide con `coyote doctor --ide <ide> --canary`.
+- R18 (MUST). Ningún archivo del repo es un archivo de secretos (`.env`, tfstate, llaves, keystores, kubeconfig, cuentas de servicio) ni lleva un secreto escrito (llaves privadas, tokens de nube o de GitHub, URLs con contraseña). Un secreto que llegó a git se rota. Los falsos positivos se dispensan con motivo en `project.yaml` (`secrets.allow`) o con `coyote:allow-secret` en la línea.
 
 ## 3. Organización
 

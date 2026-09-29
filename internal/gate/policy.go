@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/Emmanuel93/coyote/internal/secrets"
 )
 
 // Kind clasifica una herramienta.
@@ -108,6 +110,8 @@ type Paths struct {
 	Sensitive []string // carpetas y archivos con credenciales (absolutos)
 	Protected []string // rutas del proyecto que ningún agente escribe (relativas)
 	Global    []string // configuración fuera del proyecto que desarma el gate (absolutas)
+	// Secrets son las reglas de archivos de secretos del proyecto (ADR-0016).
+	Secrets secrets.Rules
 }
 
 // NewPaths arma las listas para root. stateDir es donde coyote guarda sus claves.
@@ -400,6 +404,16 @@ func (ps Paths) hardShell(a Action) *Hard {
 			}
 		}
 	}
+	if what, ok := credCommand(cmd); ok {
+		return hard("el comando imprime o crea %s; las credenciales las maneja la persona", what)
+	}
+	cwd := a.Cwd
+	if cwd == "" {
+		cwd = ps.Root
+	}
+	if what, ok := ps.secretWord(cmd, cwd); ok {
+		return hard("el comando toca %s: un agente no lee ni escribe archivos de secretos; pide los nombres con coyote secrets list", what)
+	}
 	if a.AgentType != "" {
 		for _, m := range agentFlag.FindAllStringSubmatch(cmd, -1) {
 			if !sameAgent(m[1], a.AgentType) {
@@ -437,10 +451,19 @@ func (ps Paths) readShell(a Action) (ok bool, why string, cred bool) {
 	if cwd == "" {
 		cwd = ps.Root
 	}
+	var contentDirs []string
 	for _, s := range segs {
 		recursive := s.prog == "rg" || s.prog == "find" || s.prog == "tree" || s.prog == "du"
 		if s.prog == "grep" || s.prog == "egrep" || s.prog == "fgrep" || s.prog == "ls" || s.prog == "diff" {
 			_, recursive = hasFlag(s.args, "-r", "-R", "--recursive", "--dereference-recursive")
+		}
+		// Lee contenidos sin respetar .gitignore: grep -r y diff -r siempre; rg
+		// solo con --hidden, --no-ignore o -u.
+		readsAll := recursive && (s.prog == "grep" || s.prog == "egrep" || s.prog == "fgrep" || s.prog == "diff")
+		if s.prog == "rg" {
+			if _, ok := hasFlag(s.args, "--hidden", "--no-ignore", "-u", "-uu", "-uuu", "-.", "--no-ignore-vcs"); ok {
+				readsAll = true
+			}
 		}
 		if recursive {
 			// sin rutas, recorre la carpeta actual
@@ -462,13 +485,57 @@ func (ps Paths) readShell(a Action) (ok bool, why string, cred bool) {
 			cwd = abs
 			continue
 		}
+		names := nameOnly[s.prog] // ls, find, stat…: ven nombres, no contenidos
+		patternFirst := s.prog == "grep" || s.prog == "egrep" || s.prog == "fgrep" || s.prog == "rg"
+		if _, ok := hasFlag(s.args, "-e", "--regexp", "-f", "--file"); ok {
+			patternFirst = false // el patrón va en una opción: los posicionales son archivos
+		}
+		var targets []string
 		for _, w := range s.args {
 			if why, bad := ps.readArg(w, cwd, recursive); bad {
 				return false, why, true
 			}
+			if strings.HasPrefix(w.s, "-") {
+				continue
+			}
+			if patternFirst {
+				patternFirst = false // el patrón de la búsqueda es dato
+				continue
+			}
+			if !names {
+				if why, bad := ps.secretArg(w, cwd); bad {
+					return false, why, true
+				}
+			}
+			targets = append(targets, w.s)
+		}
+		if readsAll {
+			if len(targets) == 0 {
+				targets = []string{"."}
+			}
+			for _, t := range targets {
+				contentDirs = append(contentDirs, resolve(t, cwd, ps.Home))
+			}
+		}
+	}
+	for _, d := range contentDirs {
+		if what, ok := ps.dirSecret(d); ok {
+			return false, "busca en todos los archivos de una carpeta con archivos de secretos (" + what + "); usa rg o git grep, que respetan .gitignore", false
 		}
 	}
 	return true, "", false
+}
+
+// secretArg revisa un argumento de un comando de lectura: un archivo de
+// secretos, o un comodín que los alcanza.
+func (ps Paths) secretArg(w word, cwd string) (string, bool) {
+	if w.glob {
+		return ps.secretGlobWord(w.s, cwd)
+	}
+	if kind, rel, ok := ps.secretFile(resolve(w.s, cwd, ps.Home)); ok {
+		return "lee un archivo de secretos: " + kind + " (" + rel + "); pide los nombres con coyote secrets list", true
+	}
+	return "", false
 }
 
 func (ps Paths) readArg(w word, cwd string, recursive bool) (string, bool) {
@@ -510,8 +577,34 @@ var searchTools = map[string]bool{"grep": true, "glob": true, "ls": true, "codeb
 	"grep_search": true, "file_search": true, "search_file_content": true, "list_dir": true,
 	"list_directory": true, "semanticsearch": true, "rg": true, "semantic_search": true, "read_many_files": true}
 
+// patternFields son textos de búsqueda o de instrucciones, no rutas.
+var patternFields = map[string]bool{"pattern": true, "query": true, "regex": true, "prompt": true, "description": true,
+	"instruction": true, "url": true}
+
 // readTool revisa las rutas de una herramienta de lectura.
 func (ps Paths) readTool(a Action) *Hard {
+	if s, ok := secretGlob(a); ok {
+		return hard("la búsqueda alcanza archivos de secretos (%s); pide los nombres con coyote secrets list", s)
+	}
+	base := a.Cwd
+	if base == "" {
+		base = ps.Root
+	}
+	for k, v := range a.Input {
+		if patternFields[k] {
+			continue
+		}
+		var paths []string
+		allStrings(v, &paths)
+		for _, t := range paths {
+			if t == "" || strings.ContainsAny(t, "\n*?[") {
+				continue
+			}
+			if kind, rel, ok := ps.secretFile(resolve(t, base, ps.Home)); ok && looksLikePath(t) {
+				return hard("lee un archivo de secretos: %s (%s); pide los nombres con coyote secrets list", kind, rel)
+			}
+		}
+	}
 	var texts []string
 	allStrings(a.Input, &texts)
 	cwd := a.Cwd
@@ -561,6 +654,13 @@ func (ps Paths) hardFile(a Action) *Hard {
 	if cwd == "" {
 		cwd = ps.Root
 	}
+	if f, ok := secretContent(a); ok {
+		line := ""
+		if f.Line > 0 {
+			line = fmt.Sprintf(", línea %d", f.Line)
+		}
+		return hard("el cambio escribe un secreto literal (%s%s); usa una variable de entorno o el gestor de secretos, o, si es un dato de prueba, marca la línea con %s", f.Kind, line, secrets.AllowMarker)
+	}
 	targets := targetPaths(a)
 	if len(targets) == 0 {
 		// Formato desconocido: se revisa todo texto que parezca una ruta.
@@ -577,6 +677,9 @@ func (ps Paths) hardFile(a Action) *Hard {
 		if what, ok := ps.protected(abs); ok {
 			return hard("escribir en %s desarmaría el gate o tocaría credenciales", what)
 		}
+		if kind, rel, ok := ps.secretFile(abs); ok {
+			return hard("escribe un archivo de secretos: %s (%s); los valores los pone la persona", kind, rel)
+		}
 		// La configuración de VS Code se edita, pero no para apagar sus hooks
 		// ni para aprobar herramientas solas.
 		if filepath.Base(abs) == "settings.json" && filepath.Base(filepath.Dir(abs)) == ".vscode" {
@@ -590,6 +693,62 @@ func (ps Paths) hardFile(a Action) *Hard {
 		}
 	}
 	return nil
+}
+
+// secretContent busca secretos literales en lo que una herramienta escribiría:
+// el contenido nuevo, nunca el que reemplaza.
+func secretContent(a Action) (secrets.Finding, bool) {
+	for _, text := range newContent(a) {
+		if f := secrets.Scan("", text); len(f) > 0 {
+			return f[0], true
+		}
+	}
+	return secrets.Finding{}, false
+}
+
+// newContent junta los textos nuevos de una escritura: sin los campos old*
+// (lo que se reemplaza) y, de un parche, solo las líneas que agrega.
+func newContent(a Action) []string {
+	var out []string
+	patch := strings.EqualFold(a.Tool, "apply_patch")
+	var walk func(k string, v any)
+	walk = func(k string, v any) {
+		lk := strings.ToLower(k)
+		if strings.HasPrefix(lk, "old") {
+			return
+		}
+		switch t := v.(type) {
+		case string:
+			if lk == "patch" || lk == "diff" || (patch && (lk == "input" || lk == "command")) {
+				var added []string
+				for _, l := range strings.Split(t, "\n") {
+					if strings.HasPrefix(l, "+") && !strings.HasPrefix(l, "+++") {
+						added = append(added, l[1:])
+					}
+				}
+				out = append(out, strings.Join(added, "\n"))
+				return
+			}
+			out = append(out, t)
+		case map[string]any:
+			for kk, vv := range t {
+				walk(kk, vv)
+			}
+		case []any:
+			for _, x := range t {
+				walk(k, x)
+			}
+		}
+	}
+	for k, v := range a.Input {
+		walk(k, v)
+	}
+	return out
+}
+
+// looksLikePath distingue una ruta de un texto cualquiera.
+func looksLikePath(s string) bool {
+	return !strings.ContainsAny(s, " \t\n") || strings.Contains(s, "/")
 }
 
 // vscodeGateKeys son las opciones de VS Code que apagan los hooks o aprueban
@@ -617,6 +776,12 @@ func (ps Paths) hardOther(a Action) *Hard {
 	for _, t := range texts {
 		if isCoyoteAdmin(t) {
 			return hard("un agente no aprueba ni instala el gate")
+		}
+		if what, ok := credCommand(t); ok {
+			return hard("la herramienta imprime o crea %s", what)
+		}
+		if what, ok := ps.secretWord(t, ps.Root); ok {
+			return hard("la herramienta toca %s", what)
 		}
 		for _, p := range shellProtected {
 			if p.re.MatchString(t) {

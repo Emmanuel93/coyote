@@ -167,7 +167,9 @@ func (a *app) newGateRun(act gate.Action) (*gateRun, error) {
 	if act.AgentType == "" {
 		agent = act.IDE
 	}
-	return &gateRun{a: a, act: act, root: root, cfg: cfg, paths: gate.NewPaths(root, gate.Home(), state),
+	paths := gate.NewPaths(root, gate.Home(), state)
+	paths.Secrets = cfg.Secrets
+	return &gateRun{a: a, act: act, root: root, cfg: cfg, paths: paths,
 		person: identity.Resolve(root), agent: agent}, nil
 }
 

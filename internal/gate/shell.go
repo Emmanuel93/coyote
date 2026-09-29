@@ -522,6 +522,11 @@ func coyoteCheck(args []word) error {
 		if first == "status" || first == "check" {
 			return nil
 		}
+	case "secrets":
+		// Solo nombres y ubicaciones, nunca valores (ADR-0016).
+		if first == "list" || first == "scan" {
+			return nil
+		}
 	}
 	return fmt.Errorf("coyote %s tiene efectos", strings.TrimSpace(sub+" "+first))
 }

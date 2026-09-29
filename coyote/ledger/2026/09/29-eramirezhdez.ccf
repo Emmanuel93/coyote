@@ -11,3 +11,6 @@
 2026-09-29T01:50Z|@eramirezhdez/coyote-devsecops|W-0006|coyote|note|install|inv: Codex, Gemini CLI y Windsurf dejan pasar la herramienta si el…|doc:CONTEXT.coyote.md|-|-|ok
 2026-09-29T01:50Z|@eramirezhdez/coyote-devsecops|W-0006|coyote|note|gate|dec: nivel de IDE medido con un canario que el gate siempre…|doc:CONTEXT.coyote.md|-|-|ok
 2026-09-29T01:51Z|@eramirezhdez/coyote-devsecops|W-0006|coyote|feat|gate|adaptadores de Codex, Gemini CLI, Copilot y Windsurf con nivel medido (ADR-0015)|-|-|-|ok
+2026-09-29T02:09Z|@eramirezhdez/coyote-devsecops|W-0006|coyote|note|secrets|inv: un agente no lee ni escribe archivos de secretos ni corre…|doc:CONTEXT.coyote.md|-|-|ok
+2026-09-29T02:09Z|@eramirezhdez/coyote-devsecops|W-0006|coyote|note|secrets|gap: el escáner solo reconoce formas conocidas; una contraseña de forma libre…|doc:CONTEXT.coyote.md|-|-|ok
+2026-09-29T02:09Z|@eramirezhdez/coyote-devsecops|W-0006|coyote|feat|secrets|secretos del proyecto y comandos de credenciales en el gate, escáner y…|-|-|-|ok

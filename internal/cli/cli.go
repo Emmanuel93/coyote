@@ -47,6 +47,7 @@ func init() {
 		{"standards", "lint | show | explain <id> | diff", "estándar por capas y su validación", cmdStandards},
 		{"attribution", "check [rutas] | scrub [archivo]", "detecta o quita atribución a herramientas de IA", cmdAttribution},
 		{"gate", "check [--ide IDE] < hook.json", "gate humano para los hooks previos de los IDEs (ADR-0009)", cmdGate},
+		{"secrets", "list | scan [--staged | --range base...head]", "archivos de secretos y sus nombres, sin valores; secretos escritos en el repo (ADR-0016)", cmdSecrets},
 		{"approvals", "[--all] [--json]", "cola de propuestas y aprobaciones vigentes", cmdApprovals},
 		{"review", "[id...]", "muestra el comando o el diff que se aprobaría", cmdReview},
 		{"approve", "<id>... | --all | --bash CMD [--uses N] [--for 1h]", "aprueba acciones exactas (solo una persona, en su terminal)", cmdApprove},
@@ -70,9 +71,9 @@ func init() {
 		{"auth", "login | status [--check] | logout", "token de GitHub en el llavero, nunca en archivos", cmdAuth},
 		{"web", "[--addr 127.0.0.1:7410]", "costos por proyecto y por persona en el navegador", cmdWeb},
 		{"generate", "agents [--check]", "genera AGENTS.md desde los documentos coyote", cmdGenerate},
-		{"install", "--ide claude-code|cursor|all [--check]", "instala el gate, los agentes y las skills en el IDE", cmdInstall},
+		{"install", "--ide IDE|all | --ci github [--check]", "instala el gate, los agentes y las skills en el IDE, o el pipeline del producto", cmdInstall},
 		{"hooks", "install [--force]", "instala el hook commit-msg", cmdHooks},
-		{"doctor", "[--ide IDE]", "verifica herramienta, identidad, documentos, estándar y gate", cmdDoctor},
+		{"doctor", "[--ide IDE [--canary]]", "verifica herramienta, identidad, documentos, estándar, gate y el nivel medido de cada IDE", cmdDoctor},
 		{"version", "", "muestra la versión", cmdVersion},
 		{"help", "[comando]", "muestra esta ayuda", cmdHelp},
 	}
@@ -259,6 +260,7 @@ func (a *app) lint(root string, cfg *project.Config, scripts bool) (*standards.S
 		return nil, nil, err
 	}
 	ctx.AllowScripts = scripts
+	ctx.Secrets = cfg.Secrets
 	return st, standards.Lint(ctx, st), nil
 }
 

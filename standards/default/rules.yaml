@@ -118,6 +118,14 @@ rules:
     level: MUST
     scope: workflow
 
+  - id: R18
+    title: Ningún archivo del repo es un archivo de secretos ni lleva un secreto escrito
+    level: MUST
+    scope: repo
+    why: Un secreto en git queda en la historia para siempre y lo lee cualquier agente o persona con acceso al repo.
+    check: { type: secrets }
+    fix: sácalo de git, agrégalo a .gitignore, muévelo a una variable de entorno o al gestor de secretos y rótalo
+
   - id: A1
     title: Un agente no ejecuta acciones con efectos sin aprobación humana por step, plan o concesión
     level: MUST

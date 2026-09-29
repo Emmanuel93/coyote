@@ -75,6 +75,7 @@ El perfil del proyecto es `standards.profile` de README.coyote.md o, si falta, s
 | attribution | `paths`, `except`, `commits` | un archivo, o el mensaje, autor o committer de un commit (merges incluidos), lleva atribución a IA (spec attribution-v1); o el clon es superficial |
 | agents_md_current | — | AGENTS.md falta, es ajeno o está desactualizado |
 | script | `script` | el comando sale con código distinto de 0 (tope de 60 s) |
+| secrets | `except` | un archivo es de secretos (`.env`, tfstate, llaves…) o lleva un secreto escrito (docs/specs/secrets-v1.md); usa las reglas `secrets` de `project.yaml` |
 
 Los globs admiten `**`, `*`, `?` y `{a,b}`, también anidadas; un patrón sin `/` también coincide con el nombre del archivo en cualquier carpeta, y uno que termina en `/` es un directorio (`respaldos/` es cualquier archivo bajo una carpeta `respaldos`). Los archivos son los que git conoce (versionados y nuevos no ignorados); fuera de git se recorre el directorio saltando dependencias y artefactos de build. Los archivos binarios o de más de 2 MB no se leen.
 

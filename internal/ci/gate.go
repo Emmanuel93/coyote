@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/Emmanuel93/coyote/internal/secrets"
 )
 
 // GateInput es lo que el gate de un PR necesita para decidir (R17, D6).
@@ -22,6 +24,9 @@ type GateInput struct {
 	Excluded []string
 	// Member dice si una persona es de un equipo @org/equipo.
 	Member func(team, user string) (bool, error)
+	// Secrets son los secretos que el cambio agrega (R18): el PR no pasa con
+	// ellos, aunque lo apruebe un dueño.
+	Secrets []secrets.Finding
 }
 
 // GateResult es la decisión: el riesgo, si pide revisión y si ya la tiene.
@@ -83,6 +88,10 @@ func DecideGate(in GateInput) GateResult {
 	if Rank(in.Impact) >= 2 {
 		res.Risk = Max(res.Risk, in.Impact)
 		res.Why = append(res.Why, in.Impact+" por impacto: "+in.ImpactWhy)
+	}
+	if n := len(in.Secrets); n > 0 {
+		res.Risk = R3
+		res.Why = append(res.Why, fmt.Sprintf("R3 por %s en el cambio (R18)", pluralWord(n, "secreto", "secretos")))
 	}
 	res.Required = Rank(res.Risk) >= 2
 	if !res.Required {
@@ -215,11 +224,21 @@ func DecideGate(in GateInput) GateResult {
 	for _, u := range keysOf(unsureBlock) {
 		res.Notes = append(res.Notes, fmt.Sprintf("@%s pidió cambios y no pude verificar si es dueño: su pedido cuenta hasta que lo resuelva", u))
 	}
-	res.OK = len(res.Blockers) == 0
+	res.OK = len(res.Blockers) == 0 && len(in.Secrets) == 0
 	for _, g := range res.Groups {
 		res.OK = res.OK && g.OK
 	}
+	if len(in.Secrets) > 0 {
+		res.Notes = append(res.Notes, "el cambio agrega secretos: ninguna aprobación lo deja pasar; sácalos del PR y rótalos, porque ya están en GitHub")
+	}
 	return res
+}
+
+func pluralWord(n int, one, many string) string {
+	if n == 1 {
+		return "1 " + one
+	}
+	return fmt.Sprintf("%d %s", n, many)
 }
 
 func pluralFiles(n int) string {

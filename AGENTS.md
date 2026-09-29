@@ -56,6 +56,8 @@ CLI en Go para contexto versionado, gates humanos, estándar por capas y costo t
 - [gap] ws: retomar una sesión con --resume y --agent en headless no se probó contra Claude Code real (docs/specs/workstream-v1.md)
 - [inv] install: Codex, Gemini CLI y Windsurf dejan pasar la herramienta si el hook falta: el lanzador niega con salida 2 (docs/specs/install-v1.md)
 - [dec] gate: nivel de IDE medido con un canario que el gate siempre niega; nivel 2 o 3 cae en R17 (ADR-0015)
+- [inv] secrets: un agente no lee ni escribe archivos de secretos ni corre comandos que imprimen credenciales, aun con aprobación (ADR-0016)
+- [gap] secrets: el escáner solo reconoce formas conocidas; una contraseña de forma libre se protege declarando su archivo en secrets.files (docs/specs/secrets-v1.md)
 
 ## Reglas obligatorias (MUST)
 
@@ -67,6 +69,7 @@ CLI en Go para contexto versionado, gates humanos, estándar por capas y costo t
 - R14: README.md, README.coyote.md y CONTEXT.coyote.md válidos
 - R15: Ningún entregable lleva atribución a herramientas o modelos de IA
 - R17: Un IDE de nivel 2 o 3 no ejecuta tareas de riesgo R2 o R3 fuera de ramas coyote/ con gate pr
+- R18: Ningún archivo del repo es un archivo de secretos ni lleva un secreto escrito
 - A1: Un agente no ejecuta acciones con efectos sin aprobación humana por step, plan o concesión
 - A2: Todo step declara contrato, budget y esquema de salida
 - A3: Todo evento queda en el ledger y todo cierre deja su resumen de costo

@@ -17,6 +17,7 @@ import (
 	"github.com/Emmanuel93/coyote/internal/glob"
 	"github.com/Emmanuel93/coyote/internal/identity"
 	"github.com/Emmanuel93/coyote/internal/ledger"
+	"github.com/Emmanuel93/coyote/internal/product"
 	"github.com/Emmanuel93/coyote/internal/standards"
 )
 
@@ -153,6 +154,20 @@ func cmdCommit(a *app, args []string) error {
 				}
 			}
 		}
+	}
+	// R18: ningún secreto entra al commit; --no-verify no lo omite (ADR-0016).
+	files, err := product.StagedAdded(root, *all)
+	if err != nil {
+		return fail(1, "no pude revisar si el commit lleva secretos (%v); el commit no sigue", err)
+	}
+	if found := scanAdded(files, cfg.Secrets, func(p string) (string, bool) {
+		if *all {
+			return product.WorktreeText(root, p)
+		}
+		return product.IndexText(root, p)
+	}); len(found) > 0 {
+		printSecretFindings(a, found, true)
+		return fail(1, "R18: el commit lleva secretos; sácalos antes de hacer commit")
 	}
 	typ, scope, desc := parseConventional(subject)
 	now := a.now()
