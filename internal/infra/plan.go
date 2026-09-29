@@ -36,6 +36,8 @@ const (
 	ActUpdate  = "cambiar"
 	ActReplace = "reemplazar"
 	ActDelete  = "destruir"
+	ActForget  = "olvidar"  // sale del estado sin destruirse (bloque removed)
+	ActImport  = "importar" // entra al estado sin cambiar (bloque import)
 )
 
 type planJSON struct {
@@ -45,21 +47,25 @@ type planJSON struct {
 		Mode    string `json:"mode"`
 		Type    string `json:"type"`
 		Change  struct {
-			Actions []string        `json:"actions"`
-			After   json.RawMessage `json:"after"`
+			Actions   []string        `json:"actions"`
+			After     json.RawMessage `json:"after"`
+			Importing json.RawMessage `json:"importing"`
 		} `json:"change"`
 	} `json:"resource_changes"`
 }
 
 var (
-	iamRe     = regexp.MustCompile(`(^|_)(iam|role|roles|policy|policies|service_account_key|access_key|role_assignment|role_definition|user_assigned_identity)(_|$)`)
-	keysRe    = regexp.MustCompile(`(^|_)(kms|key_ring|crypto_key|secret|secrets|secret_version|key_vault|keyvault|certificate)(_|$)`)
-	netRe     = regexp.MustCompile(`(^|_)(firewall|security_group|security_group_rule|network_security_rule|network_security_group|ingress|access_level|security_policy)(_|$)`)
-	dataRe    = regexp.MustCompile(`(^|_)(sql|database|db_instance|rds|postgres|postgresql|mysql|spanner|bigtable|dynamodb|storage_bucket|s3_bucket)(_|$)`)
-	costlyRe  = regexp.MustCompile(`(^|_)(container_cluster|container_node_pool|eks_cluster|eks_node_group|kubernetes_cluster|node_pool|sql_database_instance|db_instance|rds_cluster|compute_instance|instance|nat|router_nat|nat_gateway|forwarding_rule|lb|load_balancer|redis|memorystore|elasticache|msk|kafka)(_|$)`)
-	openCIDRs = regexp.MustCompile(`"(0\.0\.0\.0/0|::/0)"`)
-	publicRe  = regexp.MustCompile(`"(allUsers|allAuthenticatedUsers)"`)
+	iamRe    = regexp.MustCompile(`(^|_)(iam|role|roles|policy|policies|service_account_key|access_key|role_assignment|role_definition|user_assigned_identity)(_|$)`)
+	keysRe   = regexp.MustCompile(`(^|_)(kms|key_ring|crypto_key|secret|secrets|secret_version|key_vault|keyvault|certificate)(_|$)`)
+	netRe    = regexp.MustCompile(`(^|_)(firewall|security_group|security_group_rule|network_security_rule|network_security_group|ingress|access_level|security_policy|network_acl|network_acl_rule|nacl)(_|$)`)
+	dataRe   = regexp.MustCompile(`(^|_)(sql|database|db_instance|rds|postgres|postgresql|mysql|spanner|bigtable|dynamodb|storage_bucket|s3_bucket)(_|$)`)
+	costlyRe = regexp.MustCompile(`(^|_)(container_cluster|container_node_pool|eks_cluster|eks_node_group|kubernetes_cluster|node_pool|sql_database_instance|db_instance|rds_cluster|compute_instance|instance|nat|router_nat|nat_gateway|forwarding_rule|lb|load_balancer|redis|memorystore|elasticache|msk|kafka)(_|$)`)
 )
+
+// publicValues dan acceso público a datos: principales de GCP y ACL
+// predefinidas de S3 y GCS.
+var publicValues = map[string]bool{"allUsers": true, "allAuthenticatedUsers": true, "public-read": true,
+	"public-read-write": true, "authenticated-read": true, "publicRead": true, "publicReadWrite": true}
 
 // ReadPlan lee y clasifica un plan en JSON.
 func ReadPlan(r io.Reader) (*PlanSummary, error) {
@@ -77,12 +83,13 @@ func ReadPlan(r io.Reader) (*PlanSummary, error) {
 		if rc.Mode == "data" {
 			continue
 		}
-		act := action(rc.Change.Actions)
+		importing := len(rc.Change.Importing) > 0 && string(rc.Change.Importing) != "null"
+		act := action(rc.Change.Actions, importing)
 		if act == "" {
 			continue
 		}
 		c := Change{Address: rc.Address, Type: rc.Type, Action: act, Risk: "R2"}
-		after := string(rc.Change.After)
+		after := scanAfter(rc.Change.After)
 		switch {
 		case act == ActDelete || act == ActReplace:
 			c.Risk, c.Why = "R3", "se "+map[string]string{ActDelete: "destruye", ActReplace: "reemplaza"}[act]
@@ -90,12 +97,16 @@ func ReadPlan(r io.Reader) (*PlanSummary, error) {
 			c.Risk, c.Why = "R3", "permisos (IAM)"
 		case keysRe.MatchString(rc.Type):
 			c.Risk, c.Why = "R3", "llaves o secretos"
-		case netRe.MatchString(rc.Type) && openCIDRs.MatchString(after):
+		case netRe.MatchString(rc.Type) && !strings.Contains(rc.Type, "egress") && after.openCIDR:
 			c.Risk, c.Why = "R3", "abre la red a internet (0.0.0.0/0)"
-		case publicRe.MatchString(after):
-			c.Risk, c.Why = "R3", "acceso público (allUsers)"
-		case dataRe.MatchString(rc.Type) && strings.Contains(after, `"deletion_protection":false`):
+		case after.public:
+			c.Risk, c.Why = "R3", "acceso público (allUsers, public-read)"
+		case dataRe.MatchString(rc.Type) && after.unprotected:
 			c.Risk, c.Why = "R3", "datos sin protección contra borrado"
+		case act == ActForget:
+			c.Why = "sale del estado de Terraform sin destruirse"
+		case act == ActImport:
+			c.Why = "entra al estado de Terraform"
 		case netRe.MatchString(rc.Type):
 			c.Why = "reglas de red"
 		}
@@ -123,8 +134,9 @@ func ReadPlan(r io.Reader) (*PlanSummary, error) {
 	return s, nil
 }
 
-// action traduce las acciones de un recurso; "" si no cambia.
-func action(acts []string) string {
+// action traduce las acciones de un recurso; "" si no cambia. Una acción que
+// esta versión no conoce cuenta como cambio: no se omite.
+func action(acts []string, importing bool) string {
 	switch strings.Join(acts, ",") {
 	case "create":
 		return ActCreate
@@ -134,8 +146,84 @@ func action(acts []string) string {
 		return ActDelete
 	case "delete,create", "create,delete":
 		return ActReplace
+	case "forget":
+		return ActForget
+	case "", "no-op", "read":
+		if importing {
+			return ActImport
+		}
+		return ""
 	}
-	return ""
+	return ActUpdate
+}
+
+// afterFacts es lo que el estado final de un recurso dice de su riesgo.
+type afterFacts struct {
+	openCIDR    bool // una regla abierta a internet (0.0.0.0/0, ::/0)
+	public      bool // acceso público: allUsers o una ACL public-read
+	unprotected bool // deletion_protection o deletion_protection_enabled en false
+}
+
+// scanAfter recorre el estado final de un recurso, sin guardar sus valores:
+// solo anota lo que sube el riesgo. Recorre el JSON, no el texto, así que el
+// formato del plan (compacto o con sangría) no cambia la clasificación.
+func scanAfter(raw json.RawMessage) afterFacts {
+	var f afterFacts
+	if len(raw) == 0 {
+		return f
+	}
+	var v any
+	dec := json.NewDecoder(strings.NewReader(string(raw)))
+	if dec.Decode(&v) != nil {
+		return f
+	}
+	nodes := 0
+	outbound := false
+	// walk recorre el JSON; egress marca lo que está dentro de una regla de
+	// salida, que abierta a internet es lo normal.
+	var walk func(key string, v any, depth int, egress bool)
+	walk = func(key string, v any, depth int, egress bool) {
+		nodes++
+		if depth > 64 || nodes > 200000 {
+			return
+		}
+		switch t := v.(type) {
+		case map[string]any:
+			for k, x := range t {
+				walk(k, x, depth+1, egress || strings.Contains(strings.ToLower(k), "egress"))
+			}
+		case []any:
+			for _, x := range t {
+				walk(key, x, depth+1, egress)
+			}
+		case string:
+			switch {
+			case (t == "0.0.0.0/0" || t == "::/0") && !egress:
+				f.openCIDR = true
+			case key == "source_address_prefix" && (t == "*" || t == "Internet") && !egress:
+				f.openCIDR = true
+			case publicValues[t]:
+				f.public = true
+			case key == "container_access_type" && (t == "blob" || t == "container"):
+				f.public = true
+			}
+			if depth == 1 && (key == "type" || key == "direction") {
+				switch strings.ToLower(t) {
+				case "egress", "outbound":
+					outbound = true
+				}
+			}
+		case bool:
+			if !t && (key == "deletion_protection" || key == "deletion_protection_enabled") {
+				f.unprotected = true
+			}
+		}
+	}
+	walk("", v, 0, false)
+	if outbound {
+		f.openCIDR = false
+	}
+	return f
 }
 
 // Headline resume el plan en una frase: qué hace y su riesgo.
@@ -144,7 +232,7 @@ func (s *PlanSummary) Headline() string {
 		return "el plan no cambia recursos"
 	}
 	var parts []string
-	for _, a := range []string{ActCreate, ActUpdate, ActReplace, ActDelete} {
+	for _, a := range []string{ActCreate, ActUpdate, ActReplace, ActDelete, ActForget, ActImport} {
 		if n := s.Counts[a]; n > 0 {
 			parts = append(parts, fmt.Sprintf("%s %d", a, n))
 		}

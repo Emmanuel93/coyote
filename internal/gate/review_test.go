@@ -129,11 +129,11 @@ func TestVistaDelComando(t *testing.T) {
 		got[c] = strings.Join(lines, " ; ")
 	}
 	want := map[string]string{
-		`terraform $'\x61pply'`:                  "terraform apply",
-		`a=apply; terraform $a`:                  "a=apply ; terraform apply",
-		`terraform {apply,destroy}`:              "terraform apply destroy",
-		`bash -c 'terraform "apply"'`:            `bash -c terraform "apply" ; terraform apply`,
-		`git commit -m "terraform apply"`:        "git commit -m _",
+		`terraform $'\x61pply'`:                 "terraform apply",
+		`a=apply; terraform $a`:                 "a=apply ; terraform apply",
+		`terraform {apply,destroy}`:             "terraform apply destroy",
+		`bash -c 'terraform "apply"'`:           `bash -c terraform "apply" ; terraform apply`,
+		`git commit -m "terraform apply"`:       "git commit -m _",
 		`echo "gcloud auth print-access-token"`: "echo _",
 	}
 	for c, w := range want {

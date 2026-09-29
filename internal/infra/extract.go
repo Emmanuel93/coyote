@@ -1,19 +1,20 @@
 package infra
 
 import (
-	"bufio"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/Emmanuel93/coyote/internal/fsx"
 )
 
 // Detect dice si un repo es de infraestructura como código: fija Terraform u
 // OpenTofu en .tool-versions, o tiene archivos .tf o .tfvars.
 func Detect(root string) (string, bool) {
-	if data, err := os.ReadFile(filepath.Join(root, ".tool-versions")); err == nil {
+	if data, err := fsx.ReadCapped(filepath.Join(root, ".tool-versions"), 1<<20); err == nil {
 		if m := pinRe.FindSubmatch(data); m != nil {
 			if string(m[1]) == "terraform" {
 				return "terraform", true
@@ -131,16 +132,14 @@ func Propose(root string) (*Inventory, error) {
 // makeApplyTargets lee el Makefile: los targets que aplican o destruyen
 // infraestructura, o que la encienden y apagan.
 func makeApplyTargets(root string) []string {
-	f, err := os.Open(filepath.Join(root, "Makefile"))
+	data, err := fsx.ReadCapped(filepath.Join(root, "Makefile"), 2<<20)
 	if err != nil {
 		return nil
 	}
-	defer f.Close()
 	var out []string
 	target := ""
-	sc := bufio.NewScanner(f)
-	for sc.Scan() {
-		l := sc.Text()
+	for _, l := range strings.Split(string(data), "\n") {
+		l = strings.TrimSuffix(l, "\r")
 		if m := makeTargetRe.FindStringSubmatch(l); m != nil && !strings.HasPrefix(l, "\t") && !strings.Contains(l, ":=") {
 			target = m[1]
 			if infraTargets[target] && !containsStr(out, "make "+target) {

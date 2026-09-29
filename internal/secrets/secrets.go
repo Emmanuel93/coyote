@@ -228,7 +228,9 @@ func classes(s string) int {
 			n++
 		}
 	}
-	if strings.IndexFunc(s, func(r rune) bool { return !strings.ContainsRune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", r) }) >= 0 {
+	if strings.IndexFunc(s, func(r rune) bool {
+		return !strings.ContainsRune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", r)
+	}) >= 0 {
 		n++
 	}
 	return n

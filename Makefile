@@ -21,6 +21,7 @@ test:
 
 vet:
 	go vet ./...
+	@out=$$(gofmt -l cmd internal); if [ -n "$$out" ]; then echo "sin gofmt:"; echo "$$out"; exit 1; fi
 
 # El repo cumple el estándar que distribuye.
 lint: build

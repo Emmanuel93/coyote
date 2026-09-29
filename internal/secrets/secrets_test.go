@@ -239,13 +239,13 @@ func TestPKCS12SinContenido(t *testing.T) {
 
 func TestPEMEnVariasFormas(t *testing.T) {
 	forms := map[string]string{
-		"concatenada (JS)":   "const key = '" + fakeKey + "\\n' +\n  '" + fakeBody + "\\n' +\n  '-----END RSA PRIVATE KEY-----';",
-		"concatenada (Py)":   "KEY = (\"" + fakeKey + "\\n\"\n       \"" + fakeBody + "\\n\")",
-		"aplanada":           fakeKey + " " + fakeBody + " -----END RSA PRIVATE KEY-----",
-		"JSON con \\r\\n": `{"k":"` + fakeKey + `\r\n` + fakeBody + `\r\n"}`,
-		"con CRLF":           fakeKey + "\r\n" + fakeBody + "\r\n",
-		"cifrada":            fakeKey + "\nProc-Type: 4,ENCRYPTED\nDEK-Info: AES-128-CBC,00\n\n" + fakeBody + "\n",
-		"OpenSSH":            fakeOpenSSH + "\n" + fakeBody + "\n",
+		"concatenada (JS)": "const key = '" + fakeKey + "\\n' +\n  '" + fakeBody + "\\n' +\n  '-----END RSA PRIVATE KEY-----';",
+		"concatenada (Py)": "KEY = (\"" + fakeKey + "\\n\"\n       \"" + fakeBody + "\\n\")",
+		"aplanada":         fakeKey + " " + fakeBody + " -----END RSA PRIVATE KEY-----",
+		"JSON con \\r\\n":  `{"k":"` + fakeKey + `\r\n` + fakeBody + `\r\n"}`,
+		"con CRLF":         fakeKey + "\r\n" + fakeBody + "\r\n",
+		"cifrada":          fakeKey + "\nProc-Type: 4,ENCRYPTED\nDEK-Info: AES-128-CBC,00\n\n" + fakeBody + "\n",
+		"OpenSSH":          fakeOpenSSH + "\n" + fakeBody + "\n",
 	}
 	for name, text := range forms {
 		f := Scan("x", text)

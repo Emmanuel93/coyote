@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/Emmanuel93/coyote/internal/fsx"
 )
 
 // Finding es un hallazgo de la revisión del inventario contra el repo.
@@ -51,7 +53,7 @@ func Check(root string, inv *Inventory, tracked []string) []Finding {
 	case !exists(inv.Versions):
 		add(Error, "versions", "%s no existe", inv.Versions)
 	default:
-		if data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(inv.Versions))); err == nil && !pinRe.Match(data) {
+		if data, err := fsx.ReadCapped(filepath.Join(root, filepath.FromSlash(inv.Versions)), 1<<20); err == nil && !pinRe.Match(data) {
 			add(Warn, "versions", "%s no fija la versión de %s", inv.Versions, inv.Tool)
 		}
 	}
@@ -158,8 +160,10 @@ func tfFiles(root, rel string) []string {
 // backendOf devuelve el backend que declaran los .tf de un stack.
 func backendOf(root string, files []string) string {
 	for _, f := range files {
-		data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(f)))
-		if err != nil || len(data) > 2<<20 {
+		// Solo archivos regulares y con tope: un .tf que apunta a /dev/zero no
+		// se lee.
+		data, err := fsx.ReadCapped(filepath.Join(root, filepath.FromSlash(f)), 2<<20)
+		if err != nil {
 			continue
 		}
 		if m := backendRe.FindSubmatch(data); m != nil {

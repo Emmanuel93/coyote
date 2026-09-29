@@ -354,9 +354,12 @@ func TestLauncherFailsClosed(t *testing.T) {
 		"CRLF": func() {
 			hook(root, CodexHook, strings.ReplaceAll("#!/bin/sh\nfor x in 1; do\n  echo gate check --ide codex\ndone\nexit 0\n", "\n", "\r\n"), 0o755)
 		},
-		"vacío":        func() { hook(root, CodexHook, "", 0o755) },
-		"ajeno":        func() { hook(root, CodexHook, "#!/bin/sh\nexit 0\n", 0o755) },
-		"una carpeta":  func() { _ = os.RemoveAll(filepath.Join(root, CodexHook)); _ = os.MkdirAll(filepath.Join(root, CodexHook), 0o755) },
+		"vacío": func() { hook(root, CodexHook, "", 0o755) },
+		"ajeno": func() { hook(root, CodexHook, "#!/bin/sh\nexit 0\n", 0o755) },
+		"una carpeta": func() {
+			_ = os.RemoveAll(filepath.Join(root, CodexHook))
+			_ = os.MkdirAll(filepath.Join(root, CodexHook), 0o755)
+		},
 		"sin permisos": func() { hook(root, CodexHook, fake(3), 0o644) },
 	}
 	for name, setup := range cases {

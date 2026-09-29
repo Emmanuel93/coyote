@@ -14,6 +14,8 @@ import (
 	"strings"
 
 	"go.yaml.in/yaml/v3"
+
+	"github.com/Emmanuel93/coyote/internal/fsx"
 )
 
 // Path es el inventario relativo a la raíz del repo.
@@ -67,9 +69,14 @@ var (
 	ownerRe   = regexp.MustCompile(`^(@[A-Za-z0-9][A-Za-z0-9-]*(/[A-Za-z0-9][A-Za-z0-9._-]*)?|[^@\s]+@[^@\s]+\.[^@\s]+)$`)
 )
 
-// Load lee el inventario de root. ok es false si no existe.
+// MaxInventory es el tamaño máximo del inventario.
+const MaxInventory = 1 << 20
+
+// Load lee el inventario de root. ok es false si no existe. Un inventario
+// que es un symlink, no es un archivo regular o pesa más de 1 MiB es un
+// error: el gate bloquea los cambios de infraestructura hasta corregirlo.
 func Load(root string) (*Inventory, bool, error) {
-	data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(Path)))
+	data, err := fsx.ReadFile(root, Path, MaxInventory)
 	if os.IsNotExist(err) {
 		return nil, false, nil
 	}

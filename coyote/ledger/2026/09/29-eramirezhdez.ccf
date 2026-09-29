@@ -20,3 +20,4 @@
 2026-09-29T03:20Z|@eramirezhdez/coyote-devsecops|W-0006|coyote|fix|secrets|el escáner no se evade con ++, líneas largas, .p12, llaves partidas…|-|-|-|ok
 2026-09-29T03:20Z|@eramirezhdez/coyote-devsecops|W-0006|coyote|fix|gate|el comando se revisa como lo corre el shell; comillas, git grep,…|-|-|-|ok
 2026-09-29T03:24Z|@eramirezhdez/coyote-devsecops|W-0006|coyote|fix|install|los hooks fallan cerrado y el canario solo cuenta la shell del…|-|-|-|ok
+2026-09-29T03:26Z|@eramirezhdez/coyote-infra|W-0006|coyote|fix|infra|lecturas con tope y sin symlinks, y el plan se clasifica por…|-|-|-|ok

@@ -1,10 +1,13 @@
 package infra
 
 import (
+	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func write(t *testing.T, root, rel, content string) {
@@ -273,8 +276,8 @@ func TestCommands(t *testing.T) {
 		}
 	}
 	cases := map[string]string{
-		"make apply ENV=prod":                              "prod",
-		"terraform -chdir=stacks/gcp/prod plan":            "prod",
+		"make apply ENV=prod":                               "prod",
+		"terraform -chdir=stacks/gcp/prod plan":             "prod",
 		"terraform plan -var-file=environments/demo.tfvars": "demo",
 		"kubectl --context gke_tienda-prod apply -f x.yaml": "prod",
 		"make apply ENV=production":                         "",
@@ -284,5 +287,96 @@ func TestCommands(t *testing.T) {
 		if got, _ := inv.EnvFor(c); got != want {
 			t.Errorf("EnvFor(%q) = %q, se esperaba %q", c, got, want)
 		}
+	}
+}
+
+func TestPlanFormasYAcciones(t *testing.T) {
+	plan := `{"format_version":"1.2","resource_changes":[
+ {"address":"google_sql_database_instance.db","mode":"managed","type":"google_sql_database_instance","change":{"actions":["update"],"after":{"deletion_protection":false}}},
+ {"address":"aws_dynamodb_table.t","mode":"managed","type":"aws_dynamodb_table","change":{"actions":["create"],"after":{"deletion_protection_enabled":false}}},
+ {"address":"aws_network_acl_rule.in","mode":"managed","type":"aws_network_acl_rule","change":{"actions":["create"],"after":{"egress":false,"cidr_block":"0.0.0.0/0"}}},
+ {"address":"aws_s3_bucket_acl.pub","mode":"managed","type":"aws_s3_bucket_acl","change":{"actions":["create"],"after":{"acl":"public-read"}}},
+ {"address":"aws_security_group.web","mode":"managed","type":"aws_security_group","change":{"actions":["create"],"after":{"ingress":[{"cidr_blocks":["10.0.0.0/8"]}],"egress":[{"cidr_blocks":["0.0.0.0/0"]}]}}},
+ {"address":"aws_vpc_security_group_egress_rule.all","mode":"managed","type":"aws_vpc_security_group_egress_rule","change":{"actions":["create"],"after":{"cidr_ipv4":"0.0.0.0/0"}}},
+ {"address":"azurerm_network_security_rule.rdp","mode":"managed","type":"azurerm_network_security_rule","change":{"actions":["create"],"after":{"direction":"Inbound","source_address_prefix":"*"}}},
+ {"address":"google_compute_disk.old","mode":"managed","type":"google_compute_disk","change":{"actions":["forget"],"after":null}},
+ {"address":"google_compute_address.ip","mode":"managed","type":"google_compute_address","change":{"actions":["no-op"],"after":{},"importing":{"id":"projects/p/regions/r/addresses/ip"}}},
+ {"address":"google_compute_address.raro","mode":"managed","type":"google_compute_address","change":{"actions":["frobnicate"],"after":{}}}
+]}`
+	var pretty bytes.Buffer
+	if err := json.Indent(&pretty, []byte(plan), "", "  "); err != nil {
+		t.Fatal(err)
+	}
+	for name, text := range map[string]string{"compacto": plan, "con sangría": pretty.String()} {
+		s, err := ReadPlan(strings.NewReader(text))
+		if err != nil {
+			t.Fatal(err)
+		}
+		risk, why := map[string]string{}, map[string]string{}
+		for _, c := range s.Changes {
+			risk[c.Address], why[c.Address] = c.Risk, c.Why
+		}
+		want := map[string]string{
+			"google_sql_database_instance.db":        "R3",
+			"aws_dynamodb_table.t":                   "R3",
+			"aws_network_acl_rule.in":                "R3",
+			"aws_s3_bucket_acl.pub":                  "R3",
+			"azurerm_network_security_rule.rdp":      "R3",
+			"aws_security_group.web":                 "R2",
+			"aws_vpc_security_group_egress_rule.all": "R2",
+			"google_compute_disk.old":                "R2",
+			"google_compute_address.ip":              "R2",
+			"google_compute_address.raro":            "R2",
+		}
+		for addr, r := range want {
+			if risk[addr] != r {
+				t.Errorf("%s: %s es %s (%s), se esperaba %s", name, addr, risk[addr], why[addr], r)
+			}
+		}
+		if !strings.Contains(s.Headline(), "olvidar 1") || !strings.Contains(s.Headline(), "importar 1") {
+			t.Errorf("%s: el resumen cuenta olvidar e importar: %s", name, s.Headline())
+		}
+	}
+	forget, _ := ReadPlan(strings.NewReader(`{"format_version":"1.2","resource_changes":[{"address":"x.y","mode":"managed","type":"x","change":{"actions":["forget"]}}]}`))
+	if forget.Risk != "R2" || forget.Headline() == "el plan no cambia recursos" {
+		t.Errorf("un plan que olvida recursos los cambia: %s %s", forget.Risk, forget.Headline())
+	}
+}
+
+func TestLecturasAcotadas(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, ".tool-versions", "terraform 1.9.8\n")
+	write(t, root, "stacks/gcp/demo/versions.tf", "terraform {}\n")
+	if err := os.Symlink("/dev/zero", filepath.Join(root, "stacks", "gcp", "demo", "main.tf")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("/dev/zero", filepath.Join(root, "Makefile")); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		inv, err := Propose(root)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		Check(root, inv, nil)
+	}()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("propose y check leyeron /dev/zero")
+	}
+	// El inventario no se lee por un symlink.
+	write(t, root, "otro.yaml", validInventory)
+	if err := os.MkdirAll(filepath.Join(root, "coyote"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(root, "otro.yaml"), filepath.Join(root, "coyote", "infra.yaml")); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := Load(root); !ok || err == nil {
+		t.Errorf("un inventario que es un symlink es un error: %v %v", ok, err)
 	}
 }

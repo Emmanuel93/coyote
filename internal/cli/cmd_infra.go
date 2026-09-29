@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/Emmanuel93/coyote/internal/fsx"
 	"github.com/Emmanuel93/coyote/internal/infra"
 	"github.com/Emmanuel93/coyote/internal/product"
 )
@@ -44,18 +45,20 @@ func infraCheck(a *app, args []string) error {
 	if err != nil {
 		return err
 	}
-	path := *file
-	if path == "" {
-		path = filepath.Join(dir, filepath.FromSlash(infra.Path))
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
+	var inv *infra.Inventory
+	if *file == "" {
+		var ok bool
+		inv, ok, err = infra.Load(dir)
+		if !ok {
 			return fail(1, "falta %s (R13): propónlo con coyote infra propose", infra.Path)
 		}
-		return err
+	} else {
+		var data []byte
+		if data, err = fsx.ReadCapped(*file, infra.MaxInventory); err != nil {
+			return fail(1, "%v", err)
+		}
+		inv, err = infra.Parse(data)
 	}
-	inv, err := infra.Parse(data)
 	if err != nil {
 		return fail(1, "%v", err)
 	}
