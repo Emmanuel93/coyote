@@ -461,3 +461,43 @@ func TestApplyNoEscribePorUnTemporalPlantado(t *testing.T) {
 		t.Errorf(".codex/hooks.json es un archivo regular: %v", err)
 	}
 }
+
+func TestInterruptorQueApagaLosHooks(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, ".claude/settings.json", `{"disableAllHooks": true}`)
+	var conflict bool
+	for _, c := range plan(t, root, "claude-code") {
+		if c.Path == ".claude/settings.json" {
+			conflict = c.Blocking() && !c.Pending() && strings.Contains(c.Detail, "disableAllHooks")
+		}
+	}
+	if !conflict {
+		t.Error("disableAllHooks en settings.json deja la instalación en conflicto")
+	}
+	local := t.TempDir()
+	write(t, local, ".claude/settings.local.json", `{"disableAllHooks": true}`)
+	states := map[string]string{}
+	for _, c := range plan(t, local, "claude-code") {
+		states[c.Path] = c.State
+	}
+	if states[".claude/settings.local.json"] != Conflict || states[".claude/settings.json"] != Created {
+		t.Errorf("disableAllHooks en settings.local.json: %v", states)
+	}
+}
+
+func TestCopilotConservaOtrosHooks(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, CopilotFile, `{"version": 1, "hooks": {"preToolUse": [{"type": "command", "bash": ".github/hooks/coyote-gate.sh"}],
+	  "postToolUse": [{"type": "command", "bash": "./scripts/registrar.sh"}]}}`)
+	if err := Apply(root, plan(t, root, "copilot")); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(filepath.Join(root, filepath.FromSlash(CopilotFile)))
+	s := string(data)
+	if !strings.Contains(s, "./scripts/registrar.sh") || !strings.Contains(s, `\"$d/.github/hooks/coyote.json\"`) {
+		t.Errorf("el archivo de Copilot pierde hooks de la persona o no usa su marca:\n%s", s)
+	}
+	if strings.Count(s, "coyote-gate.sh") != 3 {
+		t.Errorf("queda un solo hook de coyote (el lanzador nombra el script tres veces):\n%s", s)
+	}
+}

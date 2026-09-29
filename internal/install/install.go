@@ -144,8 +144,17 @@ func Plan(o Options) ([]Change, error) {
 		if err := add(file(o.Root, ClaudeHook, []byte(GateScript("claude-code")), 0o755, "hook del gate")); err != nil {
 			return nil, err
 		}
-		if err := add(jsonFile(o.Root, ".claude/settings.json", mergeClaude, "gate, atribución apagada y COYOTE_IDE")); err != nil {
+		// Un interruptor que apaga los hooks deja el archivo en conflicto: no se
+		// escribe hasta que la persona lo quite.
+		switches, err := claudeSwitches(o.Root)
+		if err != nil {
 			return nil, err
+		}
+		out = append(out, switches...)
+		if len(switches) == 0 || switches[0].Path != ".claude/settings.json" {
+			if err := add(jsonFile(o.Root, ".claude/settings.json", mergeClaude, "gate, atribución apagada y COYOTE_IDE")); err != nil {
+				return nil, err
+			}
 		}
 		gen := map[string][]byte{}
 		for _, a := range o.Set.Agents {
@@ -607,15 +616,9 @@ func mergeWindsurf(data []byte) ([]byte, error) {
 
 // copilotFile es el archivo de hooks de coyote para Copilot: lo leen la CLI,
 // VS Code y el agente de GitHub. Es un archivo propio de coyote en
-// .github/hooks/; uno con ese nombre que no generó coyote no se pisa.
+// .github/hooks/; uno con ese nombre que no generó coyote no se pisa. Si la
+// persona le agregó otros hooks, se conservan.
 func copilotFile(root string) (Change, error) {
-	want := encodeJSON(&object{members: []member{{"version", json.Number("1")}, {"hooks", &object{members: []member{
-		{"preToolUse", []any{&object{members: []member{
-			{"type", "command"},
-			{"bash", Launcher(CopilotHook, "")},
-			{"powershell", "Write-Error 'coyote: el gate humano no corre en Windows; la acción se bloquea'; exit 2"},
-			{"timeoutSec", json.Number("30")},
-		}}}}}}}}})
 	got, exists, err := read(root, CopilotFile)
 	if err != nil {
 		return Change{}, err
@@ -627,7 +630,56 @@ func copilotFile(root string) (Change, error) {
 			return Change{Path: CopilotFile, State: Conflict, Detail: "existe y no lo generó coyote: Copilot queda sin gate; renómbralo y vuelve a correr coyote install --ide copilot"}, nil
 		}
 	}
-	return file(root, CopilotFile, want, 0o644, "gate en preToolUse (CLI, VS Code y agente de GitHub)")
+	return jsonFile(root, CopilotFile, mergeCopilot, "gate en preToolUse (CLI, VS Code y agente de GitHub)")
+}
+
+func mergeCopilot(data []byte) ([]byte, error) {
+	o, err := parseJSON(data)
+	if err != nil {
+		return nil, err
+	}
+	if _, ok := o.get("version"); !ok {
+		o.members = append([]member{{"version", json.Number("1")}}, o.members...)
+	}
+	hooks, err := o.child("hooks")
+	if err != nil {
+		return nil, err
+	}
+	if cur, ok := hooks.get("preToolUse"); ok {
+		if _, isList := cur.([]any); !isList {
+			return nil, fmt.Errorf("hooks.preToolUse no es una lista")
+		}
+	}
+	mergeFlat(hooks, "preToolUse", &object{members: []member{
+		{"type", "command"},
+		{"bash", Launcher(CopilotHook, CopilotFile)},
+		{"powershell", "Write-Error 'coyote: el gate humano no corre en Windows; la acción se bloquea'; exit 2"},
+		{"timeoutSec", json.Number("30")},
+	}})
+	return encodeJSON(o), nil
+}
+
+// claudeSwitches revisa la configuración de Claude Code que apaga todos los
+// hooks: con disableAllHooks el gate no corre, aunque su hook esté instalado.
+func claudeSwitches(root string) ([]Change, error) {
+	var out []Change
+	for _, rel := range []string{".claude/settings.json", ".claude/settings.local.json"} {
+		got, exists, err := read(root, rel)
+		if err != nil || !exists {
+			if err != nil {
+				return nil, err
+			}
+			continue
+		}
+		o, err := parseJSON(got)
+		if err != nil {
+			continue // settings.json lo revisa jsonFile; settings.local.json no es de coyote
+		}
+		if v, _ := o.get("disableAllHooks"); v == true {
+			out = append(out, Change{Path: rel, State: Conflict, Detail: "disableAllHooks está prendida: Claude Code no corre ningún hook y el gate queda apagado; quítala"})
+		}
+	}
+	return out, nil
 }
 
 // copilotOwned informa si el archivo de hooks de Copilot es de coyote.

@@ -15,6 +15,7 @@ import (
 
 	"github.com/Emmanuel93/coyote/internal/agentsmd"
 	"github.com/Emmanuel93/coyote/internal/ccfdoc"
+	"github.com/Emmanuel93/coyote/internal/fsx"
 	"github.com/Emmanuel93/coyote/internal/project"
 	"github.com/Emmanuel93/coyote/internal/standards"
 )
@@ -270,7 +271,7 @@ func checkAgentsMD(ctx *standards.Context, _ standards.Check) []standards.Findin
 	if err != nil {
 		return []standards.Finding{{Path: "AGENTS.md", Msg: err.Error()}}
 	}
-	got, err := os.ReadFile(filepath.Join(ctx.Root, "AGENTS.md"))
+	got, err := fsx.ReadCapped(filepath.Join(ctx.Root, "AGENTS.md"), 4<<20)
 	switch {
 	case err != nil:
 		return []standards.Finding{{Path: "AGENTS.md", Msg: "falta AGENTS.md"}}

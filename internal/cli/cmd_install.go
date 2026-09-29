@@ -16,6 +16,7 @@ import (
 	"github.com/Emmanuel93/coyote/internal/agentsmd"
 	"github.com/Emmanuel93/coyote/internal/approval"
 	"github.com/Emmanuel93/coyote/internal/ccf"
+	"github.com/Emmanuel93/coyote/internal/fsx"
 	"github.com/Emmanuel93/coyote/internal/gate"
 	"github.com/Emmanuel93/coyote/internal/identity"
 	"github.com/Emmanuel93/coyote/internal/install"
@@ -69,8 +70,10 @@ func (a *app) installPlan(root string, cfg *project.Config, ides []string) ([]in
 		return nil, err
 	}
 	owns := true
-	if cur, err := os.ReadFile(filepath.Join(root, "AGENTS.md")); err == nil {
+	if cur, err := fsx.ReadCapped(filepath.Join(root, "AGENTS.md"), 4<<20); err == nil {
 		owns = strings.HasPrefix(string(cur), agentsmd.Marker)
+	} else if !os.IsNotExist(err) {
+		owns = false // un AGENTS.md que no es un archivo regular no se toca
 	}
 	var all []install.Change
 	seen := map[string]bool{}
@@ -239,9 +242,14 @@ func printChanges(a *app, changes []install.Change, hook string) {
 	w.Flush()
 }
 
+// ensureIgnored agrega .coyote/ al .gitignore del proyecto. No escribe a
+// través de un symlink: un .gitignore que apunta afuera no se toca.
 func ensureIgnored(root string) error {
 	p := filepath.Join(root, ".gitignore")
-	data, err := os.ReadFile(p)
+	if err := fsx.NoSymlinks(root, ".gitignore"); err != nil {
+		return err
+	}
+	data, err := fsx.ReadFile(root, ".gitignore", 4<<20)
 	if err != nil && !os.IsNotExist(err) {
 		return err
 	}
@@ -254,7 +262,7 @@ func ensureIgnored(root string) error {
 	if s != "" && !strings.HasSuffix(s, "\n") {
 		s += "\n"
 	}
-	return os.WriteFile(p, []byte(s+"# Estado local de coyote (índice, cola del gate); nunca se versiona\n.coyote/\n"), 0o644)
+	return fsx.WriteAtomic(p, []byte(s+"# Estado local de coyote (índice, cola del gate); nunca se versiona\n.coyote/\n"), 0o644)
 }
 
 // ideChecks prueba el gate de un IDE en esta máquina, sin efectos: la
