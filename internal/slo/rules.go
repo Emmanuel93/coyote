@@ -190,9 +190,12 @@ func sliExpr(q SLI, w string) string {
 		return "((" + fill(q.ErrorRatio) + ") >= 0)"
 	}
 	// La serie de errores suele aparecer con el primer error: mientras no
-	// existe, el error cuenta 0 y no deja al periodo sin esos minutos.
+	// existe ninguna, el error cuenta 0 y no deja al periodo sin esos
+	// minutos. Con or on(), el 0 solo entra si no hay ninguna serie de
+	// errores: una consulta que agrupa distinto que el total no se esconde
+	// detrás de un 0.
 	t := fill(q.Total)
-	return "((" + fill(q.Errors) + ") or (0 * (" + t + ")))\n/\n((" + t + ") > 0)"
+	return "((" + fill(q.Errors) + ") or on() (0 * (" + t + ")))\n/\n((" + t + ") > 0)"
 }
 
 func alertExpr(sel, budget string, days int, burns []burn) string {

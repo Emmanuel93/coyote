@@ -1,27 +1,32 @@
 // Package safetext deja un texto sin caracteres que un terminal o un
 // navegador interpretan en vez de mostrar: controles, separadores de línea
 // Unicode y caracteres de formato invisibles, como los que cambian la
-// dirección del texto. Se escriben como su código (‮), que además es un
-// escape válido dentro de una cadena JSON.
+// dirección del texto o los de etiqueta, que esconden texto. Se escriben
+// como su código (\u202e), que además es un escape válido dentro de una
+// cadena JSON: fuera del plano básico, como par sustituto (\udb40\udc41).
 package safetext
 
 import (
 	"fmt"
 	"io"
 	"unicode"
+	"unicode/utf16"
 	"unicode/utf8"
 )
 
 // Unsafe dice si una runa no se escribe tal cual. El salto de línea y el
-// tabulador sí.
+// tabulador sí, y también los que unen caracteres (U+200C y U+200D), que
+// arman emojis y palabras en persa o en lenguas índicas.
 func Unsafe(r rune) bool {
 	switch {
 	case r == '\n' || r == '\t':
 		return false
 	case r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f):
 		return true
-	case r == ' ' || r == ' ':
+	case r == 0x2028 || r == 0x2029:
 		return true
+	case r == 0x200c || r == 0x200d:
+		return false
 	}
 	return unicode.Is(unicode.Cf, r)
 }
@@ -48,7 +53,8 @@ func Escape(b []byte) []byte {
 		case r == utf8.RuneError && n == 1:
 			out = fmt.Appendf(out, "\\x%02x", b[i])
 		case Unsafe(r) && r > 0xffff:
-			out = fmt.Appendf(out, "\\U%08x", r)
+			hi, lo := utf16.EncodeRune(r)
+			out = fmt.Appendf(out, "\\u%04x\\u%04x", hi, lo)
 		case Unsafe(r):
 			out = fmt.Appendf(out, "\\u%04x", r)
 		default:
@@ -58,6 +64,9 @@ func Escape(b []byte) []byte {
 	}
 	return out
 }
+
+// String es Escape para un texto.
+func String(s string) string { return string(Escape([]byte(s))) }
 
 // Writer escapa lo que escribe. Una runa partida entre dos escrituras espera
 // a la siguiente; Flush escribe lo que quedó.

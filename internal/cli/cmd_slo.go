@@ -193,7 +193,7 @@ func (a *app) sloRules(args []string) error {
 			return err
 		}
 		if *stdout {
-			_, err := a.stdout.Write(out)
+			_, err := a.contentOut().Write(out)
 			return err
 		}
 		rel := slo.RulesPath(f.Spec.Service)

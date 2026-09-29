@@ -20,6 +20,7 @@ import (
 	"github.com/Emmanuel93/coyote/internal/ledger"
 	"github.com/Emmanuel93/coyote/internal/product"
 	"github.com/Emmanuel93/coyote/internal/project"
+	"github.com/Emmanuel93/coyote/internal/safetext"
 )
 
 // Producto multi-repo (ADR-0011): el mapa de interfaces sale del código de
@@ -958,15 +959,19 @@ func impactMarkdown(im *product.Impact, m *product.Map, total int) string {
 // del código de un PR (rutas, tópicos) no puede armar enlaces ni HTML en el
 // comentario: los corchetes y los ángulos se escapan.
 func mdCell(s string) string {
-	return strings.NewReplacer("|", "\\|", "\n", " ", "\r", " ", "`", "'", "[", "\\[", "]", "\\]", "<", "&lt;", ">", "&gt;").Replace(s)
+	// Sin caracteres invisibles ni de dirección, y sin entidades del texto de
+	// origen: &commat; se vería como una arroba.
+	return strings.NewReplacer("&", "&amp;", "|", "\\|", "\n", " ", "\r", " ", "`", "'", "[", "\\[", "]", "\\]", "<", "&lt;", ">", "&gt;").Replace(safetext.String(s))
 }
 
 // mdText es mdCell para texto libre en un comentario de GitHub: tampoco
 // menciona a nadie (@persona o @org/equipo), ni arma enlaces sueltos
 // (https://…, www.…) o referencias a issues (#123), que GitHub enlaza solo.
+// El corte es un espacio de ancho cero escrito como entidad: GitHub lo
+// muestra igual y la salida de coyote no lo convierte en texto.
 func mdText(s string) string {
-	s = strings.NewReplacer("@", "@\u200b", "://", ":\u200b//", "#", "#\u200b").Replace(mdCell(s))
-	return wwwRe.ReplaceAllStringFunc(s, func(m string) string { return m[:3] + "\u200b." })
+	s = strings.NewReplacer("@", "@&#8203;", "://", ":&#8203;//", "#", "#&#8203;").Replace(mdCell(s))
+	return wwwRe.ReplaceAllStringFunc(s, func(m string) string { return m[:3] + "&#8203;." })
 }
 
 var wwwRe = regexp.MustCompile(`(?i)www\.`)

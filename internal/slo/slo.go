@@ -392,8 +392,12 @@ func scanQuery(q string) []string {
 			for j < len(rs) && (unicode.IsLetter(rs[j]) || unicode.IsDigit(rs[j]) || rs[j] == '_' || rs[j] == ':') {
 				j++
 			}
-			if strings.EqualFold(string(rs[i:j]), "offset") {
+			word := string(rs[i:j])
+			if strings.EqualFold(word, "offset") {
 				add("usa offset: la ventana es la de coyote")
+			}
+			if strings.EqualFold(word, "scalar") {
+				add("usa scalar(): el SLI es un vector, y coyote lo combina con or y con comparaciones")
 			}
 			i = j - 1
 		}
@@ -414,18 +418,18 @@ func shortStep(step string) bool {
 	if m == nil {
 		return false
 	}
-	n, _ := strconv.Atoi(m[1])
-	if m[2] == "m" {
-		n *= 60
-	}
+	mins, _ := strconv.Atoi(m[1])
+	secs, _ := strconv.Atoi(m[2])
+	n := mins*60 + secs
 	return n >= 1 && n <= 300
 }
 
-var stepRe = regexp.MustCompile(`^([0-9]{1,3})(s|m)$`)
+var stepRe = regexp.MustCompile(`^(?:([0-9]{1,3})m)?(?:([0-9]{1,3})s)?$`)
 
 // operatorWord son las palabras de PromQL que pueden ir antes de un selector
 // sin ser el nombre de una métrica.
-var operatorWord = map[string]bool{"and": true, "or": true, "unless": true, "bool": true, "atan2": true}
+var operatorWord = map[string]bool{"and": true, "or": true, "unless": true, "bool": true, "atan2": true,
+	"group_left": true, "group_right": true}
 
 // balanced revisa paréntesis, corchetes, llaves y comillas, sin contar lo
 // que está entre comillas.

@@ -23,7 +23,7 @@ Estado: nuevo en v0.7.0 (la web v0 llegó en v0.2.0) · Implementación: `intern
 - La organización (`/org` y su gasto en el presupuesto) la ven solo los admins de `hub.yaml`, que salen del commit que rige. Un admin del proyecto recibe 403: `project.yaml` se edita en el proyecto, el hub se revisa en su PR.
 - Una persona que no es admin ve sus eventos con desglose y los totales del proyecto sin desglose, tampoco de modelos.
 - El gasto de un workstream lo ven su dueño (`owner` del plan) y los admins: un plan suele ser de una sola persona.
-- Un evento con fecha futura (un reloj adelantado en otra máquina) no cuenta en ningún periodo, tampoco en el gasto o el estado de un workstream, ni en la web ni en `coyote run --ws`.
+- Un evento con fecha futura (un reloj adelantado en otra máquina) no cuenta en ningún periodo de costos. En un workstream, una aceptación con fecha futura no deja avanzar el plan; su gasto, sus rechazos y su cierre sí cuentan, en la web y en `coyote run --ws`, para que un reloj adelantado no afloje el tope.
 - Un hub que no se puede leer deja un aviso y a nadie como admin del hub: por defecto se muestra menos, no más.
 - Es visibilidad por defecto, no control de acceso: el ledger está en git y quien lee el repo lo lee. Cada página lo dice. Por eso un admin del proyecto que registra en `repos:` otro proyecto de la organización ve el desglose de su ledger: es lo que vería clonándolo.
 - Un repo registrado que resuelve a la carpeta del proyecto, o a otro repo ya leído, no se lee dos veces.

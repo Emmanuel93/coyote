@@ -57,3 +57,4 @@
 2026-09-29T09:02Z|@eramirezhdez/coyote-dev|W-0007|coyote|fix|web|salida sin controles invisibles, marcador anidado, repos una vez y eventos futuros…|-|-|-|ok
 2026-09-29T09:47Z|@eramirezhdez/coyote-security|W-0007|coyote|fix|gate|el clon del hub en datos o como origen no bloquea, git…|-|-|-|ok
 2026-09-29T09:47Z|@eramirezhdez/coyote-devsecops|W-0007|coyote|fix|ci|sin configuración en la base, gitleaks usa sus reglas por defecto sin…|-|-|-|ok
+2026-09-29T09:47Z|@eramirezhdez/coyote-sre|W-0007|coyote|fix|slo|duplicados nuevos, archivos ocultos y ticket único en R3; salida JSON y…|-|-|-|ok

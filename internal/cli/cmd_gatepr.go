@@ -14,6 +14,7 @@ import (
 	"github.com/Emmanuel93/coyote/internal/infra"
 	"github.com/Emmanuel93/coyote/internal/product"
 	"github.com/Emmanuel93/coyote/internal/project"
+	"github.com/Emmanuel93/coyote/internal/safetext"
 	"github.com/Emmanuel93/coyote/internal/secrets"
 	"github.com/Emmanuel93/coyote/internal/slo"
 )
@@ -363,7 +364,7 @@ func fileList(files []string, n int) string {
 // codeCell deja una ruta apta para un bloque de código en una celda: sin
 // acentos graves que lo cierren ni barras que partan la tabla.
 func codeCell(s string) string {
-	return strings.NewReplacer("`", "'", "|", "¦", "\n", " ", "\r", " ").Replace(s)
+	return strings.NewReplacer("`", "'", "|", "¦", "\n", " ", "\r", " ").Replace(safetext.String(s))
 }
 
 // baseRules da, para cada ruta del repo, las reglas de secretos del proyecto
@@ -400,6 +401,24 @@ func baseRules(dir, base, name string) func(string) (secrets.Rules, string) {
 
 // sloRisks compara cada archivo de SLOs que toca el PR con el de la base y
 // revisa que las reglas generadas del commit del PR salgan de su SLO.
+// newDuplicate dice si un servicio repetido pesa en este PR: x.yaml y x.yml
+// en la misma carpeta, siempre; en otra carpeta (dos proyectos de un
+// monorepo), cuando el PR agrega uno de los archivos.
+func newDuplicate(dir, base, f string, hadOld bool, paths []string) bool {
+	for _, p := range paths {
+		if p == f {
+			continue
+		}
+		if path.Dir(p) == path.Dir(f) {
+			return true
+		}
+		if _, ok := product.FileAt(dir, base, p); !ok {
+			return true
+		}
+	}
+	return !hadOld
+}
+
 func sloRisks(dir, base, head string, changed []string) []ci.FileRisk {
 	var out []ci.FileRisk
 	add := func(p, risk, why string) { out = append(out, ci.FileRisk{Path: p, Risk: risk, Why: why}) }
@@ -432,7 +451,7 @@ func sloRisks(dir, base, head string, changed []string) []ci.FileRisk {
 			for _, c := range slo.CompareFile(f, oldText, hadOld, newText, hasNew) {
 				add(f, c.Risk, c.Why)
 			}
-			if ps := dups[slo.ServiceOf(f)]; hasNew && len(ps) > 1 {
+			if ps := dups[slo.ServiceOf(f)]; hasNew && len(ps) > 1 && newDuplicate(dir, base, f, hadOld, ps) {
 				add(f, ci.R3, fmt.Sprintf("el servicio %s está en más de un archivo de SLOs (%s): sus reglas se llaman igual y al cargarlas unas pisan a las otras",
 					slo.ServiceOf(f), strings.Join(ps, ", ")))
 			}

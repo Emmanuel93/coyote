@@ -63,16 +63,18 @@ func ref(refs []string, key string) string {
 	return ""
 }
 
-// FoldAt es Fold con los eventos hasta now: uno con fecha futura (un reloj
-// adelantado o una línea editada) todavía no cuenta, igual que en el
-// presupuesto del proyecto.
+// FoldAt es Fold sin las aceptaciones con fecha futura (un reloj adelantado
+// o una línea editada): una aceptación deja avanzar al plan, y todavía no
+// ocurrió. El gasto, los rechazos y el cierre con fecha futura sí cuentan:
+// ignorarlos aflojaría el tope o dejaría correr un plan cerrado.
 func FoldAt(p *Plan, entries []ledger.Entry, now time.Time) *State {
 	limit := now.Add(time.Minute)
 	kept := make([]ledger.Entry, 0, len(entries))
 	for _, e := range entries {
-		if e.Line.TS.Before(limit) {
-			kept = append(kept, e)
+		if e.Line.Type == "apr" && !e.Line.TS.Before(limit) {
+			continue
 		}
+		kept = append(kept, e)
 	}
 	return Fold(p, kept)
 }

@@ -23,7 +23,14 @@ type Change struct {
 func IsSpecPath(p string) bool {
 	dir, file := path.Split(p)
 	ext := path.Ext(file)
-	return !InRulesDir(p) && (dir == Dir+"/" || strings.HasSuffix(dir, "/"+Dir+"/")) && (ext == ".yaml" || ext == ".yml")
+	return !InRulesDir(p) && (dir == Dir+"/" || strings.HasSuffix(dir, "/"+Dir+"/")) && (ext == ".yaml" || ext == ".yml") && goodStem(file)
+}
+
+// goodStem dice si un archivo tiene nombre antes de la extensión y no es
+// oculto: .yaml no es el SLO de ningún servicio.
+func goodStem(file string) bool {
+	stem := strings.TrimSuffix(strings.TrimSuffix(file, ".yaml"), ".yml")
+	return stem != "" && !strings.HasPrefix(stem, ".")
 }
 
 // ServiceOf es el servicio de un archivo de SLOs o de reglas: su nombre sin
@@ -137,10 +144,16 @@ func CompareFile(p, oldText string, hadOld bool, newText string, hasNew bool) []
 		if !oa.Page.Disable && !na.Page.Disable && (!reflect.DeepEqual(nonNil(oa.Labels), nonNil(na.Labels)) || !reflect.DeepEqual(nonNil(oa.Page.Labels), nonNil(na.Page.Labels)) || head.AlertName(now) != base.AlertName(old)) {
 			r3("cambia el nombre o las etiquetas de la alerta page de %s: puede cambiar a quién le llega", old.Name)
 		}
+		// Sin page, el ticket es la única alerta: cambiar a quién le llega pesa igual.
+		onlyTicket := na.Page.Disable && !oa.Ticket.Disable && !na.Ticket.Disable
+		ticketRoute := !reflect.DeepEqual(nonNil(oa.Ticket.Labels), nonNil(na.Ticket.Labels)) ||
+			!reflect.DeepEqual(nonNil(oa.Labels), nonNil(na.Labels)) || head.AlertName(now) != base.AlertName(old)
 		switch {
 		case !oa.Ticket.Disable && na.Ticket.Disable:
 			// Con la page apagada, sin ticket el SLO se queda sin ninguna alerta.
 			r3("apaga la alerta ticket de %s", old.Name)
+		case onlyTicket && ticketRoute:
+			r3("cambia el nombre o las etiquetas de la alerta ticket de %s, su única alerta: puede cambiar a quién le llega", old.Name)
 		case !oa.Ticket.Disable && !na.Ticket.Disable && !reflect.DeepEqual(nonNil(oa.Ticket.Labels), nonNil(na.Ticket.Labels)):
 			r2("cambia las etiquetas de la alerta ticket de %s", old.Name)
 		}
@@ -197,7 +210,7 @@ func IsRulesPath(p string) bool {
 		return false
 	}
 	rest := p[end:]
-	return rest != "" && !strings.Contains(rest, "/") && path.Ext(rest) == ".yaml"
+	return rest != "" && !strings.Contains(rest, "/") && path.Ext(rest) == ".yaml" && goodStem(rest)
 }
 
 // Pair devuelve, para una ruta de SLOs o de reglas generadas, las rutas

@@ -216,6 +216,40 @@ func TestGatePRSLOsDuplicadosYAnidados(t *testing.T) {
 	}
 	reset()
 
+	// Un archivo llamado solo .yaml no es el SLO de ningún servicio: sus reglas son un archivo suelto.
+	write(t, svc, "coyote/slo/.yaml", weak)
+	write(t, svc, "coyote/slo/prometheus/.yaml", "groups: []\n")
+	hidden := commit("chore(slo): oculto")
+	if out := gatepr(start, hidden); !strings.Contains(out, "### coyote: R3") || !strings.Contains(out, "no sale de ningún SLO") {
+		t.Fatalf("un .yaml oculto en la carpeta de reglas es R3:\n%s", out)
+	}
+	reset()
+
+	// Dos proyectos del monorepo con un servicio del mismo nombre, desde antes:
+	// editar la descripción de uno no es R3 por el duplicado.
+	write(t, svc, "otro/coyote/slo/pedidos-service.yaml", sloPedidos)
+	both := commit("feat(slo): otro proyecto")
+	write(t, svc, "coyote/slo/pedidos-service.yaml", strings.Replace(sloPedidos, "Pedidos sin error 5xx", "Pedidos sin errores 5xx", 1))
+	must(t, run(t, svc, "", "slo", "rules"), 0, "slo rules")
+	edit := commit("docs(slo): descripción")
+	if out := gatepr(both, edit); strings.Contains(out, "está en más de un archivo") || strings.Contains(out, "### coyote: R3") {
+		t.Fatalf("un duplicado que ya estaba en la base no hace R3 una edición:\n%s", out)
+	}
+	reset()
+
+	// Con la page apagada, cambiar a quién le llega el ticket es R3.
+	nopage := strings.Replace(sloPedidos, "page: { labels: { severity: page } }", "page: { disable: true }", 1)
+	write(t, svc, "coyote/slo/pedidos-service.yaml", nopage)
+	must(t, run(t, svc, "", "slo", "rules"), 0, "slo rules")
+	np := commit("chore(slo): sin page")
+	write(t, svc, "coyote/slo/pedidos-service.yaml", strings.Replace(nopage, "ticket: { labels: { severity: ticket } }", "ticket: { labels: { severity: ticket, team: nadie } }", 1))
+	must(t, run(t, svc, "", "slo", "rules"), 0, "slo rules")
+	rt := commit("chore(slo): ticket a otro equipo")
+	if out := gatepr(np, rt); !strings.Contains(out, "### coyote: R3") || !strings.Contains(out, "su única alerta") {
+		t.Fatalf("con la page apagada, el ticket es la única alerta:\n%s", out)
+	}
+	reset()
+
 	// Archivos con forma de otro proyecto dentro de la carpeta de reglas.
 	write(t, svc, "coyote/slo/prometheus/coyote/slo/pedidos-service.yaml", weak)
 	write(t, svc, "coyote/slo/prometheus/coyote/slo/prometheus/pedidos-service.yaml", "groups: []\n")
@@ -244,5 +278,21 @@ func TestGatePRSLOsDuplicadosYAnidados(t *testing.T) {
 	prose := regexp.MustCompile("`[^`]*`").ReplaceAllString(out, "")
 	if !strings.Contains(out, "no coincide con el archivo") || strings.Contains(prose, "www.evil-example.com") {
 		t.Fatalf("un dominio en el comentario queda cortado para que GitHub no lo enlace:\n%s", out)
+	}
+}
+
+// TestSLORulesStdoutIgualAlArchivo: --stdout redirigido da los mismos bytes
+// que escribe slo rules, aunque el SLO lleve un guion suave (U+00AD).
+func TestSLORulesStdoutIgualAlArchivo(t *testing.T) {
+	base := setup(t)
+	root := filepath.Join(base, "tienda")
+	must(t, run(t, base, "", "init", "tienda", "--type", "backend", "--purpose", "API de la tienda demo"), 0, "init")
+	write(t, root, "coyote/slo/pedidos-service.yaml", strings.Replace(sloPedidos, "Pedidos sin error 5xx", "Pedidos sin error\u00ad 5xx", 1))
+	write(t, root, "coyote/runbooks/pedidos-disponibilidad.md", "# Pedidos\n")
+	must(t, run(t, root, "", "slo", "rules"), 0, "slo rules")
+	r := run(t, root, "", "slo", "rules", "pedidos-service", "--stdout")
+	must(t, r, 0, "stdout")
+	if file := readFile(t, filepath.Join(root, "coyote/slo/prometheus/pedidos-service.yaml")); r.stdout != file {
+		t.Fatalf("--stdout no es el archivo:\n%q\n%q", r.stdout[:200], file[:200])
 	}
 }

@@ -288,6 +288,9 @@ func TestConsultasQueNoMidenLoQueDicen(t *testing.T) {
 		"subconsulta de un día":  `sum(rate(m{job="a"}[{{.window}}:1d]))`,
 		"subconsulta de ventana": `sum(rate(m{job="a"}[{{.window}}:{{.window}}]))`,
 		"crudo con barra":        "sum(rate(m{job=\"a\"}[{{.window}}])) + 0 * sum(rate(m{job=`a\\`}[5m] @ 100 offset 1w))",
+		"group_left sin nombre":  `sum(rate(m{job="a"}[{{.window}}])) * on() group_left {job="b"}`,
+		"scalar":                 `scalar(sum(rate(m{job="a"}[{{.window}}])))`,
+		"paso de 5m1s":           `sum(rate(m{job="a"}[{{.window}}:5m1s]))`,
 	}
 	for name, q := range bad {
 		text := strings.Replace(pagos, base, q, 1)
@@ -300,6 +303,7 @@ func TestConsultasQueNoMidenLoQueDicen(t *testing.T) {
 		`sum by (route) (rate(m{job="a"}[{{.window}}]))`,
 		`sum(rate(m_bucket{job="a",le="0.5"}[{{.window}}:1m]))`,
 		`sum(rate(m_bucket{job="a",le="0.5"}[{{.window}}:]))`,
+		`sum(rate(m_bucket{job="a",le="0.5"}[{{.window}}:2m30s]))`,
 		`sum(rate(orders_total{job="a"}[{{.window}}])) or sum(rate(and_total{job="a"}[{{.window}}]))`,
 		`(sum(rate(a_total{job="x"}[{{.window}}])) or vector(0)) + (sum(rate(b_total{job="x"}[{{.window}}])) or vector(0))`,
 	}

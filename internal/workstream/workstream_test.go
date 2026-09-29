@@ -427,7 +427,8 @@ func TestFoldAtIgnoraEventosFuturos(t *testing.T) {
 		line(now.AddDate(73, 0, 0), "apr", "ok", 0, "step:S1", "doc:runs/b.md"),
 	}
 	st := FoldAt(p, ev, now)
-	if st.Spent != 0.4 || st.Steps[0].Status != Review || st.Steps[0].Runs != 1 {
-		t.Fatalf("un evento con fecha futura no cuenta: gasto %v, S1 %s con %d corridas", st.Spent, st.Steps[0].Status, st.Steps[0].Runs)
+	// La aceptación futura no deja avanzar; el gasto futuro cuenta para el tope.
+	if st.Spent != 100.4 || st.Steps[0].Status != Review {
+		t.Fatalf("aceptación futura fuera, gasto futuro adentro: gasto %v, S1 %s", st.Spent, st.Steps[0].Status)
 	}
 }
