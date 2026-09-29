@@ -1,0 +1,17 @@
+# Plan de v0.6, construido fuera del motor: los pasos los ejecuta la persona con su asistente, no coyote run; por eso no llevan max_usd.
+id: W-0006
+title: v0.6 IDEs con nivel medido, secretos e infraestructura como código
+owner: "@eramirezhdez"
+autonomy: manual
+risk: R3
+reasoning: docs/plan/EXECUTION_PLAN.md#v06-seguridad-en-todos-los-frentes--razonamiento
+authorized_by: coyote/approvals/P-0005.json
+gate: G6                    # el gate en los IDEs que uses e infra.yaml en el repo de infraestructura, en ramas
+steps:
+  - { id: T39, does: "plan razonado y ADR-0015, ADR-0016, ADR-0017", agent: coyote-sr-solution-architect, output: [docs/plan/EXECUTION_PLAN.md, coyote/decisions/] }
+  - { id: T40, does: adaptadores de IDE con nivel medido, agent: coyote-devsecops, output: [internal/gate, internal/install] }
+  - { id: T41, does: secretos y credenciales, agent: coyote-devsecops, output: [internal/gate, internal/secrets] }
+  - { id: T42, does: infraestructura como código, agent: coyote-infra, output: internal/infra }
+  - { id: T43, does: piloto en solo lectura, agent: persona, output: reportes del piloto, gate: human }
+  - { id: T44, does: verificación y reporte de G6, agent: coyote-reviewer, output: docs/releases/v0.6.0.md, gate: human }
+close: { summary: close.md }

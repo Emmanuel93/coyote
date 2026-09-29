@@ -1,6 +1,6 @@
 # Plan de ejecución — Coyote
 
-Estado: v0.5.0 aprobada en G5 (P-0005), en la rama `v0.5`; `main` sigue en v0.4.0 · v0.6 en construcción en su rama · actualizado 2026-09-29
+Estado: v0.5.0 aprobada en G5 (P-0005), en la rama `v0.5`; `main` sigue en v0.4.0 · v0.6 en construcción en la rama `v0.6` · actualizado 2026-09-29
 
 Este plan ejecuta la propuesta aprobada ("Plan de construcción — Framework Coyote"). Cada release se razona con la plantilla de cinco partes que usarán los agentes de Coyote (problema, restricciones, opciones, decisión, riesgos) y cierra con un gate humano: nada se etiqueta, se publica ni toca otros proyectos sin autorización explícita.
 
@@ -21,8 +21,11 @@ Este plan ejecuta la propuesta aprobada ("Plan de construcción — Framework Co
 | v0.3 gate | Aprobaciones por hash, hooks de IDE, agentes y skills, `install` para Claude Code y Cursor | G3 | Piloto en seco sobre un dominio real, en solo lectura |
 | v0.4 run | Producto multi-repo: extracción de contexto, mapa entre repos e impacto de un cambio; `coyote run`, router v1 y cierres con costo | G4 | Presupuesto para correr agentes y llevar las propuestas del piloto a cada repo |
 | v0.5 team | Pipeline de impacto en cada PR, motor de workstreams (`supervised` y `autonomous`), aprobación en equipo por PR y corridas medidas | G5 | Aplicar coyote a los repos de la organización: pipeline y `supervised` |
-| v0.6 | Resto de IDEs, web v1, IaC, DevSecOps y SRE | G6 | Según lo que muestre v0.5 |
-| v1.0 | Endurecimiento, auditoría, documentación | G7 | Release 1.0 |
+| v0.6 | Resto de IDEs con su nivel medido, secretos y credenciales, infraestructura como código | G6 | El gate en los IDEs que uses y el inventario de infraestructura en su repo, en ramas |
+| v0.7 | SRE (SLOs y alertas como código), web v1 con visibilidad de costos (D10) y hub (D12) | G7 | Crear el hub de la organización y llevar las alertas a Faro |
+| v1.0 | Endurecimiento, auditoría, documentación | G8 | Release 1.0 |
+
+La propuesta juntaba en v0.6 lo que aquí son v0.6 y v0.7; el corte se razona en v0.6.
 
 ## v0.1 init — razonamiento
 
@@ -293,15 +296,155 @@ G4 autoriza: el presupuesto para correr agentes con `coyote run` en tu Mac, llev
 | T37 | Corridas medidas | Evidencia antes de dejar correr planes | Tus primeras corridas en el piloto, con su costo y caché en el ledger y en el reporte de G5 | Pendiente: las lanzas tú; condición para `supervised` en el piloto |
 | T38 | Verificación y G5 | Evidencia antes de aplicar coyote en los repos de la organización | Pruebas, revisión adversarial y `docs/releases/v0.5.0.md` | Hecho: dos pasadas adversariales (13 hallazgos y 5 más, corregidos); `gate pr` validado en solo lectura sobre el PR #1 de servicios |
 
-G5 autoriza:
+G5 autorizó (P-0005), con el ejercicio en ramas:
 
-1. Instalar el pipeline en los tres repos: los PR de los workflows y el secreto de lectura.
-2. `supervised` en los workstreams del piloto.
-3. Arrancar v0.6: los demás IDEs, la web v1 y las herramientas de IaC, DevSecOps y SRE.
+1. `v0.5.0` etiquetada sobre la rama `v0.5`; `main` de coyote se queda en v0.4.0.
+2. El pipeline en una rama `coyote/pipeline` de cada repo del producto, con la bandera `pr_enforcement` apagada; se ensaya con PRs contra esa rama que se cierran sin merge.
+3. `supervised` en los workstreams del piloto, después de tus corridas medidas (T37).
+4. Arrancar v0.6 en su rama: los demás IDEs, la web v1 y las herramientas de IaC, DevSecOps y SRE, con D10 y D12.
 
-## v0.5 a v1.0
+## v0.6 seguridad en todos los frentes — razonamiento
 
-Siguen el orden de la propuesta. Cada una recibirá su razonamiento completo al cerrar la anterior, con lo aprendido en su gate; así el plan no fija hoy lo que conviene decidir con evidencia.
+**Problema.**
+- El gate cubre Claude Code y Cursor. Cualquier otro agente corre comandos y edita sin aprobación: Codex, Copilot en VS Code o en la terminal, Gemini CLI, Windsurf, Junie. Ahí A1 es una promesa. En tu Mac hay configuración de Junie y de VS Code, y R17 limita a esos IDEs solo en papel: nada mide qué nivel tiene cada uno.
+- Los secretos dentro de un proyecto se leen sin aprobación.
+  - El gate protege `~/.aws` o `~/.ssh`, pero no un `.env`, un `terraform.tfstate` o el keystore de Android dentro del repo.
+  - Tampoco detiene los comandos que imprimen credenciales, como `gcloud auth print-access-token`, `kubectl get secret` o `terraform output -json`.
+  - Y nada impide hacer commit de un secreto.
+- R13 pide `coyote/infra.yaml`, pero solo revisa que exista. En un PR, `gate pr` sabe que cambió un archivo de infraestructura (R3), no qué va a crear o destruir. Y un `terraform apply` de un agente pasa si la persona lo aprueba sin leer.
+
+**Lo que mostró la lectura (solo lectura, sin abrir ningún `.env`).**
+- `fintech-infraestructure`:
+  - Terraform multinube: GCP primero, AWS y Azure como andamiaje. Dos ambientes: demo, con apagado programado, y prod, 24/7.
+  - Presupuesto escrito para el demo: $104 al mes de meta y $150 de tope.
+  - Está en etapa de plan: sin archivos de Terraform todavía y sin commits.
+  - `make apply` corre Terraform directo, `make lint` ignora las fallas de checkov (`|| true`) y el bootstrap le da `roles/editor` y `iam.securityAdmin` a la cuenta de servicio de Terraform.
+  - Su `.gitignore` ya excluye tfstate, llaves y `.env`: los secretos van a vivir en disco, junto al código y al alcance de un agente.
+- `observability-platform` (Faro):
+  - LGTM con un gateway OTel que limpia PII, verificado en local.
+  - SLOs y alertas por burn-rate escritos, sin construir (su fase F3).
+  - Según su README, su `.env` guarda la API key de ingesta y las credenciales del storage. Hoy un agente en esa carpeta lo lee sin pedir aprobación.
+- Los hooks de los IDEs, en septiembre de 2026:
+
+| IDE | Hook previo | Dónde se declara | Cómo niega | Dónde puede fallar |
+| --- | --- | --- | --- | --- |
+| Codex CLI | `PreToolUse`: shell, `apply_patch` y MCP | `.codex/hooks.json` o `[hooks]` en `.codex/config.toml` | salida 2 o `permissionDecision: deny` | la carpeta tiene que ser de confianza; `features.hooks = false` los apaga |
+| Copilot CLI y VS Code | `preToolUse` | `.github/hooks/*.json`; VS Code también lee el de Claude Code, sin su matcher | `permissionDecision: deny`; salida 2 en VS Code | en VS Code está en preview, hay reportes de negaciones que no detienen la herramienta y la organización puede apagarlos |
+| Gemini CLI | `BeforeTool`: herramientas propias y MCP | `.gemini/settings.json` | salida 2 o `decision: deny` | pide confirmar un hook del proyecto cuando cambia; `/hooks disable-all` los apaga |
+| Windsurf (hoy Devin Desktop) | `pre_run_command`, `pre_write_code`, `pre_read_code` y `pre_mcp_tool_use` | `.devin/hooks.json` (antes `.windsurf/hooks.json`) | salida 2 | no cargan en modo restringido |
+| Devin CLI | `PreToolUse` | lee los hooks de Claude Code en `.claude/` | salida 2 | sus herramientas tienen otros nombres |
+| Junie | `PreToolUse`, solo en la CLI y en EAP | `~/.junie/config.json`; los del proyecto se ignoran | salida 2 | el plugin del IDE todavía no llama hooks |
+| Kiro CLI y Cline | `PreToolUse` | `.kiro/hooks/` y `.clinerules/hooks/` | salida 2 o `cancel` | Kiro no los carga sin modo interactivo; Cline no corre en Windows y se activa a mano |
+| Zed | ninguno: reglas fijas por patrón | la configuración de Zed | `always_deny` | no hay hook que llame a coyote |
+
+  Casi todos tienen un hook previo que bloquea con salida 2 y un JSON parecido al de Claude Code. Cambian los campos, los nombres de las herramientas y el archivo donde se declara. Varios pueden quedar apagados sin aviso (carpeta sin confianza, modo restringido, política de la organización, EAP), y en un caso se reporta que la negación no detiene la herramienta. Conclusión: el nivel de un IDE no se puede declarar, hay que medirlo en la máquina de la persona.
+
+**Restricciones.**
+- Un solo gate: ningún IDE recibe una política más laxa. Un IDE de nivel 2 o 3 queda limitado por R17, no por confiar en él.
+- Los IDEs no corren en el entorno de construcción: piden cuentas y modelos. Los adaptadores se prueban con las entradas que documenta cada uno, y la verificación real es en tu máquina.
+- coyote nunca muestra el valor de un secreto: ni en el gate, ni en un reporte, ni en el ledger. Un hallazgo dice archivo, línea y tipo.
+- coyote no corre Terraform ni habla con las nubes. Lee archivos y el plan en JSON que generan la persona o el pipeline, y no guarda credenciales de nube.
+- Sin red ni dependencias nuevas. Sin tocar otros proyectos: el piloto es de solo lectura y en `fintech-infraestructure` no se escribe nada.
+- C1 y R15 como siempre.
+
+**Opciones para los IDEs.**
+- A. Solo archivos de instrucciones (`AGENTS.md`). El agente puede ignorarlos: nivel 3.
+- B. Un adaptador por IDE:
+  1. lee la entrada de su hook y traduce sus herramientas a las clases del gate;
+  2. niega en la forma que ese IDE entiende;
+  3. instala su archivo de hooks sin pisar tu configuración;
+  4. mide en tu máquina que el IDE llama al gate y respeta la negación.
+- C. Envolver la shell con shims en el `PATH`. Cubre comandos, no ediciones ni MCP, y se esquiva con una ruta absoluta.
+
+**Opciones para los secretos.**
+- A. Escáneres externos (gitleaks, trufflehog) en la CI. Tienen más patrones, pero llegan tarde (en el PR), no cubren lo que lee un agente y son binarios que instalar.
+- B. En coyote:
+  - los archivos de secretos del proyecto y los comandos que imprimen credenciales se tratan como credenciales en el gate;
+  - un escáner de alta confianza revisa `coyote commit`, el lint y `gate pr`.
+- C. B más un escáner externo en la CI, como opción.
+
+**Opciones para la infraestructura.**
+- A. Dejarla a los agentes (`coyote-infra` propone). Nada queda verificable.
+- B. Tres piezas:
+  - `infra.yaml` con esquema y `coyote infra check`;
+  - la lectura del plan de Terraform en JSON para clasificar el cambio;
+  - reglas del gate para los comandos de infraestructura, según el ambiente.
+- C. Motores de políticas (OPA, checkov) como fuente. Son binarios externos; coyote puede leer su salida después.
+
+**Decisión.**
+- **IDEs: B** (ADR-0015).
+  - Adaptadores para Codex, Gemini CLI, Copilot (la CLI y VS Code leen el mismo `.github/hooks/`), Windsurf/Devin Desktop y Devin CLI, que ya lee el hook de Claude Code.
+  - Junie solo tiene hooks en su CLI, en EAP, y el plugin del IDE no los llama: en el IDE es nivel 3. Kiro, Cline y Zed quedan en la matriz, sin adaptador en v0.6.
+  - **El nivel se mide.** `coyote doctor --ide X` usa un canario: te pide que el agente corra un comando que el gate niega siempre.
+    - Si el IDE llamó al gate y el comando no corrió, es nivel 1.
+    - Si corrió de todos modos, nivel 2: el IDE no respeta la negación.
+    - Si el gate nunca se enteró, nivel 3: hooks apagados, carpeta sin confianza o IDE sin hooks.
+
+    El gate guarda por IDE su última llamada y las herramientas que no conoce, en `.coyote/`.
+  - Una herramienta que el gate no conoce sigue pidiendo aprobación: falla cerrado.
+- **Secretos: B** (ADR-0016). La opción C (gitleaks en la CI) pasa a v0.7, con el pipeline.
+  - **Gate.** Hay dos cosas que se bloquean siempre, aun con aprobación:
+    - leer un archivo de secretos del proyecto: `.env*` salvo los de ejemplo, tfstate, llaves y keystores, kubeconfig y cuentas de servicio;
+    - correr un comando que imprime credenciales: CLIs de nube, `kubectl get secret`, `terraform output` y `state`, `helm get values`, `vault` y `env` a secas.
+  - **Sin fatiga.** `coyote secrets list` muestra los nombres de las variables sin sus valores: el agente sabe qué existe sin leerlo. Un falso positivo se dispensa en `project.yaml` con motivo, como en el estándar.
+  - **Escáner.** Patrones de alta confianza: llaves privadas, tokens de nube y de GitHub, cuentas de servicio y URLs con contraseña.
+    - `coyote commit` detiene un commit con un secreto.
+    - Una regla MUST nueva, R18, lo revisa en el lint.
+    - `gate pr` marca R3 y cita archivo y línea, nunca el valor.
+    - El gate detiene a un agente que escribe un secreto literal.
+- **Infraestructura: B** (ADR-0017).
+  - **Inventario.** `coyote/infra.yaml` v1 declara:
+    - la herramienta (Terraform u OpenTofu) y dónde se fijan sus versiones;
+    - los ambientes: var-file, presupuesto (meta y tope), `apply: reviewed` o `local`, y las marcas que los delatan en un comando (`ENV=prod`, `--project=…`, un contexto de kubectl);
+    - los stacks: nube, ambiente y si está activo o es andamiaje;
+    - los dueños.
+  - **Revisión del inventario.** `coyote extract` lo propone para un repo de Terraform. `coyote infra check` lo compara con el repo: estado remoto, versiones fijadas, lock en git, var-files, presupuestos y ningún tfstate versionado. R13 usa esa revisión.
+  - **Plan.** `coyote infra plan plan.json` lee la salida de `terraform show -json` y clasifica cada recurso:
+    - destruir o reemplazar, IAM, red expuesta y llaves: R3;
+    - lo demás que cambia: R2;
+    - sin cambios: R1.
+
+    Solo reporta direcciones y tipos, nunca valores, porque el plan en JSON lleva secretos. `gate pr --plan` lo suma al reporte del PR.
+  - **Gate por ambiente.**
+    - Un agente nunca corre `apply`, `destroy` ni cambios de estado de Terraform u OpenTofu.
+    - Los comandos con efectos contra un ambiente `reviewed` (kubectl, helm, gcloud, aws, az y los targets de make declarados) se bloquean siempre: prod lo aplica la persona o el pipeline con revisor.
+    - Los demás comandos de infraestructura con efectos piden una aprobación de un solo uso.
+- **Alcance.** SRE (SLOs y alertas como código), la web v1 con D10 y el hub (D12) pasan a v0.7.
+  - v0.6 cierra frentes de seguridad que G6 puede verificar por sí solos.
+  - La web y SRE sirven para operar y ver, y dependen del hub.
+
+**Riesgos.**
+- Los formatos de los hooks cambian: varios están en preview o EAP. Mitigación: adaptadores en una tabla, pruebas con las entradas documentadas y el canario, que muestra cuando un IDE deja de llamar al gate o de respetarlo.
+- Un falso positivo de archivo de secretos bloquea una lectura legítima. Mitigación: los archivos de ejemplo se leen, `secrets list` da los nombres y la dispensa lleva motivo.
+- Falsos positivos del escáner, como las llaves falsas de las pruebas. Mitigación: solo patrones de alta confianza, y una marca por línea (`coyote:allow-secret`) que se ve en la revisión.
+- Detectar el ambiente por marcas puede fallar: `kubectl` sin `--context` usa el contexto actual. Mitigación: sin marca, el comando pide aprobación normal y la revisión avisa que usa el contexto actual.
+- El plan en JSON contiene secretos. Mitigación: coyote lo lee sin copiarlo y solo reporta direcciones y tipos.
+- Separar v0.6 y v0.7 retrasa la web y SRE un gate. Lo decides en G6.
+
+### Tareas de v0.6
+
+| ID | Tarea | Razonamiento | Aceptación | Estado |
+| --- | --- | --- | --- | --- |
+| T39 | Plan y ADR-0015, ADR-0016, ADR-0017 | Tres frentes de seguridad; se razonan antes del código | Esta sección, los ADRs y W-0006 | Hecho |
+| T40 | IDEs con nivel medido | Sin adaptador, A1 es una promesa en ese IDE | Codex, Gemini CLI, Copilot, Windsurf/Devin Desktop y Devin CLI: entrada, herramientas, negación e instalación sin pisar tu configuración; `doctor --ide` con canario; matriz en la spec | Pendiente |
+| T41 | Secretos y credenciales | Un agente no debe leer ni publicar un secreto | Archivos de secretos y comandos que imprimen credenciales, bloqueados siempre; `secrets list`; escáner en `commit`, lint (R18), `gate pr` y escrituras del agente; pruebas adversariales | Pendiente |
+| T42 | Infraestructura como código | Ver qué hace un cambio de infraestructura antes de aplicarlo | `infra.yaml` v1, `infra check` y R13, `extract` para Terraform, `infra plan` y `gate pr --plan`; gate de comandos de infraestructura por ambiente | Pendiente |
+| T43 | Piloto en solo lectura | Evidencia sobre tus repos antes de G6 | `infra.yaml` propuesto para `fintech-infraestructure`, con su `infra check`; inventario de archivos de secretos de los repos (nombres y conteos); el canario en tus IDEs, que corres tú | Pendiente |
+| T44 | Verificación y G6 | Evidencia antes de activar el gate en otros IDEs y en la infraestructura | Pruebas, revisión adversarial y `docs/releases/v0.6.0.md` | Pendiente |
+
+G6 autorizaría:
+
+1. Etiquetar `v0.6.0` en su rama.
+2. Instalar el gate en los IDEs que usas, con su nivel medido; en los repos del producto, en ramas `coyote/`.
+3. Proponer `coyote/infra.yaml` a `fintech-infraestructure` en una rama, cuando el repo tenga commits.
+4. Arrancar v0.7: SRE, web v1 (D10) y hub (D12).
+
+## v0.7 a v1.0
+
+- **v0.7, operación y visibilidad.** SLOs y alertas como código, con Faro como primer destino; web v1 con workstreams, aprobaciones, presupuesto y la visibilidad de costos (D10); el hub de la organización (D12); gitleaks como opción del pipeline.
+- **v1.0.** Endurecimiento, auditoría y documentación.
+
+Cada una recibirá su razonamiento completo al cerrar la anterior, con lo aprendido en su gate; así el plan no fija hoy lo que conviene decidir con evidencia.
 
 ## Supuestos sobre decisiones abiertas
 
@@ -312,8 +455,8 @@ Siguen el orden de la propuesta. Cada una recibirá su razonamiento completo al 
 | D4 embeddings | Ninguno en v0.2 (BM25 local); locales cuando lleguen | No sacar código a terceros sin autorización || Confirmado en G2 |
 | D6 aprobación R2–R3 | CLI con registro firmado en v0.3; pull request con `coyote gate pr` en CI después | La CLI funciona sin red; el PR agrega revisión de equipo | Confirmado en G3 |
 | D11 IDE del piloto | Claude Code | Es el de nivel 1 con hooks más completos | Confirmado en G3 |
-| D10 visibilidad de costos | Cada persona ve lo suyo, admins todo | Menor exposición por defecto | v0.6 (movida en G5) |
-| D12 hub | `kredius`, sin crearlo hasta G5 | Aislamiento | v0.6 (movida en G5) |
+| D10 visibilidad de costos | Cada persona ve lo suyo, admins todo | Menor exposición por defecto | v0.7, con la web v1 (movida en G5 a v0.6; el corte de v0.6 la lleva a v0.7) |
+| D12 hub | `kredius`, sin crearlo hasta G5 | Aislamiento | v0.7, con el hub (movida en G5 a v0.6; el corte de v0.6 la lleva a v0.7) |
 | D13 nombres de archivo | `README.coyote.md` y `CONTEXT.coyote.md` | Coherente con `README.md` y `AGENTS.md` | Confirmado en G1 |
 | D14 alcance de R15 | Commits, PRs, comentarios, docs, releases y autoría del commit | Es lo que pediste | Confirmado en G1 |
 | D15 web | Plantillas Go embebidas, solo lectura y solo en 127.0.0.1 | Un solo binario, sin superficie de red || Confirmado en G2 |
@@ -327,6 +470,10 @@ Siguen el orden de la propuesta. Cada una recibirá su razonamiento completo al 
 | D27 revisión sin CODEOWNERS | Sin CODEOWNERS, un cambio R2 o R3 lo aprueba cualquier persona que no abrió el PR, y el reporte pide definir dueños | Los tres repos del piloto no tienen CODEOWNERS | Confirmado en G5 |
 | D28 exigir el chequeo del PR | Bandera `features.pr_enforcement`, apagada mientras GitHub no pueda exigir chequeos en repos privados (plan de pago): `gate pr` avisa; prendida, bloquea hasta que aprueba un dueño | La función depende de algo externo que hoy no está | Confirmado en G5 |
 | D29 ejercicio de G5 | En ramas: nada se integra a `main` de coyote ni de los repos del producto; el pipeline se ensaya con PRs contra `coyote/pipeline` | Lo pediste: probar sin tocar producción | Confirmado en G5 |
+| D30 IDEs del equipo | Adaptadores para Codex, Gemini CLI, Copilot, Windsurf/Devin Desktop y Devin CLI; el nivel de cada IDE se mide con el canario en la máquina de cada persona (ADR-0015) | Un nivel declarado no dice si el hook está prendido ni si la negación se respeta | G6 |
+| D31 secretos del proyecto | Se tratan como credenciales: ningún agente los lee, ni con aprobación; `secrets list` da los nombres (ADR-0016) | Un agente que lee un secreto lo puede filtrar en lo que escribe | G6 |
+| D32 `apply` de infraestructura | Nunca lo corre un agente; un ambiente `reviewed` solo lo aplican la persona o un pipeline con revisor (ADR-0017) | Lo piden R13 y la definición de `coyote-infra` | G6 |
+| D33 corte de v0.6 | Seguridad (IDEs, secretos e infraestructura) en v0.6; SRE, web v1 y hub en v0.7 | Releases que un gate pueda verificar por sí solos | G6 |
 | D23 unidad de trabajo | Producto multi-repo: servicios, app y backoffice juntos, en un proyecto aparte que lee los tres (ADR-0011) | Un cambio en uno afecta a los otros (G3) | Confirmado en G4 |
 | D20 lectura sin aprobación | Lista cerrada de comandos de solo lectura en la herramienta; sin patrones propios del proyecto | Leer no tiene efectos y evita la fatiga | Confirmado en G3 |
 | D21 validez de una aprobación | Solo en la máquina donde se dio (firma con clave local), 24 h como máximo | Un registro copiado o fabricado no sirve | Confirmado en G3 |

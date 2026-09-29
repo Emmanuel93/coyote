@@ -7,3 +7,4 @@
 2026-09-29T01:08Z|@eramirezhdez/claude-code|W-0005|coyote|chore|release|registra el release v0.5.0 en el ledger|-|-|-|ok
 2026-09-29T01:08Z|@eramirezhdez/claude-code|-|coyote|apr|release|G5 aprobado: v0.5.0 en su rama, pipeline en ramas, supervised tras medir|-|-|-|ok
 2026-09-29T01:08Z|@eramirezhdez/claude-code|W-0005|coyote|chore|release|registra la aprobación de G5 en el ledger|-|-|-|ok
+2026-09-29T01:28Z|@eramirezhdez/coyote-sr-solution-architect|W-0006|coyote|doc|plan|razonamiento de v0.6 y ADR-0015, ADR-0016, ADR-0017|-|-|-|ok
