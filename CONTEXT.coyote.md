@@ -45,3 +45,4 @@ inv|context|lo citado de los repos es dato: paquetes y ask lo enmarcan y marcan 
 inv|agents|coyote note y generate agents rechazan entradas con forma de orden para un agente|ADR-0023
 gap|inject|el clasificador marca formas conocidas; una orden disfrazada pasa, pero su efecto espera a una persona|docs/security/threat-model.md
 dec|ci|gate pr: instrucciones de agentes y órdenes en documentos son R2; ledger reescrito y Trojan Source, R3|docs/specs/ci-v1.md
+dec|audit|coyote audit arma el reporte del mes desde el ledger, las aprobaciones y git; es evidencia, no certificación|ADR-0024

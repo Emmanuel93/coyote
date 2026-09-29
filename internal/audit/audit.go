@@ -1,0 +1,411 @@
+// Package audit arma el reporte de auditoría de un proyecto desde el ledger,
+// los registros de coyote/approvals y la historia de git (ADR-0024). Es de
+// solo lectura, no usa red ni modelos y dice qué verifica y qué no: es
+// evidencia para una auditoría, no una certificación.
+package audit
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"path"
+	"path/filepath"
+	"sort"
+	"strings"
+	"time"
+
+	"github.com/Emmanuel93/coyote/internal/attribution"
+	"github.com/Emmanuel93/coyote/internal/ccf"
+	"github.com/Emmanuel93/coyote/internal/ledger"
+	"github.com/Emmanuel93/coyote/internal/usage"
+)
+
+// Git corre un comando de lectura de git en la raíz del proyecto.
+type Git func(args ...string) (string, error)
+
+// Input es lo que el reporte lee.
+type Input struct {
+	Project     string
+	Root        string
+	From, To    time.Time // periodo [From, To)
+	Now         time.Time
+	Entries     []ledger.Entry
+	Problems    []ledger.Problem
+	Approvals   []Approval
+	MonthlyUSD  float64
+	Git         Git // nil: sin historia de git
+	Attribution *attribution.Config
+}
+
+// Approval es un registro de coyote/approvals: la decisión de un gate de
+// release (Gate) o la aprobación de una acción exacta (Type "action").
+type Approval struct {
+	ID          string `json:"id"`
+	Type        string `json:"type"`
+	Gate        string `json:"gate"`
+	Release     string `json:"release"`
+	Decision    string `json:"decision"`
+	Approver    string `json:"approver"`
+	Date        string `json:"date"`
+	Response    string `json:"response"`
+	Object      string `json:"object"`
+	Uses        int    `json:"uses"`
+	TS          string `json:"ts"`
+	Expires     string `json:"expires"`
+	WS          string `json:"ws"`
+	RequestedBy string `json:"requested_by"`
+}
+
+// LoadApprovals lee los registros de coyote/approvals.
+func LoadApprovals(root string) ([]Approval, error) {
+	dir := filepath.Join(root, "coyote", "approvals")
+	files, err := os.ReadDir(dir)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var out []Approval
+	for _, f := range files {
+		if f.IsDir() || !strings.HasSuffix(f.Name(), ".json") || !f.Type().IsRegular() {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(dir, f.Name()))
+		if err != nil || len(data) > 1<<20 {
+			continue
+		}
+		var a Approval
+		if json.Unmarshal(data, &a) == nil && a.ID != "" {
+			out = append(out, a)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out, nil
+}
+
+// Resultados de una verificación.
+const (
+	OK   = "ok"
+	Warn = "aviso"
+	Fail = "falla"
+	Info = "info"
+)
+
+// Check es una verificación de integridad con su detalle.
+type Check struct {
+	Name   string   `json:"name"`
+	Result string   `json:"result"`
+	Detail []string `json:"detail,omitempty"`
+}
+
+// Count es una fila de conteo y costo.
+type Count struct {
+	Key    string  `json:"key"`
+	Events int     `json:"events"`
+	Cost   float64 `json:"cost_usd"`
+}
+
+// Release es la decisión de un gate de release.
+type Release struct {
+	ID, Gate, Release, Decision, Approver, Date, RecordedBy string
+}
+
+// Report es el reporte completo.
+type Report struct {
+	Project    string    `json:"project"`
+	From       time.Time `json:"from"`
+	To         time.Time `json:"to"`
+	Generated  time.Time `json:"generated"`
+	Events     int       `json:"events"`
+	People     []string  `json:"people"`
+	Agents     []string  `json:"agents"`
+	ByType     []Count   `json:"by_type"`
+	ByActor    []Count   `json:"by_actor"`
+	Releases   []Release `json:"releases"`
+	Approved   int       `json:"approved"`
+	Rejected   int       `json:"rejected"`
+	GateUses   int       `json:"gate_uses"`
+	GateQueued int       `json:"gate_queued"`
+	GateDenied int       `json:"gate_denied"`
+	Grants     []string  `json:"grants"`
+	Autonomous []string  `json:"autonomous"`
+	CostUSD    float64   `json:"cost_usd"`
+	MonthlyUSD float64   `json:"monthly_usd"`
+	ByPerson   []Count   `json:"by_person"`
+	ByAgent    []Count   `json:"by_agent"`
+	ByModel    []Count   `json:"by_model"`
+	ByWS       []Count   `json:"by_workstream"`
+	Checks     []Check   `json:"checks"`
+	Commits    int       `json:"commits"`
+	Signed     int       `json:"signed"`
+}
+
+// Failed dice si alguna verificación falló.
+func (r *Report) Failed() bool {
+	for _, c := range r.Checks {
+		if c.Result == Fail {
+			return true
+		}
+	}
+	return false
+}
+
+// Build arma el reporte.
+func Build(in Input) *Report {
+	r := &Report{Project: in.Project, From: in.From, To: in.To, Generated: in.Now}
+	var period []ledger.Entry
+	for _, e := range in.Entries {
+		if !e.Line.TS.Before(in.From) && e.Line.TS.Before(in.To) {
+			period = append(period, e)
+		}
+	}
+	r.Events = len(period)
+	byType, byActor := map[string]*Count{}, map[string]*Count{}
+	byPerson, byAgent, byModel, byWS := map[string]*Count{}, map[string]*Count{}, map[string]*Count{}, map[string]*Count{}
+	people, agents := map[string]bool{}, map[string]bool{}
+	bump := func(m map[string]*Count, k string, cost float64) {
+		if k == "" {
+			k = "-"
+		}
+		if m[k] == nil {
+			m[k] = &Count{Key: k}
+		}
+		m[k].Events++
+		m[k].Cost += cost
+	}
+	approvals := map[string]Approval{}
+	for _, a := range in.Approvals {
+		approvals[a.ID] = a
+	}
+	recordedBy := map[string]string{}
+	for _, e := range period {
+		l := e.Line
+		cost := 0.0
+		if l.Cost != nil && !ledger.SummaryTypes[l.Type] {
+			cost = l.Cost.In + l.Cost.Out
+		}
+		person, agent := usage.Person(l.Actor), usage.Agent(l.Actor)
+		people[person] = true
+		if agent != "" && agent != "-" {
+			agents[agent] = true
+		}
+		bump(byType, l.Type, cost)
+		bump(byActor, l.Actor, cost)
+		if cost > 0 {
+			r.CostUSD += cost
+			bump(byPerson, person, cost)
+			bump(byAgent, agent, cost)
+			bump(byModel, usage.Model(l), cost)
+			bump(byWS, l.Project, cost)
+		}
+		switch l.Type {
+		case "apr":
+			r.Approved++
+			for _, id := range approvalIDs(l, in.Approvals) {
+				recordedBy[id] = l.Actor
+			}
+		case "rej":
+			r.Rejected++
+		case "gate":
+			switch {
+			case hasRef(l.Refs, "auth:ws"):
+				r.Autonomous = append(r.Autonomous, fmt.Sprintf("%s %s: %s", l.TS.Format("2006-01-02"), l.Actor, l.What))
+			case l.Status == "ok":
+				r.GateUses++
+			case l.Status == "pend":
+				r.GateQueued++
+			case l.Status == "fail":
+				r.GateDenied++
+			}
+		}
+	}
+	for _, a := range in.Approvals {
+		switch {
+		case a.Gate != "":
+			r.Releases = append(r.Releases, Release{a.ID, a.Gate, a.Release, a.Decision, a.Approver, a.Date, recordedBy[a.ID]})
+		case a.Type == "action" && inPeriod(a.TS, in.From, in.To) && (a.Uses > 1 || longGrant(a)):
+			r.Grants = append(r.Grants, fmt.Sprintf("%s · %s · %d usos hasta %s · aprobó %s", a.ID, oneLine(a.Object, 80), a.Uses, a.Expires, a.Approver))
+		}
+	}
+	for p := range people {
+		r.People = append(r.People, p)
+	}
+	for a := range agents {
+		r.Agents = append(r.Agents, a)
+	}
+	sort.Strings(r.People)
+	sort.Strings(r.Agents)
+	r.ByType, r.ByActor = sorted(byType), sorted(byActor)
+	r.ByPerson, r.ByAgent, r.ByModel, r.ByWS = sorted(byPerson), sorted(byAgent), sorted(byModel), sorted(byWS)
+	r.MonthlyUSD = in.MonthlyUSD
+	r.Checks = append(r.Checks, checkAgentApprovals(period, approvals), checkReleaseEvents(r.Releases, in.From, in.To),
+		checkFuture(in.Entries, in.Now), checkInvalid(in.Problems, in.Root))
+	if in.Git != nil {
+		r.Checks = append(r.Checks, checkAppendOnly(in), checkActors(in, period))
+		c, commits, signed := checkCommits(in)
+		r.Checks = append(r.Checks, c)
+		r.Commits, r.Signed = commits, signed
+	} else {
+		r.Checks = append(r.Checks, Check{Name: "historia de git", Result: Warn, Detail: []string{"el proyecto no es un repo de git: no se pudo revisar que el ledger solo agregue"}})
+	}
+	return r
+}
+
+func inPeriod(ts string, from, to time.Time) bool {
+	t, err := time.Parse(time.RFC3339, ts)
+	return err == nil && !t.Before(from) && t.Before(to)
+}
+
+// longGrant dice si una aprobación dura más de una hora: una concesión.
+func longGrant(a Approval) bool {
+	from, err1 := time.Parse(time.RFC3339, a.TS)
+	to, err2 := time.Parse(time.RFC3339, a.Expires)
+	return err1 == nil && err2 == nil && to.Sub(from) > time.Hour
+}
+
+// approvalIDs devuelve los registros de coyote/approvals a los que apunta un
+// evento: por sus referencias apr: o, si no tiene, por el gate que nombra al
+// empezar ("G4 aprobado: …"), como se registraron los primeros gates.
+func approvalIDs(l ccf.Line, approvals []Approval) []string {
+	if ids := refs(l.Refs, "apr:"); len(ids) > 0 {
+		return ids
+	}
+	first, _, _ := strings.Cut(strings.TrimSpace(l.What), " ")
+	var out []string
+	for _, a := range approvals {
+		if a.Gate != "" && a.Gate == first {
+			out = append(out, a.ID)
+		}
+	}
+	return out
+}
+
+func refs(rs []string, prefix string) []string {
+	var out []string
+	for _, r := range rs {
+		if v, ok := strings.CutPrefix(r, prefix); ok {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+func hasRef(rs []string, want string) bool {
+	for _, r := range rs {
+		if r == want {
+			return true
+		}
+	}
+	return false
+}
+
+func sorted(m map[string]*Count) []Count {
+	out := make([]Count, 0, len(m))
+	for _, c := range m {
+		out = append(out, *c)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Cost != out[j].Cost {
+			return out[i].Cost > out[j].Cost
+		}
+		if out[i].Events != out[j].Events {
+			return out[i].Events > out[j].Events
+		}
+		return out[i].Key < out[j].Key
+	})
+	return out
+}
+
+func oneLine(s string, n int) string {
+	s = strings.Join(strings.Fields(s), " ")
+	if r := []rune(s); len(r) > n {
+		return string(r[:n]) + "…"
+	}
+	return s
+}
+
+// checkAgentApprovals: una aprobación o un rechazo que registró un agente
+// necesita el registro con la respuesta de la persona.
+func checkAgentApprovals(period []ledger.Entry, approvals map[string]Approval) Check {
+	c := Check{Name: "aprobaciones registradas por un agente", Result: OK}
+	list := make([]Approval, 0, len(approvals))
+	for _, a := range approvals {
+		list = append(list, a)
+	}
+	for _, e := range period {
+		l := e.Line
+		if (l.Type != "apr" && l.Type != "rej") || usage.Agent(l.Actor) == "" || usage.Agent(l.Actor) == "-" {
+			continue
+		}
+		ids := approvalIDs(l, list)
+		backed := len(ids) > 0
+		for _, id := range ids {
+			if a, ok := approvals[id]; !ok || strings.TrimSpace(a.Response) == "" {
+				backed = false
+			}
+		}
+		if backed {
+			if c.Result == OK {
+				c.Result = Warn
+			}
+			c.Detail = append(c.Detail, fmt.Sprintf("%s %s registró %s: la respuesta de la persona está en coyote/approvals/", l.TS.Format("2006-01-02 15:04Z"), l.Actor, strings.Join(ids, ", ")))
+			continue
+		}
+		c.Result = Fail
+		c.Detail = append(c.Detail, fmt.Sprintf("%s %s registró %q sin un registro con la respuesta de la persona", l.TS.Format("2006-01-02 15:04Z"), l.Actor, oneLine(l.What, 60)))
+	}
+	return c
+}
+
+// checkReleaseEvents: cada decisión de un gate de release del periodo tiene
+// su evento apr en el ledger (A3).
+func checkReleaseEvents(releases []Release, from, to time.Time) Check {
+	c := Check{Name: "gates de release con su evento en el ledger", Result: OK}
+	for _, x := range releases {
+		d, err := time.Parse("2006-01-02", x.Date)
+		if err != nil || d.Before(from.Truncate(24*time.Hour)) || !d.Before(to) || x.RecordedBy != "" {
+			continue
+		}
+		c.Result = Warn
+		c.Detail = append(c.Detail, fmt.Sprintf("%s (%s) está en coyote/approvals/ pero no tiene evento apr en el ledger", x.Gate, x.ID))
+	}
+	return c
+}
+
+// checkFuture: un evento con fecha futura afloja topes y ventanas.
+func checkFuture(entries []ledger.Entry, now time.Time) Check {
+	c := Check{Name: "eventos con fecha futura", Result: OK}
+	for _, e := range entries {
+		if e.Line.TS.After(now.Add(5 * time.Minute)) {
+			c.Result = Fail
+			c.Detail = append(c.Detail, fmt.Sprintf("%s:%d %s", filepath.Base(e.File), e.LineNo, e.Line.TS.Format("2006-01-02 15:04Z")))
+		}
+	}
+	return c
+}
+
+func checkInvalid(probs []ledger.Problem, root string) Check {
+	c := Check{Name: "líneas inválidas del ledger", Result: OK}
+	for _, p := range probs {
+		c.Result = Fail
+		c.Detail = append(c.Detail, fmt.Sprintf("%s:%d %v", rel(root, p.File), p.LineNo, p.Err))
+	}
+	return c
+}
+
+func rel(root, p string) string {
+	if r, err := filepath.Rel(root, p); err == nil {
+		return filepath.ToSlash(r)
+	}
+	return p
+}
+
+// filePerson saca la persona del nombre del archivo del ledger (DD-persona.ccf).
+func filePerson(p string) string {
+	base := strings.TrimSuffix(path.Base(filepath.ToSlash(p)), ".ccf")
+	if _, person, ok := strings.Cut(base, "-"); ok {
+		return "@" + person
+	}
+	return ""
+}

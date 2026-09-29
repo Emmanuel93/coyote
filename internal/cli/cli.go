@@ -47,6 +47,7 @@ func init() {
 		{"note", "<texto> --type T [--scope S] [--ref R] [--agent A]", "agrega una entrada a CONTEXT.coyote.md", cmdNote},
 		{"record", "<type> <qué> [--scope S] [--tokens e/c/s] [--cost e+s]", "escribe un evento en el ledger", cmdRecord},
 		{"log", "[--limit N] [--type T] [--user U] [--since 7d]", "muestra el ledger con totales", cmdLog},
+		{"audit", "[--month AAAA-MM] [--json] [--write]", "reporte de auditoría desde el ledger, las aprobaciones y git: eventos, costo, integridad y controles (ADR-0024)", cmdAudit},
 		{"commit", "-m <mensaje> [-a] [--ws W]", "commit con tu autoría, formato R2 y sin atribución de IA", cmdCommit},
 		{"standards", "lint | show | explain <id> | diff", "estándar por capas y su validación", cmdStandards},
 		{"hub", "init [carpeta] [--org NOMBRE] | status [--json]", "hub de la organización: estándar, admins, presupuesto y proyectos, leído en un commit (ADR-0018)", cmdHub},

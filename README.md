@@ -89,7 +89,7 @@ Cada corrida tiene topes de turnos y de dólares. El router baja de modelo al 80
 | Comando | Para qué |
 |---------|----------|
 | `init`, `status`, `doctor [--ide IDE [--canary]]` | crea o adopta un proyecto, su estado y su diagnóstico, con el nivel medido de cada IDE |
-| `note`, `record`, `log` | contexto (`inv`, `dec`, `gap`, `how`, `term`, `risk`, `todo`), eventos y el ledger con sus totales |
+| `note`, `record`, `log`, `audit` | contexto (`inv`, `dec`, `gap`, `how`, `term`, `risk`, `todo`), eventos, el ledger con sus totales y el reporte de auditoría del mes |
 | `commit -m`, `hooks install` | commits con tu autoría, formato R2 y sin atribución a IA |
 | `standards lint\|show\|diff\|explain`, `attribution check\|scrub` | el estándar por capas y la atribución a IA |
 | `generate agents [--check]` | genera `AGENTS.md` o verifica que esté al día |
@@ -136,7 +136,7 @@ coyote/
 
 ## Documentación
 
-- Especificaciones: [CCF](docs/specs/ccf-v1.md), [CCF-doc](docs/specs/ccf-doc-v1.md), [estándar](docs/specs/standards-v1.md), [atribución](docs/specs/attribution-v1.md), [contexto](docs/specs/context-v1.md), [remoto](docs/specs/remote-v1.md), [gate](docs/specs/gate-v1.md), [secretos](docs/specs/secrets-v1.md), [infraestructura](docs/specs/infra-v1.md), [instalación](docs/specs/install-v1.md), [producto](docs/specs/product-v1.md), [corridas](docs/specs/run-v1.md), [workstreams](docs/specs/workstream-v1.md), [pipeline](docs/specs/ci-v1.md), [hub](docs/specs/hub-v1.md), [web](docs/specs/web-v1.md), [SLOs](docs/specs/slo-v1.md).
+- Especificaciones: [CCF](docs/specs/ccf-v1.md), [CCF-doc](docs/specs/ccf-doc-v1.md), [estándar](docs/specs/standards-v1.md), [atribución](docs/specs/attribution-v1.md), [contexto](docs/specs/context-v1.md), [remoto](docs/specs/remote-v1.md), [gate](docs/specs/gate-v1.md), [secretos](docs/specs/secrets-v1.md), [infraestructura](docs/specs/infra-v1.md), [instalación](docs/specs/install-v1.md), [producto](docs/specs/product-v1.md), [corridas](docs/specs/run-v1.md), [workstreams](docs/specs/workstream-v1.md), [pipeline](docs/specs/ci-v1.md), [hub](docs/specs/hub-v1.md), [web](docs/specs/web-v1.md), [SLOs](docs/specs/slo-v1.md), [auditoría](docs/specs/audit-v1.md).
 - Estándar default: [standards/default/STANDARD.md](standards/default/STANDARD.md). Agentes y skills: [agents/](agents/), [skills/](skills/).
 - Decisiones: [coyote/decisions/](coyote/decisions/). Seguridad: [modelo de amenazas](docs/security/threat-model.md). Plan y releases: [docs/plan/](docs/plan/EXECUTION_PLAN.md), [docs/releases/](docs/releases/).
 - Ejemplo completo: [examples/acme-shop](examples/acme-shop/) (proyecto sintético).

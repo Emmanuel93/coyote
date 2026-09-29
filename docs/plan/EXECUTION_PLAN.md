@@ -695,7 +695,7 @@ G7 autorizaría:
 | T52 | Plan y ADR-0022 a ADR-0027 | Siete frentes; se razonan antes del código | Esta sección, los ADRs y W-0008 | Hecho |
 | T53 | Web con clave por sesión | Quedó prometida en v0.7 | Clave por corrida en la ruta, 404 sin ella; la clave no queda en disco ni en el ledger; pruebas | Hecho |
 | T54 | Amenazas e inyección | C6.1 | `threat-model.md`; paquetes enmarcados y clasificador; `generate agents` sin notas marcadas; en `gate pr`, instrucciones de agentes R2 y ledger reescrito R3; prueba de escape; fuzzing sin fallas abiertas | Hecho: calibrado en 304 documentos reales (2 marcas correctas); Trojan Source en `gate pr`; ocho lectores con fuzzing, 4.9 M entradas sin fallas |
-| T55 | Auditoría | C6.5 | `coyote audit` con integridad y controles; el reporte de septiembre de coyote | Pendiente |
+| T55 | Auditoría | C6.5 | `coyote audit` con integridad y controles; el reporte de septiembre de coyote | Hecho: el primer reporte encontró G4 a G6 registrados por un agente sin referencia y G7 sin evento en el ledger; se vinculan por el gate y G7 se registró tarde |
 | T56 | Golden y evaluación | C6.2 y C6.3 | Golden de 30 preguntas; `coyote eval` en la CI con umbral; la expansión se queda solo si mejora | Pendiente |
 | T57 | Compatibilidad 1.x | Una 1.0 es una promesa | `compatibilidad.md`, `requires` y el estándar 1.0 | Pendiente |
 | T58 | Documentación | C6.6 | Tutorial probado, guías, referencia generada, explicación y CHANGELOG | Pendiente |

@@ -1,7 +1,9 @@
 package product
 
 import (
+	"bytes"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -136,6 +138,19 @@ func gitRead(dir string, args ...string) *exec.Cmd {
 	cmd := exec.Command("git", append(append(base, "-C", abs), args...)...)
 	cmd.Env = gitEnv()
 	return cmd
+}
+
+// Git corre un comando de lectura de git con las mismas protecciones que el
+// resto de la plomería: sin locks opcionales, sin fsmonitor, sin filtros ni
+// diffs externos. Devuelve la salida estándar.
+func Git(dir string, args ...string) (string, error) {
+	var out, errb bytes.Buffer
+	cmd := gitRead(dir, args...)
+	cmd.Stdout, cmd.Stderr = &out, &errb
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("git %s: %v %s", strings.Join(args, " "), err, strings.TrimSpace(errb.String()))
+	}
+	return out.String(), nil
 }
 
 // gitWorktree es gitRead para los comandos que comparan el árbol de trabajo

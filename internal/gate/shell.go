@@ -527,6 +527,9 @@ func coyoteCheck(args []word) error {
 		return nil
 	case "ask":
 		return denyFlags("--record", "-record")(rest)
+	case "audit":
+		// Leer el reporte es libre; dejarlo en coyote/audit/ escribe.
+		return denyFlags("--write", "-write")(rest)
 	case "standards":
 		switch first {
 		case "lint":
