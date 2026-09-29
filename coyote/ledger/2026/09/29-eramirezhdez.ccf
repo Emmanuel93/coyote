@@ -44,3 +44,4 @@
 2026-09-29T06:40Z|@eramirezhdez/coyote-dev|W-0007|coyote|feat|web|web v1 con presupuesto, workstreams, gate, SLOs y la visibilidad de D10|-|-|-|ok
 2026-09-29T06:49Z|@eramirezhdez/coyote-sre|W-0007|coyote|feat|slo|SLOs y alertas como código con R19 y SLOs relajados en gate…|-|-|-|ok
 2026-09-29T06:57Z|@eramirezhdez/coyote-devsecops|W-0007|coyote|feat|ci|gitleaks opcional en el pipeline, fijado por hash y con la configuración…|-|-|-|ok
+2026-09-29T07:04Z|@eramirezhdez/coyote-sre|W-0007|coyote|fix|slo|una consulta no elige varias métricas con __name__|-|-|-|ok

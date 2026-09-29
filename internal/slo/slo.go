@@ -75,6 +75,7 @@ var (
 	labelRe     = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]{0,99}$`)
 	alertRe     = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,99}$`)
 	hardRangeRe = regexp.MustCompile(`\[\s*\d+(ms|s|m|h|d|w|y)\s*[\]:]`)
+	multiNameRe = regexp.MustCompile(`__name__\s*=~`)
 )
 
 // reserved son las etiquetas que pone coyote.
@@ -225,6 +226,9 @@ func checkSLI(where string, s SLI, add func(string, ...any)) {
 		}
 		if strings.Contains(strings.ReplaceAll(q, Window, ""), "{{") {
 			add("%s: sli.%s: el único marcador es %s", where, k, Window)
+		}
+		if multiNameRe.MatchString(q) {
+			add("%s: sli.%s elige varias métricas con __name__=~: rate() falla cuando comparten etiquetas y el SLO nunca se calcula; suma cada métrica con (sum(rate(m[%s])) or vector(0))", where, k, Window)
 		}
 		if strings.ContainsAny(q, "\x00") || len(q) > 4000 {
 			add("%s: sli.%s es demasiado larga o tiene bytes nulos", where, k)

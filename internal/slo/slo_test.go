@@ -107,6 +107,7 @@ func TestArchivosInvalidos(t *testing.T) {
 		"runbook fuera del repo": strings.Replace(pagos, "coyote/runbooks/pagos-api-disponibilidad.md", "../../etc/passwd", 1),
 		"nombre de alerta":       strings.Replace(pagos, "    alerts:\n", "    alerts:\n      name: \"Pagos API\"\n", 1),
 		"sin slos":               "version: 1\nservice: pagos-api\nslos: []\n",
+		"varias métricas":        strings.Replace(pagos, `http_server_request_duration_seconds_count{job="pagos-api",http_response_status_code=~"5.."}`, `{__name__=~"x_(a|b)_total", job="pagos-api"}`, 1),
 	}
 	for name, text := range cases {
 		if _, err := Parse([]byte(text)); err == nil {

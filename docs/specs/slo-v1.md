@@ -30,6 +30,7 @@ slos:
 - Una clave desconocida es un error, como en el resto de los archivos de coyote.
 - Las consultas usan `{{.window}}` y ningún otro marcador. Una ventana fija (`[5m]`) es un error: la ventana la pone coyote en cada regla.
 - coyote revisa la forma de las consultas (paréntesis, corchetes, llaves y comillas), no PromQL completo. La CI de quien carga las reglas corre `promtool check rules`.
+- Una consulta no elige varias métricas con `__name__=~`: `rate()` quita el nombre y, si dos métricas comparten etiquetas, la regla falla en cada evaluación y el SLO nunca se calcula. Se suma cada métrica con `(sum(rate(m[{{.window}}])) or vector(0))`; el `or vector(0)` evita que una métrica que no existe deje vacía toda la suma.
 - Las etiquetas `slo_id`, `slo_service`, `slo_name`, `slo_window` y `slo_severity` las pone coyote.
 - Un SLI que no es una proporción (la saturación de una cola, errores sostenidos) no va aquí: es una alerta de umbral escrita a mano.
 
