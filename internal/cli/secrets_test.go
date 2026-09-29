@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -8,7 +9,7 @@ import (
 
 // Secretos de prueba armados por partes (R18 del propio repo).
 var (
-	cliAWS    = "AKIA" + "IOSFODNN7EXAMPLE"
+	cliAWS    = "AKIA" + "Q3VZ7T2M9KX4B8JN"
 	cliGitHub = "ghp_" + strings.Repeat("a1B2", 9)
 )
 
@@ -31,6 +32,9 @@ func TestSecretsListYScan(t *testing.T) {
 		}
 	}
 	must(t, run(t, root, "", "secrets", "list", "--json"), 0, "secrets list --json")
+	if nn := run(t, root, "", "secrets", "list", "--no-names"); !strings.Contains(nn.stdout, ".env") || strings.Contains(nn.stdout, "DB_HOST") {
+		t.Errorf("--no-names no abre los archivos:\n%s", nn.stdout)
+	}
 
 	// Sin secretos versionados, scan pasa.
 	git(t, root, "add", "-A")
@@ -42,13 +46,13 @@ func TestSecretsListYScan(t *testing.T) {
 	git(t, root, "add", "src/config.go")
 	s := run(t, root, "", "secrets", "scan", "--staged")
 	must(t, s, 1, "scan --staged con secreto")
-	if !strings.Contains(s.stdout, "src/config.go:3") || !strings.Contains(s.stdout, "llave de acceso de AWS") || strings.Contains(s.stdout, "EXAMPLE") {
+	if !strings.Contains(s.stdout, "src/config.go:3") || !strings.Contains(s.stdout, "llave de acceso de AWS") || strings.Contains(s.stdout, "Q3VZ") {
 		t.Errorf("scan --staged:\n%s", s.stdout)
 	}
 	// coyote commit no deja pasar el secreto, ni con --no-verify.
 	c := run(t, root, "", "commit", "-m", "feat(src): configuración")
 	must(t, c, 1, "commit con secreto")
-	if !strings.Contains(c.stderr, "R18") || strings.Contains(c.stderr+c.stdout, "EXAMPLE") {
+	if !strings.Contains(c.stderr, "R18") || strings.Contains(c.stderr+c.stdout, "Q3VZ") {
 		t.Errorf("commit con secreto:\n%s\n%s", c.stdout, c.stderr)
 	}
 	must(t, run(t, root, "", "commit", "--no-verify", "-m", "feat(src): configuración"), 1, "commit --no-verify con secreto")
@@ -102,5 +106,64 @@ func TestGatePRSecretos(t *testing.T) {
 	must(t, run(t, base, "", "gate", "pr", "--repo", "servicios="+svc, "--self", "servicios", "--base", baseSHA, "--head", headSHA, "--event", "", "--policy", "warn"), 0, "warn")
 	if st := git(t, svc, "status", "--porcelain", "--ignored"); st != "" {
 		t.Errorf("el repo cambió: %s", st)
+	}
+}
+
+func TestSecretosEnProyectoDeSubcarpeta(t *testing.T) {
+	base := setup(t)
+	t.Setenv("COYOTE_STATE_DIR", filepath.Join(base, "state"))
+	old := isTerminal
+	isTerminal = func() bool { return true }
+	t.Cleanup(func() { isTerminal = old })
+	mono := filepath.Join(base, "mono")
+	if err := os.MkdirAll(mono, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	git(t, mono, "init", "-q")
+	must(t, run(t, mono, "", "init", "demo", "--type", "backend", "--purpose", "API de pedidos de la tienda demo"), 0, "init")
+	root := filepath.Join(mono, "demo")
+	cfg := readFile(t, filepath.Join(root, "coyote", "project.yaml"))
+	write(t, root, "coyote/project.yaml", cfg+"secrets:\n  files: [\"conf/*.conf\"]\n")
+	write(t, root, "conf/prod.conf", "db.password=corta\n")
+	git(t, mono, "add", "-A")
+	s := run(t, root, "", "secrets", "scan", "--staged")
+	must(t, s, 1, "scan --staged en un proyecto de subcarpeta")
+	if !strings.Contains(s.stdout, "demo/conf/prod.conf") || !strings.Contains(s.stdout, "secretos del proyecto") {
+		t.Errorf("scan --staged:\n%s", s.stdout)
+	}
+	for _, args := range [][]string{{"commit", "-m", "feat(conf): configuración de producción"}, {"commit", "-a", "-m", "feat(conf): configuración de producción"}} {
+		c := run(t, root, "", args...)
+		if c.code != 1 || !strings.Contains(c.stderr, "R18") || !strings.Contains(c.stderr, "demo/conf/prod.conf") {
+			t.Errorf("%v con un secreto del proyecto: %d\n%s\n%s", args, c.code, c.stdout, c.stderr)
+		}
+	}
+}
+
+func TestEscanerNoSeEvade(t *testing.T) {
+	_, root := gateProject(t)
+	write(t, root, ".gitignore", ".coyote/\n")
+	git(t, root, "add", "-A")
+	git(t, root, "commit", "-qm", "inicio", "--no-verify")
+	// Una línea agregada que empieza con "++ " no esconde lo que sigue.
+	write(t, root, "README.md", readFile(t, filepath.Join(root, "README.md"))+"x\n++ fin\ntoken = "+cliGitHub+"\n")
+	git(t, root, "add", "README.md")
+	must(t, run(t, root, "", "secrets", "scan", "--staged"), 1, "scan --staged con ++")
+	if c := run(t, root, "", "commit", "-m", "docs(readme): notas"); c.code != 1 || !strings.Contains(c.stderr, "R18") {
+		t.Errorf("commit con ++ y un token: %d\n%s", c.code, c.stderr)
+	}
+	git(t, root, "reset", "-q", "--hard")
+	// Una línea larga antes del secreto tampoco.
+	write(t, root, "app.min.js", strings.Repeat("a", 100<<10)+"\nconst t = '"+cliGitHub+"';\n")
+	git(t, root, "add", "app.min.js")
+	if c := run(t, root, "", "commit", "-m", "feat(web): bundle"); c.code != 1 || !strings.Contains(c.stderr, "R18") {
+		t.Errorf("commit con línea larga y un token: %d\n%s", c.code, c.stderr)
+	}
+	git(t, root, "reset", "-q")
+	// Un nombre con dos puntos seguidos se revisa.
+	write(t, root, "dos..puntos.txt", "clave "+cliAWS+"\n")
+	git(t, root, "add", "-f", "dos..puntos.txt")
+	git(t, root, "commit", "-qm", "oops", "--no-verify")
+	if s := run(t, root, "", "secrets", "scan"); s.code != 1 || !strings.Contains(s.stdout, "dos..puntos.txt:1") {
+		t.Errorf("scan con dos..puntos.txt: %d\n%s", s.code, s.stdout)
 	}
 }

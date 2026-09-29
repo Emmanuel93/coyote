@@ -1202,3 +1202,45 @@ func TestCambiosQueGitNoMuestra(t *testing.T) {
 		t.Error("nombres entre comillas")
 	}
 }
+
+func TestParseAddedCuentaElHunk(t *testing.T) {
+	// Una línea agregada que empieza con "++ " se ve como "+++ " en el parche:
+	// no es el encabezado de otro archivo, y lo que sigue también se revisa.
+	patch := "diff --git a/README.md b/README.md\n" +
+		"--- a/README.md\n" +
+		"+++ b/README.md\n" +
+		"@@ -3,0 +4,3 @@\n" +
+		"+x\n" +
+		"+++ fin\n" +
+		"+token = valor\n" +
+		"\\ No newline at end of file\n" +
+		"diff --git a/b.txt b/b.txt\n" +
+		"--- a/b.txt\n" +
+		"+++ b/b.txt\n" +
+		"@@ -1 +1 @@\n" +
+		"-viejo\n" +
+		"+" + strings.Repeat("n", 70<<10) + "\n"
+	got, err := ParseAdded(strings.NewReader(patch))
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := got["README.md"]
+	if len(lines) != 3 || lines[1].Text != "++ fin" || lines[2].Text != "token = valor" || lines[2].Line != 6 {
+		t.Errorf("líneas de README.md: %+v", lines)
+	}
+	if _, ok := got["fin"]; ok {
+		t.Error("la línea agregada se leyó como otro archivo")
+	}
+	if b := got["b.txt"]; len(b) != 1 || len(b[0].Text) != 70<<10 || b[0].Line != 1 {
+		t.Errorf("una línea larga se lee completa: %d líneas", len(b))
+	}
+}
+
+func TestSafeGitPath(t *testing.T) {
+	for p, ok := range map[string]bool{"dos..puntos.txt": true, "a/b..c/d": true, "src/main.go": true,
+		"../x": false, "a/../b": false, "./x": false, "-x": false, "/etc/passwd": false, "a//b": false, "": false} {
+		if safeGitPath(p) != ok {
+			t.Errorf("safeGitPath(%q) = %v", p, !ok)
+		}
+	}
+}

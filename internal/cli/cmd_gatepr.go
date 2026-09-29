@@ -64,7 +64,7 @@ func gatePR(a *app, args []string) error {
 	if err != nil {
 		return fail(1, "%v", err)
 	}
-	in.Secrets = scanAdded(added, secrets.Rules{}, func(f string) (string, bool) { return product.FileAt(dir, right, f) })
+	in.Secrets = scanAdded(added, secrets.Rules{}, "", func(f string) (string, bool) { return product.FileAt(dir, right, f) })
 	var plan *infra.PlanSummary
 	if *planFile != "" {
 		f, err := os.Open(*planFile)

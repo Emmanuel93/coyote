@@ -27,32 +27,95 @@ type AddedFile struct {
 }
 
 // ParseAdded lee un parche con --unified=0 y devuelve las líneas agregadas por
-// archivo, en el orden en que aparecen.
+// archivo, en el orden en que aparecen. Cuenta las líneas de cada hunk: una
+// línea agregada que empieza con "++ " se ve en el parche como "+++ " y no es
+// el encabezado de otro archivo. Lee líneas de cualquier largo.
 func ParseAdded(r io.Reader) (map[string][]AddedLine, error) {
 	out := map[string][]AddedLine{}
-	sc := bufio.NewScanner(r)
-	sc.Buffer(make([]byte, 1<<20), 16<<20)
+	br := bufio.NewReaderSize(r, 1<<16)
 	name, next := "", 0
-	for sc.Scan() {
-		l := sc.Text()
-		switch {
-		case strings.HasPrefix(l, "diff --git "):
-			name, next = "", 0
-		case strings.HasPrefix(l, "+++ "):
-			name = diffName(l[4:])
-		case strings.HasPrefix(l, "--- "):
-		case strings.HasPrefix(l, "@@"):
-			m := hunkRe.FindStringSubmatch(l)
-			if m == nil {
-				continue
+	oldLeft, newLeft := 0, 0
+	for {
+		l, err := br.ReadString('\n')
+		if l != "" {
+			l = strings.TrimSuffix(l, "\n")
+			inHunk := oldLeft > 0 || newLeft > 0
+			switch {
+			case strings.HasPrefix(l, "\\"):
+				// "\ No newline at end of file": no es una línea del archivo.
+			case inHunk && strings.HasPrefix(l, "+"):
+				if name != "" {
+					out[name] = append(out[name], AddedLine{Line: next, Text: l[1:]})
+				}
+				next++
+				newLeft--
+			case inHunk && strings.HasPrefix(l, "-"):
+				oldLeft--
+			case inHunk && strings.HasPrefix(l, " "):
+				oldLeft--
+				newLeft--
+				next++
+			case strings.HasPrefix(l, "diff --git "):
+				name, next, oldLeft, newLeft = "", 0, 0, 0
+			case strings.HasPrefix(l, "+++ "):
+				name = diffName(l[4:])
+			case strings.HasPrefix(l, "@@"):
+				m := hunkRe.FindStringSubmatch(l)
+				if m == nil {
+					break
+				}
+				next, _ = strconv.Atoi(m[3])
+				oldLeft, newLeft = 1, 1
+				if m[2] != "" {
+					oldLeft, _ = strconv.Atoi(m[2])
+				}
+				if m[4] != "" {
+					newLeft, _ = strconv.Atoi(m[4])
+				}
 			}
-			next, _ = strconv.Atoi(m[3])
-		case strings.HasPrefix(l, "+") && name != "":
-			out[name] = append(out[name], AddedLine{Line: next, Text: l[1:]})
-			next++
+		}
+		if err == io.EOF {
+			return out, nil
+		}
+		if err != nil {
+			return out, err
 		}
 	}
-	return out, sc.Err()
+}
+
+// safeGitPath rechaza rutas que git leería como opción o fuera de la raíz del
+// repo: las que empiezan con - o /, y las que tienen un componente vacío, .
+// o .. (dos..puntos.txt sí es un nombre válido).
+func safeGitPath(p string) bool {
+	if p == "" || strings.HasPrefix(p, "-") || strings.HasPrefix(p, "/") {
+		return false
+	}
+	for _, c := range strings.Split(p, "/") {
+		if c == "" || c == "." || c == ".." {
+			return false
+		}
+	}
+	return true
+}
+
+// GitPrefix devuelve la raíz del repo git que contiene dir y la carpeta dir
+// relativa a esa raíz, con barra al final ("" si dir es la raíz). Las rutas
+// de git son relativas a la raíz; las reglas de un proyecto, a su carpeta.
+func GitPrefix(dir string) (top, prefix string, err error) {
+	var stdout, stderr bytes.Buffer
+	cmd := gitRead(dir, "rev-parse", "--show-toplevel", "--show-prefix")
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	if err := cmd.Run(); err != nil {
+		return "", "", fmt.Errorf("git rev-parse: %v %s", err, strings.TrimSpace(stderr.String()))
+	}
+	lines := strings.Split(strings.TrimRight(stdout.String(), "\n"), "\n")
+	if len(lines) == 0 || lines[0] == "" {
+		return "", "", fmt.Errorf("git rev-parse no dio la raíz del repo")
+	}
+	if len(lines) > 1 {
+		prefix = lines[1]
+	}
+	return lines[0], prefix, nil
 }
 
 // AddedText devuelve lo que agrega un rango de git (base...head o base..head)
@@ -172,9 +235,10 @@ func StagedAdded(dir string, worktree bool) ([]AddedFile, error) {
 	return out, nil
 }
 
-// IndexText lee un archivo de texto tal como está en el índice (":ruta").
+// IndexText lee un archivo de texto tal como está en el índice (":ruta",
+// relativa a la raíz del repo).
 func IndexText(dir, path string) (string, bool) {
-	if strings.HasPrefix(path, "-") || strings.Contains(path, "..") {
+	if !safeGitPath(path) {
 		return "", false
 	}
 	cmd := gitRead(dir, "cat-file", "blob", ":"+path)
@@ -188,7 +252,7 @@ func IndexText(dir, path string) (string, bool) {
 
 // WorktreeText lee un archivo de texto del árbol de trabajo, sin seguir symlinks.
 func WorktreeText(dir, path string) (string, bool) {
-	if strings.HasPrefix(path, "-") || strings.Contains(path, "..") {
+	if !safeGitPath(path) {
 		return "", false
 	}
 	return fileText(dir, "", path)

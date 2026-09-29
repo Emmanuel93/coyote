@@ -73,6 +73,36 @@ func ReadFile(root, rel string, max int64) ([]byte, error) {
 	return io.ReadAll(io.LimitReader(f, max+1))
 }
 
+// ReadCapped lee un archivo que puede ser un symlink, pero solo si lo que
+// alcanza es un archivo regular de hasta max bytes: un symlink a /dev/zero o
+// a un FIFO no se lee. Sirve para los archivos de un repo ajeno, donde un
+// symlink es legítimo; lo que coyote escribe se lee con ReadFile.
+func ReadCapped(path string, max int64) ([]byte, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("%s no es un archivo regular", filepath.Base(path))
+	}
+	if info.Size() > max {
+		return nil, fmt.Errorf("%s pesa %d bytes; máximo %d", filepath.Base(path), info.Size(), max)
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, max+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > max {
+		return nil, fmt.Errorf("%s creció a más de %d bytes al leerlo", filepath.Base(path), max)
+	}
+	return data, nil
+}
+
 // Regular informa si rel es un archivo regular dentro de root, sin symlinks.
 func Regular(root, rel string) bool {
 	if NoSymlinks(root, rel) != nil {

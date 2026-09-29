@@ -608,7 +608,7 @@ func ChangedFiles(dir, diff string) ([]string, error) {
 // FileAt lee un archivo de texto tal como está en una revisión, sin tocar el
 // árbol de trabajo: el CODEOWNERS que manda es el de la rama base.
 func FileAt(dir, rev, path string) (string, bool) {
-	if rev == "" || strings.HasPrefix(rev, "-") || strings.HasPrefix(path, "-") || strings.Contains(path, "..") {
+	if rev == "" || strings.HasPrefix(rev, "-") || !safeGitPath(path) {
 		return "", false
 	}
 	return fileText(dir, rev, path)

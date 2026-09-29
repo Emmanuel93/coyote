@@ -12,6 +12,7 @@ import (
 	"github.com/Emmanuel93/coyote/internal/product"
 	"github.com/Emmanuel93/coyote/internal/project"
 	"github.com/Emmanuel93/coyote/internal/secrets"
+	"github.com/Emmanuel93/coyote/internal/standards"
 )
 
 // coyote secrets (ADR-0016): qué archivos de secretos tiene el proyecto y
@@ -62,8 +63,9 @@ type secretEntry struct {
 }
 
 func secretsList(a *app, args []string) error {
-	fl := a.flags("secrets list", "[--json]")
+	fl := a.flags("secrets list", "[--json] [--no-names]")
 	asJSON := fl.Bool("json", false, "salida en JSON")
+	noNames := fl.Bool("no-names", false, "solo rutas y tipos: no abre los archivos")
 	if _, err := parseArgs(fl, args); err != nil {
 		return err
 	}
@@ -100,7 +102,18 @@ func secretsList(a *app, args []string) error {
 		if !ok {
 			return nil
 		}
+		// Un .pem sin llave privada (un certificado, una llave pública) no es
+		// secreto; con --no-names no se abre nada y se lista igual.
+		if !*noNames {
+			if _, ok := rules.KindAt(root, rel); !ok {
+				return nil
+			}
+		}
 		e := secretEntry{Path: rel, Kind: kind}
+		if *noNames {
+			list = append(list, e)
+			return nil
+		}
 		if info, err := d.Info(); err == nil && info.Size() <= 1<<20 {
 			if data, err := os.ReadFile(p); err == nil {
 				e.Names = secrets.Names(rel, data)
@@ -154,7 +167,20 @@ func secretsScan(a *app, args []string) error {
 	if err != nil {
 		return err
 	}
-	rules, _ := secretRules(dir)
+	rules, root := secretRules(dir)
+	// Las reglas del proyecto son relativas a su carpeta; las rutas de git, a
+	// la raíz del repo, que puede estar más arriba.
+	prefix := ""
+	if root != "" {
+		dir = root
+		if *staged || *rng != "" {
+			_, p, err := product.GitPrefix(root)
+			if err != nil {
+				return fail(1, "%v", err)
+			}
+			prefix = p
+		}
+	}
 	var found []secrets.Finding
 	switch {
 	case *staged:
@@ -162,17 +188,20 @@ func secretsScan(a *app, args []string) error {
 		if err != nil {
 			return fail(1, "%v", err)
 		}
-		found = scanAdded(files, rules, func(p string) (string, bool) { return product.IndexText(dir, p) })
+		found = scanAdded(files, rules, prefix, func(p string) (string, bool) { return product.IndexText(dir, p) })
 	case *rng != "":
 		files, right, err := product.AddedText(dir, *rng)
 		if err != nil {
 			return fail(1, "%v", err)
 		}
-		found = scanAdded(files, rules, func(p string) (string, bool) { return product.FileAt(dir, right, p) })
+		found = scanAdded(files, rules, prefix, func(p string) (string, bool) { return product.FileAt(dir, right, p) })
 	default:
 		files, err := product.TrackedFiles(dir)
 		if err != nil {
-			return fail(1, "%v", err)
+			// Fuera de git se recorren los archivos, sin dependencias ni compilación.
+			if files, err = standards.ListFiles(dir); err != nil {
+				return fail(1, "%v", err)
+			}
 		}
 		found = scanTracked(dir, files, rules)
 	}
@@ -198,12 +227,12 @@ func scanTracked(dir string, files []string, rules secrets.Rules) []secrets.Find
 		if rules.Allowed(f) {
 			continue
 		}
-		if kind, ok := rules.Kind(f); ok {
+		text, readable := product.WorktreeText(dir, f)
+		if kind, ok := rules.Kind(f); ok && (!readable || secrets.Confirm(kind, []byte(text))) {
 			out = append(out, secrets.Finding{Path: f, Kind: "archivo de secretos (" + kind + ")"})
 			continue
 		}
-		text, ok := product.WorktreeText(dir, f)
-		if !ok {
+		if !readable {
 			continue
 		}
 		out = append(out, secrets.Scan(f, text)...)
@@ -213,16 +242,32 @@ func scanTracked(dir string, files []string, rules secrets.Rules) []secrets.Find
 
 // scanAdded revisa lo que agrega un cambio: los archivos de secretos nuevos
 // por su nombre, las líneas agregadas y, completos, los que git lista sin
-// hunks (binarios, vacíos o con -diff).
-func scanAdded(files []product.AddedFile, rules secrets.Rules, whole func(string) (string, bool)) []secrets.Finding {
+// hunks (binarios, vacíos o con -diff). prefix es la carpeta del proyecto
+// dentro del repo: sus reglas valen para las rutas que están debajo; fuera
+// de ella valen las de siempre.
+func scanAdded(files []product.AddedFile, projectRules secrets.Rules, prefix string, whole func(string) (string, bool)) []secrets.Finding {
 	var out []secrets.Finding
 	for _, f := range files {
-		if rules.Allowed(f.Path) {
+		rules, rel := projectRules, f.Path
+		if prefix != "" {
+			var in bool
+			if rel, in = strings.CutPrefix(f.Path, prefix); !in {
+				rules, rel = secrets.Rules{}, f.Path
+			}
+		}
+		if rules.Allowed(rel) {
 			continue
 		}
-		if kind, ok := rules.Kind(f.Path); ok {
-			out = append(out, secrets.Finding{Path: f.Path, Kind: "archivo de secretos (" + kind + ")"})
-			continue
+		if kind, ok := rules.Kind(rel); ok {
+			confirmed := true
+			if secrets.NeedsContent(kind) {
+				text, readable := whole(f.Path)
+				confirmed = !readable || secrets.Confirm(kind, []byte(text))
+			}
+			if confirmed {
+				out = append(out, secrets.Finding{Path: f.Path, Kind: "archivo de secretos (" + kind + ")"})
+				continue
+			}
 		}
 		if f.Whole {
 			if text, ok := whole(f.Path); ok {
@@ -230,8 +275,18 @@ func scanAdded(files []product.AddedFile, rules secrets.Rules, whole func(string
 			}
 			continue
 		}
-		for _, l := range f.Lines {
-			out = append(out, secrets.ScanLine(f.Path, l.Line, l.Text)...)
+		// Las líneas agregadas seguidas se revisan juntas: una llave ocupa varias.
+		for i := 0; i < len(f.Lines); {
+			j := i + 1
+			for j < len(f.Lines) && f.Lines[j].Line == f.Lines[j-1].Line+1 {
+				j++
+			}
+			block := make([]string, 0, j-i)
+			for _, l := range f.Lines[i:j] {
+				block = append(block, l.Text)
+			}
+			out = append(out, secrets.ScanFrom(f.Path, f.Lines[i].Line, strings.Join(block, "\n"))...)
+			i = j
 		}
 	}
 	return out

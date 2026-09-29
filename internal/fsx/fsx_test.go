@@ -61,3 +61,32 @@ func TestWriteAtomicNoSigueUnTemporalPlantado(t *testing.T) {
 		t.Errorf("quedaron temporales: %v", left)
 	}
 }
+
+func TestReadCappedNoLeeDispositivos(t *testing.T) {
+	dir := t.TempDir()
+	link := filepath.Join(dir, "main.tf")
+	if err := os.Symlink("/dev/zero", link); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadCapped(link, 1<<20); err == nil {
+		t.Error("un symlink a /dev/zero no se lee")
+	}
+	big := filepath.Join(dir, "grande.tf")
+	if err := os.WriteFile(big, make([]byte, 2048), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadCapped(big, 1024); err == nil {
+		t.Error("un archivo de más del tope no se lee")
+	}
+	ok := filepath.Join(dir, "ok.tf")
+	if err := os.WriteFile(ok, []byte("terraform {}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	alias := filepath.Join(dir, "alias.tf")
+	if err := os.Symlink(ok, alias); err != nil {
+		t.Fatal(err)
+	}
+	if data, err := ReadCapped(alias, 1024); err != nil || string(data) != "terraform {}" {
+		t.Errorf("un symlink a un archivo regular se lee: %q %v", data, err)
+	}
+}

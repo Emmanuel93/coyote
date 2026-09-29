@@ -15,6 +15,7 @@ import (
 
 	"github.com/Emmanuel93/coyote/internal/attribution"
 	"github.com/Emmanuel93/coyote/internal/ccfdoc"
+	"github.com/Emmanuel93/coyote/internal/fsx"
 	"github.com/Emmanuel93/coyote/internal/gitx"
 	"github.com/Emmanuel93/coyote/internal/glob"
 	"github.com/Emmanuel93/coyote/internal/infra"
@@ -336,12 +337,8 @@ func (ctx *Context) expand(entries []string) []string {
 }
 
 func (ctx *Context) readText(rel string) (string, bool) {
-	p := ctx.abs(rel)
-	info, err := os.Stat(p)
-	if err != nil || info.IsDir() || info.Size() > 2<<20 {
-		return "", false
-	}
-	data, err := os.ReadFile(p)
+	// Solo archivos regulares y con tope: un symlink a /dev/zero no se lee.
+	data, err := fsx.ReadCapped(ctx.abs(rel), 2<<20)
 	if err != nil {
 		return "", false
 	}
@@ -588,12 +585,12 @@ func checkSecrets(ctx *Context, c Check) []Finding {
 		if glob.Any(c.Except, f) || ctx.Secrets.Allowed(f) {
 			continue
 		}
-		if kind, ok := ctx.Secrets.Kind(f); ok {
+		text, readable := ctx.readText(f)
+		if kind, ok := ctx.Secrets.Kind(f); ok && (!readable || secrets.Confirm(kind, []byte(text))) {
 			out = append(out, Finding{Path: f, Msg: "archivo de secretos en el repo (" + kind + "): sácalo de git y agrégalo a .gitignore"})
 			continue
 		}
-		text, ok := ctx.readText(f)
-		if !ok {
+		if !readable {
 			continue
 		}
 		for _, fd := range secrets.Scan(f, text) {
