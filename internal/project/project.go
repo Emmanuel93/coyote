@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"text/template"
 	"time"
@@ -68,6 +69,9 @@ type Config struct {
 		ReserveForInteractive float64 `yaml:"reserve_for_interactive,omitempty"`
 	} `yaml:"pace,omitempty"`
 	Repos []RepoRef `yaml:"repos,omitempty"`
+	// Features son banderas de funciones que dependen de algo fuera de coyote;
+	// se prenden cuando ese algo existe (ver KnownFeatures).
+	Features map[string]bool `yaml:"features,omitempty"`
 	// Risk sube el riesgo de rutas de los repos del producto para coyote gate
 	// pr (R17): un cambio en ellas pide la revisión de un dueño.
 	Risk struct {
@@ -75,6 +79,14 @@ type Config struct {
 		R3 []string `yaml:"R3,omitempty"`
 	} `yaml:"risk,omitempty"`
 }
+
+// KnownFeatures son las banderas que coyote entiende y de qué dependen.
+var KnownFeatures = map[string]string{
+	"pr_enforcement": "gate pr bloquea el merge hasta que aprueba un dueño; necesita que GitHub exija el chequeo, que en repos privados pide un plan de pago",
+}
+
+// Feature informa si una bandera está prendida. Una que no está vale false.
+func (c *Config) Feature(name string) bool { return c.Features[name] }
 
 // RiskRules devuelve las reglas de riesgo como R2=patrón y R3=patrón.
 func (c *Config) RiskRules() []string {
@@ -148,6 +160,16 @@ func (c *Config) Validate() error {
 	}
 	if !valid {
 		errs = append(errs, fmt.Sprintf("autonomy %q inválido (%s)", c.Autonomy, strings.Join(Autonomies, ", ")))
+	}
+	for name := range c.Features {
+		if _, ok := KnownFeatures[name]; !ok {
+			names := make([]string, 0, len(KnownFeatures))
+			for k := range KnownFeatures {
+				names = append(names, k)
+			}
+			sort.Strings(names)
+			errs = append(errs, fmt.Sprintf("features: %q no existe (%s)", name, strings.Join(names, ", ")))
+		}
 	}
 	for _, r := range c.RiskRules() {
 		if !riskRuleRe.MatchString(r) || strings.Contains(r, "..") {

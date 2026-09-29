@@ -72,7 +72,7 @@ func cmdInstall(a *app, args []string) error {
 	fs := a.flags("install", "--ide claude-code|cursor|all | --ci github [--check] [--dry-run]")
 	ide := fs.String("ide", "", "IDE a configurar: claude-code, cursor o all")
 	ciKind := fs.String("ci", "", "pipeline de impacto del producto: github")
-	policy := fs.String("policy", "warn", "con --ci: warn solo reporta; fail hace fallar el chequeo si el cambio rompe a otro módulo")
+	policy := fs.String("policy", "", "con --ci: warn solo reporta; fail hace fallar el chequeo hasta que aprueba un dueño. Por defecto sale de features.pr_enforcement")
 	coyoteRef := fs.String("coyote-ref", "", "con --ci: versión etiquetada de coyote que compila el pipeline (por defecto, la de este binario)")
 	coyoteRepo := fs.String("coyote-repo", "", "con --ci: owner/nombre del repo de coyote en GitHub")
 	check := fs.Bool("check", false, "falla si la configuración no está vigente, sin escribir (para CI)")
@@ -306,6 +306,17 @@ func (a *app) installCI(kind, policy, ref, coyoteRepo string, check, dry bool) e
 	if cfg.Type != "product" {
 		return fail(1, "el pipeline de impacto es de un proyecto de tipo product (coyote init --type product)")
 	}
+	// La política sale de la bandera pr_enforcement: bloquear el merge solo
+	// sirve si GitHub exige el chequeo, y en repos privados eso pide un plan de pago.
+	enforce := cfg.Feature("pr_enforcement")
+	switch {
+	case policy == "" && enforce:
+		policy = "fail"
+	case policy == "":
+		policy = "warn"
+	case policy == "fail" && !enforce:
+		fmt.Fprintln(a.stderr, "aviso: --policy fail con features.pr_enforcement apagada: el chequeo marca rojo, pero GitHub no lo exige en repos privados sin plan de pago")
+	}
 	if ref == "" {
 		ref = version.Version
 	}
@@ -370,11 +381,18 @@ func (a *app) installCI(kind, policy, ref, coyoteRepo string, check, dry bool) e
 	if !check && !dry {
 		fmt.Fprintf(a.stdout, "\nPara activarlo en cada repo:\n"+
 			"1. Copia coyote/ci/<repo>.yml a .github/workflows/coyote.yml del repo, con un PR.\n"+
+			"   Para probarlo sin tocar la rama principal, déjalo en una rama (coyote/pipeline) y abre PRs contra esa rama:\n"+
+			"   pull_request_target usa el workflow de la rama base del PR.\n"+
 			"2. Crea en cada repo el secreto %s: un token de GitHub de solo lectura (Contents: read) de los repos del producto.\n"+
 			"   Si %s es de otra cuenta, agrega %s con lectura de ese repo; un token fino cubre un solo dueño.\n"+
-			"3. Opcional: %s con Members: read de la organización, para verificar los equipos de CODEOWNERS.\n"+
-			"4. Para exigir la revisión, usa --policy fail y marca el chequeo \"coyote gate pr / riesgo e impacto\" como requerido en la protección de la rama.\n",
+			"3. Opcional: %s con Members: read de la organización, para verificar los equipos de CODEOWNERS.\n",
 			install.SecretName, coyoteRepo, install.ToolSecretName, install.TeamsSecretName)
+		if enforce {
+			fmt.Fprintln(a.stdout, "4. pr_enforcement está prendida: marca el chequeo \"coyote gate pr / riesgo e impacto\" como requerido en la protección de la rama para que el merge espere la aprobación.")
+		} else {
+			fmt.Fprintln(a.stdout, "4. pr_enforcement está apagada: el chequeo avisa y no bloquea. Cuando GitHub te deje exigir chequeos en repos privados (plan de pago),\n"+
+				"   pon features.pr_enforcement: true en coyote/project.yaml y vuelve a correr coyote install --ci github.")
+		}
 	}
 	return nil
 }

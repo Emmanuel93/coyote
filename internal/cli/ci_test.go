@@ -177,8 +177,43 @@ func TestInstallCI(t *testing.T) {
 	if !strings.Contains(wf, "--self app") || !strings.Contains(wf, "repository: acme/servicios") || strings.Contains(wf, "repository: acme/app\n") {
 		t.Errorf("workflow de app:\n%s", wf)
 	}
-	// Las reglas de riesgo del proyecto viajan en el workflow de cada repo.
+	// Sin la bandera pr_enforcement el chequeo solo avisa; prendida, falla hasta que aprueba un dueño.
 	cfgPath := filepath.Join(root, "coyote", "project.yaml")
+	if wf := readFile(t, filepath.Join(root, "coyote", "ci", "app.yml")); !strings.Contains(wf, "--policy warn") || !strings.Contains(r.stdout, "pr_enforcement está apagada") {
+		t.Errorf("sin la bandera, warn:\n%s\n%s", wf, r.stdout)
+	}
+	base0 := readFile(t, cfgPath)
+	if !strings.Contains(base0, "pr_enforcement: false") {
+		t.Errorf("init deja la bandera apagada y documentada:\n%s", base0)
+	}
+	if err := os.WriteFile(cfgPath, []byte(strings.Replace(base0, "pr_enforcement: false", "pr_enforcement: true", 1)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	must(t, run(t, root, "", "install", "--ci", "github", "--coyote-ref", "v0.5.0", "--coyote-repo", "acme/coyote", "--check"), 1, "la bandera cambia los workflows")
+	r = run(t, root, "", "install", "--ci", "github", "--coyote-ref", "v0.5.0", "--coyote-repo", "acme/coyote")
+	must(t, r, 0, "install con la bandera")
+	if wf := readFile(t, filepath.Join(root, "coyote", "ci", "app.yml")); !strings.Contains(wf, "--policy fail") || !strings.Contains(r.stdout, "pr_enforcement está prendida") {
+		t.Errorf("con la bandera, fail:\n%s\n%s", wf, r.stdout)
+	}
+	if err := os.WriteFile(cfgPath, []byte(strings.Replace(base0, "pr_enforcement: false", "pagos_premium: true", 1)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r = run(t, root, "", "install", "--ci", "github", "--coyote-ref", "v0.5.0", "--coyote-repo", "acme/coyote")
+	must(t, r, 1, "bandera desconocida")
+	if !strings.Contains(r.stderr, `features: "pagos_premium" no existe (pr_enforcement)`) {
+		t.Errorf("bandera desconocida:\n%s", r.stderr)
+	}
+	// Con la bandera apagada, --policy fail se permite con un aviso.
+	if err := os.WriteFile(cfgPath, []byte(base0), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r = run(t, root, "", "install", "--ci", "github", "--coyote-ref", "v0.5.0", "--coyote-repo", "acme/coyote", "--policy", "fail", "--dry-run")
+	must(t, r, 0, "fail sin la bandera")
+	if !strings.Contains(r.stderr, "GitHub no lo exige en repos privados sin plan de pago") {
+		t.Errorf("aviso de fail sin la bandera:\n%s", r.stderr)
+	}
+	must(t, run(t, root, "", "install", "--ci", "github", "--coyote-ref", "v0.5.0", "--coyote-repo", "acme/coyote"), 0, "de vuelta a warn")
+	// Las reglas de riesgo del proyecto viajan en el workflow de cada repo.
 	cfg := readFile(t, cfgPath)
 	if err := os.WriteFile(cfgPath, []byte(cfg+"risk:\n  R3: [\"services/*/src/**/pagos/**\"]\n"), 0o644); err != nil {
 		t.Fatal(err)

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -83,6 +84,7 @@ type statusReport struct {
 	Branch     string            `json:"branch,omitempty"`
 	Dirty      int               `json:"dirty"`
 	Autonomy   string            `json:"autonomy"`
+	Features   map[string]bool   `json:"features"`
 	Documents  map[string]string `json:"documents"`
 	Layers     []string          `json:"layers"`
 	Must       int               `json:"must"`
@@ -108,7 +110,10 @@ func cmdStatus(a *app, args []string) error {
 	if err != nil {
 		return err
 	}
-	r := statusReport{Project: cfg.Name, Type: cfg.Type, Root: root, Autonomy: cfg.Autonomy, Documents: map[string]string{}}
+	r := statusReport{Project: cfg.Name, Type: cfg.Type, Root: root, Autonomy: cfg.Autonomy, Documents: map[string]string{}, Features: map[string]bool{}}
+	for name := range project.KnownFeatures {
+		r.Features[name] = cfg.Feature(name)
+	}
 	if gitx.IsRepo(root) {
 		r.Branch, r.Dirty = gitx.Branch(root), gitx.Dirty(root)
 	}
@@ -190,6 +195,18 @@ func cmdStatus(a *app, args []string) error {
 		mode += " (el motor de workstreams se detiene menos; el gate aplica igual)"
 	}
 	fmt.Fprintf(tw, "Autonomía\t%s\n", mode)
+	names := make([]string, 0, len(r.Features))
+	for name := range r.Features {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		state := "apagada"
+		if r.Features[name] {
+			state = "prendida"
+		}
+		fmt.Fprintf(tw, "Bandera %s\t%s\n", name, state)
+	}
 	tw.Flush()
 	for _, w := range r.Warnings {
 		fmt.Fprintln(a.stdout, "aviso: "+w)

@@ -85,6 +85,28 @@ risk:
 
 El comentario muestra el riesgo, los archivos, quién puede aprobar y el impacto. Con `--policy fail`, el chequeo falla hasta que llega la aprobación. Para exigirla, se marca el chequeo "coyote gate pr / riesgo e impacto" como requerido en la protección de la rama.
 
+### Bandera `pr_enforcement`
+
+Que un chequeo bloquee el merge depende de GitHub: en repos privados, exigir un chequeo pide un plan de pago. La bandera deja lista la función para cuando exista:
+
+```yaml
+# coyote/project.yaml del producto; ningún agente puede editarlo
+features:
+  pr_enforcement: false   # apagada: gate pr avisa (warn); prendida: el chequeo falla hasta que aprueba un dueño (fail)
+```
+
+- **La política sale de la bandera.** `coyote install --ci github` toma de ella la política de los workflows, y `--policy` manda sobre la bandera con un aviso.
+- **Al prenderla, se regeneran los workflows.** `install --ci github --check` avisa que están desactualizados y cada workflow pasa a `fail`. Después se marca el chequeo como requerido en la protección de la rama.
+- **Banderas desconocidas.** Una bandera que coyote no conoce es un error de `project.yaml`.
+
+### Probar sin tocar la rama principal
+
+`pull_request_target` usa el workflow de la rama base del PR. Para ensayar el pipeline sin integrar nada a `main`:
+
+1. Se deja el workflow en una rama (`coyote/pipeline`).
+2. Se abren PRs contra esa rama.
+3. Se cierran sin merge.
+
 Para cerrar el círculo, conviene activar además "Require review from Code Owners" en la protección de la rama, con CODEOWNERS sobre `.github/`. Así, cambiar el workflow que corre el gate también pasa por un dueño, en un PR aparte, porque el workflow que evalúa ese PR es el de la rama base.
 
 ## Límites
