@@ -29,6 +29,10 @@ var DefaultRules = []Rule{
 	{R3, []string{".github/workflows/**", ".github/actions/**", ".gitlab-ci.yml", "CODEOWNERS", ".github/CODEOWNERS", "docs/CODEOWNERS"}, "el pipeline o quién revisa"},
 	{R3, []string{".gitattributes", "**/.gitattributes", ".gitmodules"}, "cómo git lee los archivos"},
 	{R3, []string{".gitleaks.toml", "**/.gitleaks.toml", ".gitleaksignore", "**/.gitleaksignore"}, "la configuración de gitleaks"},
+	// Las reglas por defecto de gitleaks saltan toda ruta que contenga
+	// gitleaks.toml y los nombres que terminan en go.mod, go.sum o go.work: un
+	// nombre así, que no es el de siempre, esconde un archivo de gitleaks.
+	{R3, []string{"**/*gitleaks.toml*", "**/*gitleaks.toml*/**", "**/?*go.mod", "**/?*go.sum", "**/?*go.work", "**/?*go.work.sum"}, "un nombre que gitleaks no revisa"},
 	{R3, []string{"**/migrations/**", "**/migration/**", "**/db/changelog/**", "**/flyway/**", "**/*.sql"}, "el esquema de datos"},
 	{R3, []string{"**/auth/**", "**/security/**", "**/crypto/**"}, "autenticación o seguridad"},
 	{R3, []string{"**/*.tf", "**/*.tf.json", "**/*.tfvars", "**/*.tfvars.json", "**/terragrunt.hcl", "**/.terraform.lock.hcl",

@@ -48,7 +48,8 @@ func TestGitHubWorkflow(t *testing.T) {
 		t.Fatalf("YAML inválido con gitleaks: %v\n%s", err, wf)
 	}
 	for _, want := range []string{
-		"GIT_ATTR_SOURCE: " + emptyTree, "--remerge-diff --no-renames $BASE..$HEAD", "commit-tree \"$HEAD^{tree}\" -p \"$mb\"",
+		"GIT_ATTR_SOURCE: " + emptyTree, "shell: bash", "--remerge-diff --no-renames $BASE..$HEAD", "commit-tree \"$HEAD^{tree}\" -p \"$mb\"",
+		`--config "$RUNNER_TEMP/gitleaks-base/gitleaks.toml"`, "commit.gpgSign=false", `GIT_COMMITTER_DATE="@0 +0000"`,
 		"--ignore-gitleaks-allow", "--redact", gitleaksSHA256,
 		`--gitleaks "$RUNNER_TEMP/gitleaks.json" --gitleaks-net "$RUNNER_TEMP/gitleaks-net.json"`,
 	} {

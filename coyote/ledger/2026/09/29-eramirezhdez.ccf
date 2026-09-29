@@ -51,3 +51,4 @@
 2026-09-29T07:50Z|@eramirezhdez/coyote-sre|W-0007|coyote|fix|slo|consultas, plantillas y reglas generadas que no esconden una relajación|-|-|-|ok
 2026-09-29T07:58Z|@eramirezhdez/coyote-devsecops|W-0007|coyote|fix|ci|gitleaks ve merges, renames y atributos, y su configuración es R3|-|-|-|ok
 2026-09-29T09:01Z|@eramirezhdez/coyote-sre|W-0007|coyote|fix|slo|un servicio en un solo archivo, reglas anidadas y borradas en R3,…|-|-|-|ok
+2026-09-29T09:02Z|@eramirezhdez/coyote-devsecops|W-0007|coyote|fix|ci|configuración de gitleaks por ruta absoluta, commit neto sin identidad del runner…|-|-|-|ok

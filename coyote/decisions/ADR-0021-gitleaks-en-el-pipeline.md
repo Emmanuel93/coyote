@@ -24,7 +24,11 @@ El escáner de coyote solo reconoce formas de alta confianza (ADR-0016). gitleak
   - agregarlo en una ruta que gitleaks ignora y moverlo con un rename;
   - marcarlo como binario con un `.gitattributes` del PR.
 
-  Por eso el paso escanea los commits con `--remerge-diff --no-renames` y, aparte, el diff neto del PR: un commit con el árbol del PR sobre el merge-base, escrito en una carpeta de objetos temporal fuera del clon. Git corre sin atributos del repo (`GIT_ATTR_SOURCE` apunta al árbol vacío). `gate pr` junta los dos reportes y cuenta una vez cada archivo con su regla.
+  Por eso el paso escanea los commits con `--remerge-diff --no-renames` y, aparte, el diff neto del PR: un commit con el árbol del PR sobre el merge-base, escrito en una carpeta de objetos temporal fuera del clon, con autor y fecha fijos y sin firma. Git corre sin atributos del repo (`GIT_ATTR_SOURCE` apunta al árbol vacío). `gate pr` junta los dos reportes y cuenta una vez cada archivo con su regla.
+- **Segunda revisión.**
+  - gitleaks salta el archivo del repo cuya ruta es igual a la de `--config`: la configuración va por ruta absoluta.
+  - Las reglas por defecto saltan cualquier ruta que contenga `gitleaks.toml` y los nombres que terminan en `go.mod`, `go.sum` o `go.work`: esos nombres raros son R3 en `gate pr`.
+  - Un falso positivo se exceptúa sin commit (`archivo:regla:línea`): el commit del diff neto cambia en cada corrida.
 - **Sin falsos verdes.** gitleaks 8.30.1 sale con 0 cuando git falla (una base que no existe, un git que se cae): no revisa nada y dice "no leaks found".
   - El paso verifica antes que los dos commits existan.
   - Corre git por un envoltorio que deja sus errores en el log.

@@ -403,3 +403,52 @@ func TestGitleaksDeVerdad(t *testing.T) {
 		t.Fatal("una base desconocida hace fallar el paso")
 	}
 }
+
+// TestGitleaksDeVerdadConfigPropia: con una configuración propia en la base
+// (sin las reglas por defecto), un archivo del PR en la misma ruta relativa
+// que la configuración del paso se revisa igual; y el paso no depende de la
+// identidad de git del runner ni de que firme commits.
+func TestGitleaksDeVerdadConfigPropia(t *testing.T) {
+	if os.Getenv("COYOTE_GITLEAKS_E2E") != "1" {
+		t.Skip("COYOTE_GITLEAKS_E2E no está en 1")
+	}
+	base := setup(t)
+	productoDemo(t, base)
+	ws := filepath.Join(base, "ws")
+	tmp := filepath.Join(base, "runner")
+	for _, d := range []string{filepath.Join(ws, "repos"), tmp} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	svc := filepath.Join(ws, "repos", "servicios")
+	git(t, base, "clone", "-q", filepath.Join(base, "servicios"), svc)
+	write(t, svc, ".gitleaks.toml", "[[rules]]\nid = \"github-pat\"\nregex = '''ghp_[0-9a-zA-Z]{36}'''\n")
+	git(t, svc, "add", "-A")
+	git(t, svc, "commit", "-qm", "chore: configuración propia de gitleaks")
+	baseSHA := strings.TrimSpace(git(t, svc, "rev-parse", "HEAD"))
+	tok := "ghp_" + strings.Repeat("Kd8Lm2Np4Qr6", 3)
+	write(t, svc, "conf/control.txt", "token = \""+tok+"\"\n")
+	write(t, svc, "gitleaks-base/gitleaks.toml", "token = \""+tok+"\"\n")
+	git(t, svc, "add", "-A")
+	git(t, svc, "commit", "-qm", "feat: tokens")
+	headSHA := strings.TrimSpace(git(t, svc, "rev-parse", "HEAD"))
+	// Un runner sin identidad de git y que firma commits.
+	runnerCfg := filepath.Join(base, "runner.gitconfig")
+	write(t, base, "runner.gitconfig", "[commit]\n\tgpgsign = true\n[user]\n\tuseConfigOnly = true\n")
+	write(t, base, "gitleaks.sh", install.GitleaksScript("servicios"))
+	cmd := exec.Command("bash", filepath.Join(base, "gitleaks.sh"))
+	cmd.Env = append(os.Environ(), "RUNNER_TEMP="+tmp, "GITHUB_WORKSPACE="+ws, "BASE="+baseSHA, "HEAD="+headSHA,
+		"GIT_ATTR_SOURCE=4b825dc642cb6eb9a060e54bf8d69288fbee4904", "GIT_CONFIG_GLOBAL="+runnerCfg)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("el paso de gitleaks falló: %v\n%s", err, out)
+	}
+	for _, report := range []string{"gitleaks.json", "gitleaks-net.json"} {
+		got := readFile(t, filepath.Join(tmp, report))
+		for _, want := range []string{"conf/control.txt", "gitleaks-base/gitleaks.toml"} {
+			if !strings.Contains(got, want) {
+				t.Errorf("%s no tiene %s:\n%s", report, want, got)
+			}
+		}
+	}
+}

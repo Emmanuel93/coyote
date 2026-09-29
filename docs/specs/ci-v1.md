@@ -58,7 +58,7 @@ Es la aprobación en equipo sin claves compartidas. Hace lo mismo que `ci impact
 
 | Riesgo | Rutas |
 |--------|-------|
-| R3 | el pipeline, las acciones propias y CODEOWNERS; `.gitattributes` y `.gitmodules`; `.gitleaks.toml` y `.gitleaksignore`; migraciones y SQL; `auth`, `security`, `crypto`; infraestructura (Terraform con `*.tf.json`, `*.tfvars`, `terragrunt.hcl` y `.terraform.lock.hcl`, Helm, Kubernetes, Dockerfile); la configuración del gate, de los hooks de cada IDE, del inventario (`coyote/infra.yaml`) y del estándar |
+| R3 | el pipeline, las acciones propias y CODEOWNERS; `.gitattributes` y `.gitmodules`; `.gitleaks.toml` y `.gitleaksignore`, y los nombres que gitleaks salta sin mirar (cualquier ruta con `gitleaks.toml`, o que termina en `go.mod`, `go.sum` o `go.work` sin llamarse así); migraciones y SQL; `auth`, `security`, `crypto`; infraestructura (Terraform con `*.tf.json`, `*.tfvars`, `terragrunt.hcl` y `.terraform.lock.hcl`, Helm, Kubernetes, Dockerfile); la configuración del gate, de los hooks de cada IDE, del inventario (`coyote/infra.yaml`) y del estándar |
 | R2 | contratos de API (OpenAPI, AsyncAPI, proto, Avro, GraphQL); dependencias (`go.mod`, `pom.xml`, Gradle, `package.json`, `pubspec.yaml`…); configuración del servicio (`application*.yml`) |
 
 El proyecto agrega las suyas en `coyote/project.yaml`, un archivo que ningún agente puede editar. `install --ci` las lleva a cada workflow:
@@ -125,21 +125,22 @@ El workflow agrega un paso antes de `gate pr`:
 - **Binario fijado.** Descarga gitleaks 8.30.1 para Linux x64 de su release en GitHub y verifica el sha256 que trae coyote. Subir de versión es un cambio de coyote con su prueba.
 - **Dos escaneos.**
   - Los commits del PR (`base..head`), con `--remerge-diff`, para ver lo que entra al resolver un merge, y `--no-renames`, para que un archivo movido se lea entero.
-  - El diff neto del PR: un commit aparte con el árbol del PR sobre el merge-base, escrito fuera del clon. Ve lo que se integra aunque haya llegado por un camino que el primer escaneo no lee, como un archivo que fue binario en un commit intermedio.
+  - El diff neto del PR: un commit aparte con el árbol del PR sobre el merge-base, escrito fuera del clon. Ve lo que se integra aunque haya llegado por un camino que el primer escaneo no lee, como un archivo que fue binario en un commit intermedio. El commit lleva autor y fecha fijos y sin firma: no depende de la identidad de git del runner.
   - `gate pr` recibe los dos reportes (`--gitleaks` y `--gitleaks-net`) y cuenta una vez cada archivo con su regla. Lo que solo aparece en el diff neto va marcado "diff del PR".
 - **Configuración de la base.** Usa `.gitleaks.toml` y `.gitleaksignore` de la rama base (sin `.gitleaks.toml`, las reglas de gitleaks por defecto) e ignora los comentarios `gitleaks:allow` que agregue el PR.
   - Escanea la carpeta `.git` del repo: gitleaks busca `.gitleaksignore` en la carpeta que escanea, y en el árbol de trabajo sería el del PR.
+  - Pasa la configuración por ruta absoluta: gitleaks salta el archivo del repo cuya ruta es igual a la de `--config`, y una ruta del repo nunca es absoluta.
   - Lee sin atributos de git (`GIT_ATTR_SOURCE` apunta al árbol vacío): un `.gitattributes` del PR no esconde un archivo como binario.
   - Cambiar `.gitleaks.toml` o `.gitleaksignore` es R3 por su ruta: una dispensa nueva la aprueba un dueño.
 - **Sin falsos verdes.** gitleaks sale con 0 aunque git falle y no revise nada. El paso verifica antes que los dos commits existan y corre git por un envoltorio que deja sus errores en el log. Falla ante cualquier error de git o de gitleaks.
 - **Sin valores.** Corre con `--redact` y solo escribe los reportes en la carpeta temporal del job, que no se publica.
 - **Cambio de base.** El workflow también corre con `edited`: cambiar la rama base de un PR vuelve a correr el chequeo.
 
-Un falso positivo lo aprueba un dueño en el PR y se agrega a `.gitleaksignore` en la rama base, con su propio PR. No se usa la acción de gitleaks: pide licencia en cuentas de organización y toma la configuración del código que revisa.
+Un falso positivo lo aprueba un dueño en el PR y se agrega a `.gitleaksignore` en la rama base, con su propio PR, sin commit: `archivo:regla:línea`. La forma con commit que imprime gitleaks solo calla el primer escaneo, porque el commit del diff neto cambia en cada corrida; sin commit, la excepción vale para ese archivo en cualquier commit. No se usa la acción de gitleaks: pide licencia en cuentas de organización y toma la configuración del código que revisa.
 
 Lo que el paso no ve:
 
-- Lo que excluye la configuración de la base. Las reglas por defecto de gitleaks ignoran rutas como `node_modules/` o las imágenes, también en el diff neto.
+- Lo que excluye la configuración de la base, también en el diff neto. Las reglas por defecto de gitleaks (`useDefault = true`, lo que usa el paso si la base no trae `.gitleaks.toml`) saltan imágenes, fuentes, documentos de Office, PDF y binarios por su extensión; lockfiles (`package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`, `poetry.lock`…); `node_modules/`, `bower_components/`, algunas rutas de `vendor/` y de Python (`site-packages`, `*.dist-info`); los wrappers de Gradle y Maven; y cualquier ruta que contenga `gitleaks.toml`, `verification-metadata.xml` o `Database.refactorlog`. Los nombres raros de esa lista son R3 en `gate pr`; para escanear también lo demás, la base trae su propio `.gitleaks.toml` con las reglas por defecto copiadas y sin esas rutas, sin `useDefault`.
 - Un secreto dentro de un archivo binario o en UTF-16, y los mensajes de commit.
 - Un secreto que se subió y se quitó con un force-push: ya no está en los commits del PR, aunque GitHub lo guardó. Hay que rotarlo igual.
 - Un `[extend] path` en el `.gitleaks.toml` de la base: el paso solo copia ese archivo, así que gitleaks no encuentra la otra configuración y el paso falla.

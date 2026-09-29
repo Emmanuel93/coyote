@@ -287,7 +287,7 @@ func gateReport(res ci.GateResult, in ci.GateInput, p *prRun, policy string, pla
 		b.WriteString("\n")
 	}
 	if n := max(in.LeaksTotal, len(in.Leaks)); n > 0 {
-		fmt.Fprintf(&b, "**gitleaks.** %s en los commits del PR; nunca se muestra el valor. Si es un secreto, sácalo y rótalo: ya está en GitHub. Si es un falso positivo, lo aprueba un dueño y se agrega a `.gitleaksignore` en la rama base.\n\n", capFirst(plural(n, "hallazgo", "hallazgos")))
+		fmt.Fprintf(&b, "**gitleaks.** %s en el PR; nunca se muestra el valor. Si es un secreto, sácalo y rótalo: ya está en GitHub. Si es un falso positivo, lo aprueba un dueño y se agrega a `.gitleaksignore` en la rama base, sin commit (`archivo:regla:línea`), en su propio PR.\n\n", capFirst(plural(n, "hallazgo", "hallazgos")))
 		b.WriteString("| Archivo | Línea | Regla | Commit |\n|---|---|---|---|\n")
 		for i, l := range in.Leaks {
 			if i == ciMaxRows {

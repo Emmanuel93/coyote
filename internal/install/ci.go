@@ -58,7 +58,12 @@ const (
 //   - la configuración y las excepciones salen de la rama base, y los
 //     gitleaks:allow del PR no cuentan;
 //   - gitleaks sale con 0 aunque git falle: un envoltorio de git deja el error
-//     en su log y el paso falla ante cualquier error.
+//     en su log y el paso falla ante cualquier error;
+//   - la configuración va por ruta absoluta: gitleaks salta el archivo del
+//     repo cuya ruta es igual a la de --config, y una ruta del repo nunca es
+//     absoluta;
+//   - el commit del diff neto lleva autor y fecha fijos y sin firma: no
+//     depende de la identidad de git del runner.
 func GitleaksScript(self string) string {
 	return `set -eu
 cd "$RUNNER_TEMP"
@@ -81,13 +86,16 @@ printf '#!/bin/sh\n"%s" "$@"; rc=$?\n[ "$rc" -eq 0 ] || echo "git terminó con e
 chmod +x gitshim/git
 mb=$(git -C "$repo" merge-base "$BASE" "$HEAD")
 net=$(GIT_OBJECT_DIRECTORY="$RUNNER_TEMP/net-objects" GIT_ALTERNATE_OBJECT_DIRECTORIES="$repo/.git/objects" \
-  git -C "$repo" commit-tree "$HEAD^{tree}" -p "$mb" -m "diff del PR" </dev/null)
-flags="--config gitleaks-base/gitleaks.toml --gitleaks-ignore-path gitleaks-base --ignore-gitleaks-allow --redact --no-banner --no-color --report-format json --exit-code 0"
+  GIT_AUTHOR_NAME=coyote GIT_AUTHOR_EMAIL=coyote@localhost GIT_AUTHOR_DATE="@0 +0000" \
+  GIT_COMMITTER_NAME=coyote GIT_COMMITTER_EMAIL=coyote@localhost GIT_COMMITTER_DATE="@0 +0000" \
+  git -C "$repo" -c commit.gpgSign=false commit-tree "$HEAD^{tree}" -p "$mb" -m "diff del PR" </dev/null)
+flags=(--config "$RUNNER_TEMP/gitleaks-base/gitleaks.toml" --gitleaks-ignore-path "$RUNNER_TEMP/gitleaks-base" --ignore-gitleaks-allow
+  --redact --no-banner --no-color --report-format json --exit-code 0)
 status=0
-PATH="$RUNNER_TEMP/gitshim:$PATH" ./gitleaks git "$repo/.git" --log-opts="--remerge-diff --no-renames $BASE..$HEAD" $flags \
+PATH="$RUNNER_TEMP/gitshim:$PATH" ./gitleaks git "$repo/.git" --log-opts="--remerge-diff --no-renames $BASE..$HEAD" "${flags[@]}" \
   --report-path gitleaks.json 2> gitleaks.log || status=$?
 PATH="$RUNNER_TEMP/gitshim:$PATH" GIT_OBJECT_DIRECTORY="$RUNNER_TEMP/net-objects" GIT_ALTERNATE_OBJECT_DIRECTORIES="$repo/.git/objects" \
-  ./gitleaks git "$repo/.git" --log-opts="--no-renames $mb..$net" $flags --report-path gitleaks-net.json 2>> gitleaks.log || status=$?
+  ./gitleaks git "$repo/.git" --log-opts="--no-renames $mb..$net" "${flags[@]}" --report-path gitleaks-net.json 2>> gitleaks.log || status=$?
 sed 's/\x1b\[[0-9;]*m//g' gitleaks.log > gitleaks.txt
 cat gitleaks.txt >&2
 if [ "$status" -ne 0 ] || grep -Eq '^[^ ]+ (ERR|FTL) ' gitleaks.txt; then
@@ -212,6 +220,7 @@ func GitHubWorkflow(o CIOptions) (string, error) {
 		w("          HEAD: ${{ github.event.pull_request.head.sha }}")
 		w("          # Sin atributos de git: un .gitattributes no esconde un archivo como binario.")
 		w("          GIT_ATTR_SOURCE: %s", emptyTree)
+		w("        shell: bash")
 		w("        run: |")
 		for _, line := range strings.Split(strings.TrimSuffix(GitleaksScript(o.Self.Name), "\n"), "\n") {
 			if line == "" {
