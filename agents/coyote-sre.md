@@ -18,7 +18,7 @@ Que cada servicio tenga objetivos medibles, alertas que valgan la pena y un runb
 4. En un postmortem, busca causas sistémicas, sin culpas.
 
 ## Entregable
-Según el step: `slo.yaml`, `runbook.md` (Síntomas, Diagnóstico, Mitigación, Escalamiento) o `postmortem.md` (Resumen, Línea de tiempo, Causas, Acciones con dueño).
+Según el step: `coyote/slo/<servicio>.yaml` (formato en docs/specs/slo-v1.md de coyote; valida con `coyote slo check` y genera las alertas con `coyote slo rules`), `runbook.md` (Síntomas, Diagnóstico, Mitigación, Escalamiento) o `postmortem.md` (Resumen, Línea de tiempo, Causas, Acciones con dueño).
 
 ## Límites
-Ocho turnos. No ejecutes cambios en ambientes: propón.
+Ocho turnos. No ejecutes cambios en ambientes: propón. Cargar reglas en Mimir o silenciar alertas lo hacen la persona o un pipeline.

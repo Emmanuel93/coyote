@@ -13,6 +13,7 @@ import (
 	"github.com/Emmanuel93/coyote/internal/product"
 	"github.com/Emmanuel93/coyote/internal/project"
 	"github.com/Emmanuel93/coyote/internal/secrets"
+	"github.com/Emmanuel93/coyote/internal/slo"
 )
 
 // coyote gate pr es la aprobación en equipo sin claves compartidas (D6,
@@ -61,6 +62,9 @@ func gatePR(a *app, args []string) error {
 		return fail(1, "%v", err)
 	}
 	in := ci.GateInput{Author: p.pr.Author, HeadSHA: p.pr.HeadSHA, Changed: changed, Files: ci.PathRisks(changed, rules)}
+	// Un SLO relajado es R3 aunque su ruta sea R2 (ADR-0020): se compara el
+	// archivo de la base con el del PR, como dato.
+	in.Files = append(in.Files, sloRisks(dir, p.pr.BaseSHA, p.pr.HeadSHA, changed)...)
 	// R18: lo que el PR agrega se revisa como dato, sin ejecutar nada.
 	added, right, err := product.AddedText(dir, p.pr.BaseSHA+"..."+p.pr.HeadSHA)
 	if err != nil {
@@ -330,4 +334,20 @@ func baseRules(dir, base, name string) func(string) (secrets.Rules, string) {
 			}
 		}
 	}
+}
+
+// sloRisks compara cada archivo de SLOs que toca el PR con el de la base.
+func sloRisks(dir, base, head string, changed []string) []ci.FileRisk {
+	var out []ci.FileRisk
+	for _, f := range changed {
+		if !slo.IsSpecPath(f) {
+			continue
+		}
+		oldText, hadOld := product.FileAt(dir, base, f)
+		newText, hasNew := product.FileAt(dir, head, f)
+		for _, c := range slo.Compare(oldText, hadOld, newText, hasNew) {
+			out = append(out, ci.FileRisk{Path: f, Risk: c.Risk, Why: c.Why})
+		}
+	}
+	return out
 }

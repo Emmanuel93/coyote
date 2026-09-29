@@ -85,4 +85,16 @@ func TestInfraGate(t *testing.T) {
 	if !InfraEffect("helm install x ./chart") || InfraEffect("helm list") {
 		t.Error("InfraEffect")
 	}
+	// Cargar o borrar reglas de alertas, o silenciarlas, tiene efectos (ADR-0020); revisarlas no.
+	for _, c := range []string{"mimirtool rules sync coyote/slo/prometheus/pagos.yaml", "mimirtool --address=http://localhost:9009 --id=anonymous rules load r.yaml",
+		"cortextool rules delete ns grupo", "mimirtool alertmanager load am.yaml", "amtool silence add alertname=PagosApi", "amtool --alertmanager.url=http://am silence expire 1234", "amtool alert add x"} {
+		if !InfraEffect(c) {
+			t.Errorf("%q tiene efectos", c)
+		}
+	}
+	for _, c := range []string{"mimirtool rules lint r.yaml", "mimirtool rules check r.yaml", "mimirtool rules list", "amtool silence query", "amtool alert query", "promtool check rules r.yaml"} {
+		if InfraEffect(c) {
+			t.Errorf("%q solo lee", c)
+		}
+	}
 }

@@ -37,6 +37,7 @@ var DefaultRules = []Rule{
 	{R2, []string{"**/openapi*.{yaml,yml,json}", "**/swagger*.{yaml,yml,json}", "**/asyncapi*.{yaml,yml}", "**/*.proto", "**/*.avsc", "**/*.graphql"}, "un contrato de API"},
 	{R2, []string{"go.mod", "**/pom.xml", "**/build.gradle", "**/build.gradle.kts", "**/package.json", "**/pubspec.yaml", "**/requirements*.txt", "**/pyproject.toml", "**/Cargo.toml"}, "las dependencias"},
 	{R2, []string{"**/application*.{yml,yaml,properties}", "**/bootstrap*.{yml,yaml,properties}"}, "la configuración del servicio"},
+	{R2, []string{"coyote/slo/**", "**/coyote/slo/**"}, "los SLOs y sus alertas"},
 }
 
 // riskFlagRe acepta solo caracteres de patrón: la regla viaja por el shell del workflow.

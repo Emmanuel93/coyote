@@ -128,6 +128,14 @@ rules:
     check: { type: secrets }
     fix: sácalo de git, agrégalo a .gitignore, muévelo a una variable de entorno o al gestor de secretos y rótalo
 
+  - id: R19
+    title: Las alertas de un SLO salen de su archivo, están vigentes y la page enlaza un runbook
+    level: MUST
+    scope: repo
+    why: Una alerta editada a mano se aleja de su SLO, y una page sin runbook deja sola a quien la recibe de madrugada.
+    check: { type: slo }
+    fix: corre coyote slo rules después de cambiar coyote/slo/<servicio>.yaml y escribe el runbook que declara cada SLO
+
   - id: A1
     title: Un agente no ejecuta acciones con efectos sin aprobación humana por step, plan o concesión
     level: MUST

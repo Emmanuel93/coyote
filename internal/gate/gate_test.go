@@ -44,6 +44,7 @@ func TestReadOnlyShell(t *testing.T) {
 		"git log --format='%h %s' 2>/dev/null", "git status 2>&1 | tail -5", "echo listo && git status --short",
 		"sort go.mod | uniq -c", "jq .version package.json", "diff a.txt b.txt", "cd internal && ls", "tree -L 2",
 		"git -C internal log -1", "sleep 1", "coyote ws status W-0002", "coyote ws check W-0002 --json", "coyote ws status",
+		"coyote hub status", "coyote hub status --json", "coyote slo check", "coyote slo rules --check", "coyote slo rules pagos --stdout",
 	}
 	for _, c := range allow {
 		a := claude(t, "Bash", map[string]any{"command": c, "description": "x"}, root)
@@ -61,6 +62,7 @@ func TestReadOnlyShell(t *testing.T) {
 		"./ls", "/bin/ls", "ls &", "curl https://example.com", "sed -i s/a/b/ x", "awk '{print}' x",
 		"xargs rm < lista", "rg --pre ./x foo", "cat <(ls)", "coyote commit -m 'x'", "coyote ask x --record",
 		"coyote standards lint --scripts", "coyote install --ide cursor", "coyote install --check=false --ide cursor",
+		"coyote slo rules", "coyote slo rules pagos", "coyote hub init ../hub",
 		"go test -run X ./...", "go run .", "ls\nrm -rf x", "ls # comentario", "git worktree add x",
 		"git config --list", "git config -l", "git config --get-regexp .", "git config --get-urlmatch http https://x",
 		"git config --get http.https://x.extraheader", "git remote -v", "git remote get-url origin", "go vet ./...", "go env",

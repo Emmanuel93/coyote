@@ -26,6 +26,7 @@ El default se derivó de repos reales construidos desde el dominio: conserva lo 
 - R16 (SHOULD). Todo feature parte del modelo de dominio y de sus contratos antes del código.
 - R17 (MUST). Un IDE sin hooks que bloqueen (nivel 2 o 3) no ejecuta tareas de riesgo R2 o R3 fuera de ramas `coyote/` protegidas por `coyote gate pr`. El nivel de cada IDE se mide con `coyote doctor --ide <ide> --canary`.
 - R18 (MUST). Ningún archivo del repo es un archivo de secretos (`.env`, tfstate, llaves, keystores, kubeconfig, cuentas de servicio) ni lleva un secreto escrito (llaves privadas, tokens de nube o de GitHub, URLs con contraseña). Un secreto que llegó a git se rota. Los falsos positivos se dispensan con motivo en `project.yaml` (`secrets.allow`) o con `coyote:allow-secret` en la línea.
+- R19 (MUST). Las alertas de un SLO salen de su archivo (`coyote/slo/<servicio>.yaml`) con `coyote slo rules`, están vigentes y cada alerta page enlaza un runbook que existe (ADR-0020). Un proyecto sin SLOs cumple.
 
 ## 3. Organización
 

@@ -35,6 +35,7 @@ API de pedidos de una tienda ficticia; proyecto sintético para probar coyote
 - R15: Ningún entregable lleva atribución a herramientas o modelos de IA
 - R17: Un IDE de nivel 2 o 3 no ejecuta tareas de riesgo R2 o R3 fuera de ramas coyote/ con gate pr
 - R18: Ningún archivo del repo es un archivo de secretos ni lleva un secreto escrito
+- R19: Las alertas de un SLO salen de su archivo, están vigentes y la page enlaza un runbook
 - A1: Un agente no ejecuta acciones con efectos sin aprobación humana por step, plan o concesión
 - A2: Todo step declara contrato, budget y esquema de salida
 - A3: Todo evento queda en el ledger y todo cierre deja su resumen de costo

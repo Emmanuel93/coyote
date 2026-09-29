@@ -19,6 +19,7 @@ import (
 	"github.com/Emmanuel93/coyote/internal/glob"
 	"github.com/Emmanuel93/coyote/internal/infra"
 	"github.com/Emmanuel93/coyote/internal/secrets"
+	"github.com/Emmanuel93/coyote/internal/slo"
 	"github.com/Emmanuel93/coyote/internal/tokens"
 )
 
@@ -148,6 +149,7 @@ func init() {
 	Register("script", checkScript)
 	Register("secrets", checkSecrets)
 	Register("infra", checkInfra)
+	Register("slo", checkSLO)
 }
 
 // Lint aplica todas las reglas activas con check al proyecto.
@@ -643,6 +645,20 @@ func checkInfra(ctx *Context, c Check) []Finding {
 			fd.Level = "SHOULD"
 		}
 		out = append(out, fd)
+	}
+	return out
+}
+
+// checkSLO revisa los SLOs del proyecto (R19, ADR-0020). Sin coyote/slo no
+// hay nada que revisar.
+func checkSLO(ctx *Context, c Check) []Finding {
+	files, err := slo.LoadAll(ctx.Root)
+	if err != nil {
+		return []Finding{{Path: slo.Dir, Msg: err.Error()}}
+	}
+	var out []Finding
+	for _, p := range slo.Check(ctx.Root, files) {
+		out = append(out, Finding{Path: p.Path, Msg: p.Msg})
 	}
 	return out
 }

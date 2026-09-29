@@ -527,6 +527,14 @@ func coyoteCheck(args []word) error {
 		if first == "list" || first == "scan" {
 			return nil
 		}
+	case "hub":
+		if first == "status" {
+			return nil
+		}
+	case "slo":
+		if first == "check" || first == "rules" && hasExact(rest, "--check", "-check", "--stdout", "-stdout") {
+			return nil
+		}
 	}
 	return fmt.Errorf("coyote %s tiene efectos", strings.TrimSpace(sub+" "+first))
 }
