@@ -1,6 +1,6 @@
 # Plan de ejecución — Coyote
 
-Estado: v0.7.0 aprobada en G7 (P-0007), en la rama `v0.7`; `main` sigue en v0.4.0 · v1.0 por arrancar en su rama · actualizado 2026-09-29
+Estado: v0.7.0 aprobada en G7 (P-0007), en la rama `v0.7`; `main` sigue en v0.4.0 · v1.0 en construcción en la rama `v1.0` · actualizado 2026-09-29
 
 Este plan ejecuta la propuesta aprobada ("Plan de construcción — Framework Coyote"). Cada release se razona con la plantilla de cinco partes que usarán los agentes de Coyote (problema, restricciones, opciones, decisión, riesgos) y cierra con un gate humano: nada se etiqueta, se publica ni toca otros proyectos sin autorización explícita.
 
@@ -23,7 +23,7 @@ Este plan ejecuta la propuesta aprobada ("Plan de construcción — Framework Co
 | v0.5 team | Pipeline de impacto en cada PR, motor de workstreams (`supervised` y `autonomous`), aprobación en equipo por PR y corridas medidas | G5 | Aplicar coyote a los repos de la organización: pipeline y `supervised` |
 | v0.6 | Resto de IDEs con su nivel medido, secretos y credenciales, infraestructura como código | G6 | El gate en los IDEs que uses y el inventario de infraestructura en su repo, en ramas |
 | v0.7 | SRE (SLOs y alertas como código), web v1 con visibilidad de costos (D10) y hub (D12) | G7 | Crear el hub de la organización y llevar las alertas a Faro |
-| v1.0 | Endurecimiento, auditoría, documentación | G8 | Release 1.0 |
+| v1.0 | Endurecimiento (web, inyección, compatibilidad), auditoría, evaluación del contexto, documentación y cadena de suministro | H8a y G8 | H8a: el piloto real. G8: etiquetar v1.0.0, llevar `main` a v1.0.0 y publicar el release |
 
 La propuesta juntaba en v0.6 lo que aquí son v0.6 y v0.7; el corte se razona en v0.6.
 
@@ -553,9 +553,163 @@ G7 autorizaría:
 
 **Decisión en G7 (P-0007).** Aprobados v0.7.0, el hub `kredius` con `fintech-producto` apuntando a él en `coyote/hub`, Faro con `git init` y la rama `coyote/slo`, y el arranque de v1.0. Quedan fuera las métricas del gateway con el Alertmanager, y gitleaks en el pipeline.
 
-## v1.0
+## v1.0 estable — razonamiento
 
-Endurecimiento, auditoría y documentación. Recibirá su razonamiento completo al cerrar v0.7, con lo aprendido en G7; así el plan no fija hoy lo que conviene decidir con evidencia.
+**Problema.**
+- v0.7 cierra lo que la propuesta pedía construir. Una 1.0 promete más: que el equipo adopte coyote sin quien lo construyó, que lo que registra aguante una auditoría y que lo que entrega no cambie sin aviso.
+- Hoy falta:
+  - un modelo de amenazas: cada release tuvo revisiones adversariales, pero lo aprendido está repartido en siete reportes;
+  - evidencia de auditoría: el ledger tiene los eventos, pero armar un reporte es leerlo a mano;
+  - saber si el contexto que entrega coyote es bueno: no hay preguntas de referencia ni una métrica;
+  - documentación para aprender: hay un README de 150 líneas y 17 especificaciones escritas para quien construye;
+  - un release verificable: hoy son binarios con SHA256SUMS, sin SBOM ni procedencia;
+  - una promesa de compatibilidad: el binario de v0.6 no pudo leer el `hub:` de v0.7 y falló con un error de YAML.
+
+**Lo que mostró la lectura (solo lectura).**
+- La etapa 6 de la propuesta aprobada pide:
+  - C6.1: modelo de amenazas con OWASP LLM 2025 y Agentic 2026, pruebas de inyección por fragmentos y por el ledger, clasificador de ingesta y prueba de escape del loop autónomo;
+  - C6.2: expansión de un salto en los paquetes y contradicciones;
+  - C6.3: golden de 30 preguntas por proyecto, juez de fidelidad mensual y umbral de regresión de 2 puntos en CI;
+  - C6.4: una feature R2 real en `fintech-services`, de punta a punta, con PRs en `ws/` y su `close.md`;
+  - C6.5: auditoría tipo ISO 42001 desde el ledger;
+  - C6.6: documentación Diátaxis;
+  - C6.7: `coyote serve` solo si el uso lo pidió;
+  - C6.8: release con goreleaser, SBOM CycloneDX y procedencia SLSA nivel 1.
+- Huecos en el código:
+  - `gate pr` no da riesgo a los archivos que los agentes leen como instrucciones: `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `CONTEXT.coyote.md`, `README.coyote.md`, `.github/copilot-instructions.md` y `.cursorrules`. Un PR puede plantar una orden para los agentes como R1.
+  - Un PR puede cambiar o borrar líneas del ledger sin que `gate pr` lo marque.
+  - Los paquetes de `get context` no dicen que su contenido son datos. Solo lo dice `AGENTS.md`.
+  - En el ledger de coyote, 4 de las 6 aprobaciones (`apr`) las escribió un agente a nombre de la persona. La respuesta de la persona está en `coyote/approvals/`, pero nada lo señala.
+  - `make dist` graba la hora del build en el binario, así que dos builds del mismo commit dan hashes distintos.
+  - `main` está en v0.4.0 más un commit, y las ramas v0.5, v0.6 y v0.7 descienden de él: puede avanzar a v1.0.0 sin merge.
+  - La skill `coyote-conflicts` ya enseña a presentar un conflicto. Detectarlos solos no existe.
+- Referencias vigentes, revisadas el 2026-09-29:
+  - OWASP Top 10 for LLM Applications 2025 (LLM01 a LLM10);
+  - OWASP Top 10 for Agentic Applications 2026 (ASI01 a ASI10), de diciembre de 2025;
+  - ISO/IEC 42001:2023: su Anexo A tiene 38 controles, y el A.6.2.8 pide registrar los eventos del sistema de IA;
+  - NIST AI RMF 1.0, con sus funciones GOVERN, MAP, MEASURE y MANAGE;
+  - SLSA v1.2: Build L1 pide que la procedencia exista; L2 pide además que esté firmada y que el build corra en una plataforma hospedada;
+  - CycloneDX 1.7, de octubre de 2025.
+
+**Restricciones.**
+- Las de siempre:
+  - sin dependencias nuevas, y compila sin red;
+  - nada se integra a `main` y el push es tuyo;
+  - sin atribución a IA (R15) ni nombres reales en el código (C1).
+- goreleaser, syft y los generadores de SLSA no están disponibles sin red. El SBOM y la procedencia se generan con la biblioteca estándar de Go.
+- Las corridas pagadas son tuyas ($30 al mes y $2 por corrida). El juez de fidelidad y el piloto real no los corro yo.
+- La propuesta pide la feature "fusionada", y tú pediste que en el ejercicio nada llegue a `main`. Por eso el piloto real termina en un PR revisado, y el merge lo decides tú.
+- El README sigue en 150 líneas (R10). La documentación nueva vive en `docs/`.
+
+**Opciones.**
+
+| Frente | Opciones | Elegida |
+| --- | --- | --- |
+| Web en una máquina compartida | Clave en una cookie. Clave en la ruta. Socket Unix, que el navegador no abre. Identificar al usuario del otro lado del TCP, que no es portátil | Clave en la ruta: una cookie de 127.0.0.1 viaja a cualquier puerto (RFC 6265, §8.5) (ADR-0022) |
+| Contenido de los repos | Borrar lo sospechoso. Enmarcarlo y marcarlo. Clasificarlo con un modelo | Enmarcar y marcar con reglas fijas. El gate sigue siendo la defensa que no depende de que el modelo obedezca (ADR-0023) |
+| Auditoría | Exportar el ledger. Un reporte con controles y verificaciones de integridad | El reporte, desde el ledger y git: es evidencia, no una certificación (ADR-0024) |
+| Calidad del contexto | Juez con modelo en la CI. Métricas de recuperación sin modelo en la CI y juez opcional | Métricas sin modelo en la CI, con umbral de 2 puntos. El juez corre una vez al mes con tu presupuesto (ADR-0025) |
+| Compatibilidad | Sin promesa. Semver sobre formatos, CLI y estándar, con `requires` | Semver y `requires` (ADR-0026) |
+| Release | goreleaser en Actions (L2). Build reproducible con SBOM y procedencia locales (L1) | L1 local. L2 con Actions solo si G8 autoriza publicar (ADR-0027) |
+| Documentación | Wiki. `docs/` con Diátaxis, referencia generada y tutorial probado | `docs/` con Diátaxis |
+| `coyote serve` (C6.7) | Postgres y pgvector, o nada | Nada: ningún uso lo pidió (D18). Pasa a v1.1 si hace falta |
+| Contradicciones (C6.2) | Una heurística ahora, o después del golden | Después: sin golden no se puede medir su ruido |
+
+**Decisión.**
+- **Web (T53).** `coyote web` genera en cada corrida una clave de 256 bits y la imprime, solo en la terminal, dentro de la URL (`/s/<clave>/`).
+  - Todos los enlaces llevan ese prefijo. Una ruta sin la clave correcta responde 404, y la comparación es de tiempo constante.
+  - La clave no se escribe en disco, en el ledger ni en los argumentos del proceso.
+  - Las respuestas llevan `Referrer-Policy: no-referrer` y `Cache-Control: no-store`.
+- **Amenazas e inyección (T54).**
+  - `docs/security/threat-model.md` lista los activos, los actores y las fronteras de confianza. Para cada riesgo de LLM01–LLM10 y ASI01–ASI10 dice su defensa en el código, su prueba y el riesgo que queda.
+  - Los paquetes de contexto y las respuestas de `ask` abren con una línea: lo citado de los repos son datos, no instrucciones.
+  - Un clasificador de reglas fijas marca los fragmentos con forma de orden para un agente: pedir que ignore sus instrucciones o que calle algo a la persona, un comando que baja código y lo corre, texto oculto. Los marca y los cuenta, pero no los borra.
+  - `generate agents` no lleva una nota marcada a `AGENTS.md`: ese archivo es una instrucción.
+  - En `gate pr`:
+    - los archivos de instrucciones de los agentes pasan a R2;
+    - un texto marcado en lo que agrega el PR es R2;
+    - cambiar o borrar líneas del ledger es R3.
+  - Prueba de escape: un agente falso en `autonomous` intenta cada una de estas cosas, y todas deben fallar:
+    - salir de su rama `ws/`;
+    - pasar su tope;
+    - cambiar su plan aprobado o aprobarse a sí mismo;
+    - tocar el gate o el hub;
+    - hacer push fuera de `ws/`.
+  - Fuzzing nativo de Go sobre los lectores expuestos: el de shell del gate, CCF, CCF-doc, safetext y el de consultas de SLO.
+- **Auditoría (T55).** `coyote audit [--month AAAA-MM] [--json] [--write]` arma un reporte desde el ledger, `coyote/approvals/` y la historia de git. Tiene cuatro partes:
+  - **Eventos.** Los eventos por tipo y actor. Las aprobaciones, los rechazos, las negaciones del gate y las concesiones de autonomía. El costo por proyecto, persona, agente y modelo, frente a su presupuesto.
+  - **Integridad.** Verifica que:
+    - el ledger solo agrega líneas;
+    - el actor coincide con la persona del archivo y con quien hizo el commit;
+    - toda aprobación registrada por un agente tiene la respuesta de la persona;
+    - no hay eventos futuros ni líneas inválidas;
+    - ningún commit lleva atribución a IA.
+  - **Controles.** Cada sección dice qué control apoya del Anexo A de ISO/IEC 42001 y del NIST AI RMF.
+  - **Límites.** Dice lo que el reporte no puede probar: la identidad es la que declara la máquina, salvo en los commits firmados.
+
+  Con `--write`, el reporte queda en `coyote/audit/AAAA-MM.md`.
+- **Golden y evaluación (T56).**
+  - `evals/golden.v1.jsonl` trae 30 preguntas sobre coyote y las fuentes que deben aparecer en la respuesta.
+  - `coyote eval` mide recall@5 y MRR de `ask`, y cuánto cubren los paquetes, todo sin modelo. La CI falla si una métrica baja más de 2 puntos frente a la línea base versionada.
+  - Con esa medida se prueba la expansión de un salto: el paquete suma lo que citan sus mejores fragmentos (ADRs, documentos), dentro del presupuesto. Se queda solo si el golden mejora.
+  - El juez de fidelidad corre con `coyote run`, cuando tú lo decidas.
+- **Compatibilidad 1.x (T57).** `docs/reference/compatibilidad.md` promete:
+  - los formatos v1 (CCF, CCF-doc, `project.yaml`, `hub.yaml`, SLO v1, aprobaciones y planes) solo crecen con campos opcionales;
+  - los comandos, sus salidas `--json` y sus códigos de salida no cambian de sentido;
+  - una regla MUST nueva del estándar llega primero como SHOULD en un minor;
+  - el gate sí puede negar más en cualquier versión.
+
+  `requires: ">=1.N"` en `project.yaml` y `hub.yaml` deja que un binario viejo lo diga claro, en vez de fallar con un error de YAML. El estándar default queda como 1.0.
+- **Documentación (T58).** `docs/` sigue las cuatro partes de Diátaxis:
+  - un tutorial de 15 minutos que una prueba corre de punta a punta;
+  - guías por tarea y por IDE;
+  - la referencia: la de comandos se genera de la tabla de la CLI y `make check` falla si queda vieja; los formatos son las specs;
+  - la explicación del diseño, desde los ADRs.
+
+  Suma un `CHANGELOG.md` armado desde los reportes de release.
+- **Cadena de suministro (T59).**
+  - `make dist` toma la fecha del commit, no la del reloj, así que dos builds del mismo commit dan los mismos hashes.
+  - Para cada binario genera, con Go estándar, un SBOM CycloneDX 1.7 armado desde su buildinfo.
+  - Genera también la procedencia SLSA v1.2 Build L1, con el commit, el comando, la versión de Go y el sha256 de cada archivo.
+  - `docs/` explica cómo verificar todo, incluido reconstruir desde la etiqueta y comparar hashes.
+- **Piloto real (T60, hito H8a).** Cuando T53 a T56 estén hechos, te propongo una feature R2 chica en `fintech-services`, con su plan `supervised`, su presupuesto y sus ramas `ws/`. La corres tú si la autorizas. De paso ejercita lo pendiente de G5 (el pipeline y las corridas medidas) y de G6 (el canario en tu IDE). Si no hay tiempo o presupuesto, v1.0 sale sin el piloto, pasa a v1.1 y G8 lo dice.
+- **Verificación (T61).** Tres pasadas adversariales, como en v0.7, la retro de los ocho releases y `docs/releases/v1.0.0.md` para G8.
+
+**Riesgos.**
+- **Envejecimiento de la documentación.** Es el release con más texto, y la documentación envejece rápido. Mitigación: la referencia se genera y el tutorial corre en una prueba.
+- **Errores del clasificador.** Tendrá falsos positivos y falsos negativos. Mitigación: marca pero no borra, y el gate no depende de que el modelo obedezca.
+- **Falsa confianza en la auditoría.** Mitigación: cada sección dice qué verifica y qué no, y el reporte recomienda firmar los commits.
+- **Alcance de SLSA L1.** Dice cómo se construyó el binario, pero no prueba quién lo construyó. Mitigación: L2, con una plataforma hospedada, queda para G8.
+- **Alcance del golden.** El golden de coyote mide coyote, no tus proyectos. Mitigación: el formato sirve para cualquier proyecto, y escribir el suyo es parte del piloto.
+- **Tamaño del release.** Orden de trabajo:
+  1. web, amenazas, auditoría y golden, porque el piloto real los usa;
+  2. después, compatibilidad y cadena de suministro;
+  3. al final, la documentación, porque describe todo lo anterior.
+
+  Si el tiempo aprieta, se cortan el juez de fidelidad y la expansión de un salto.
+
+### Tareas de v1.0
+
+| ID | Tarea | Razonamiento | Aceptación | Estado |
+| --- | --- | --- | --- | --- |
+| T52 | Plan y ADR-0022 a ADR-0027 | Siete frentes; se razonan antes del código | Esta sección, los ADRs y W-0008 | Hecho |
+| T53 | Web con clave por sesión | Quedó prometida en v0.7 | Clave por corrida en la ruta, 404 sin ella; la clave no queda en disco ni en el ledger; pruebas | Pendiente |
+| T54 | Amenazas e inyección | C6.1 | `threat-model.md`; paquetes enmarcados y clasificador; `generate agents` sin notas marcadas; en `gate pr`, instrucciones de agentes R2 y ledger reescrito R3; prueba de escape; fuzzing sin fallas abiertas | Pendiente |
+| T55 | Auditoría | C6.5 | `coyote audit` con integridad y controles; el reporte de septiembre de coyote | Pendiente |
+| T56 | Golden y evaluación | C6.2 y C6.3 | Golden de 30 preguntas; `coyote eval` en la CI con umbral; la expansión se queda solo si mejora | Pendiente |
+| T57 | Compatibilidad 1.x | Una 1.0 es una promesa | `compatibilidad.md`, `requires` y el estándar 1.0 | Pendiente |
+| T58 | Documentación | C6.6 | Tutorial probado, guías, referencia generada, explicación y CHANGELOG | Pendiente |
+| T59 | Cadena de suministro | C6.8 | Build reproducible; SBOM y procedencia por binario; verificación documentada | Pendiente |
+| T60 | Piloto real (H8a) | C6.4 | Con tu autorización: plan `supervised`, PRs en `ws/` y `close.md`. Sin ella, pasa a v1.1 | Pendiente |
+| T61 | Verificación y G8 | Evidencia antes de la 1.0 | Pruebas, tres pasadas adversariales, retro y `docs/releases/v1.0.0.md` | Pendiente |
+
+G8 autorizaría:
+
+1. Etiquetar `v1.0.0` y aceptar ADR-0022 a ADR-0027.
+2. Llevar `main` a v1.0.0 sin merge: puede avanzar porque las ramas de release descienden de él. El push es tuyo.
+3. Publicar el release en GitHub con binarios, SBOM y procedencia. Con Actions sube a SLSA Build L2.
+4. El piloto real, si no se hizo en H8a.
+5. Qué entra en v1.1.
 
 ## Supuestos sobre decisiones abiertas
 
@@ -588,6 +742,15 @@ Endurecimiento, auditoría y documentación. Recibirá su razonamiento completo 
 | D34 formato de SLOs | `coyote/slo/<servicio>.yaml` v1, propio y cercano a los formatos conocidos; reglas de Prometheus generadas por coyote y versionadas en `coyote/slo/prometheus/` (ADR-0020) | Un generador sin binarios externos que el gate y `gate pr` entienden | Confirmado en G7 |
 | D35 cargar alertas | Nunca un agente: la persona o un pipeline cargan las reglas en Faro (ADR-0020) | Una alerta cambiada en producción es un cambio de infraestructura | Confirmado en G7 |
 | D36 gitleaks | Opcional (`features.gitleaks`), fijado por hash, con la configuración de la rama base y su reporte en `gate pr` (ADR-0021) | Más patrones en el PR sin que el autor lo apague | Aceptado en G7 (ADR-0021); prenderlo en el pipeline del producto queda para después |
+| D37 web en máquina compartida | Clave por corrida en la ruta de cada enlace; sin ella, 404 (ADR-0022) | Otro usuario de la máquina no ve lo que ve quien la corre, y una cookie de 127.0.0.1 viajaría a cualquier puerto | Se confirma en G8 |
+| D38 contenido de los repos | Datos enmarcados y marcados por un clasificador de reglas fijas; notas marcadas fuera de `AGENTS.md`; instrucciones de agentes R2 y ledger reescrito R3 en `gate pr` (ADR-0023) | La inyección no se puede evitar del todo: se hace visible y el gate frena sus efectos | Se confirma en G8 |
+| D39 auditoría | `coyote audit` desde el ledger y git, con controles de ISO/IEC 42001 y NIST AI RMF; es evidencia, no certificación (ADR-0024) | Lo registrado sirve si alguien lo puede revisar sin leer el ledger a mano | Se confirma en G8 |
+| D40 evaluación del contexto | Golden y métricas sin modelo en la CI, con umbral de 2 puntos; el juez con modelo es opcional y usa tu presupuesto (ADR-0025) | La CI no gasta y una regresión se ve en el PR | Se confirma en G8 |
+| D41 compatibilidad | Semver sobre formatos, CLI y estándar, con `requires`; el gate puede negar más en cualquier versión (ADR-0026) | Una 1.0 le dice al equipo qué no va a cambiar | Se confirma en G8 |
+| D42 cadena de suministro | Build reproducible, SBOM CycloneDX 1.7 y procedencia SLSA Build L1 en `make dist`; L2 con Actions si se publica (ADR-0027) | Sin red no hay goreleaser, y un binario se verifica reconstruyéndolo | Se confirma en G8 |
+| D43 piloto real | Hito H8a con su propia autorización y presupuesto; sin él, pasa a v1.1 | Toca `fintech-services` y gasta en corridas | Se confirma en H8a |
+| D44 `coyote serve` | Queda para v1.1 si el uso lo pide (D18) | Ningún uso lo pidió | Se confirma en G8 |
+| D45 `main` | Avanza a v1.0.0 en G8, sin merge; el push es tuyo | Las ramas de release descienden de `main` | Se confirma en G8 |
 | D23 unidad de trabajo | Producto multi-repo: servicios, app y backoffice juntos, en un proyecto aparte que lee los tres (ADR-0011) | Un cambio en uno afecta a los otros (G3) | Confirmado en G4 |
 | D20 lectura sin aprobación | Lista cerrada de comandos de solo lectura en la herramienta; sin patrones propios del proyecto | Leer no tiene efectos y evita la fatiga | Confirmado en G3 |
 | D21 validez de una aprobación | Solo en la máquina donde se dio (firma con clave local), 24 h como máximo | Un registro copiado o fabricado no sirve | Confirmado en G3 |

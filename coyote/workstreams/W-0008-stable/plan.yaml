@@ -1,0 +1,21 @@
+# Plan de v1.0, construido fuera del motor: los pasos los ejecuta la persona con su asistente, no coyote run; por eso no llevan max_usd.
+id: W-0008
+title: v1.0 estable con endurecimiento, auditoría, evaluación del contexto, documentación y cadena de suministro
+owner: "@eramirezhdez"
+autonomy: manual
+risk: R3
+reasoning: docs/plan/EXECUTION_PLAN.md#v10-estable--razonamiento
+authorized_by: coyote/approvals/P-0007.json
+gate: G8                    # etiquetar v1.0.0, llevar main a v1.0.0 y publicar el release
+steps:
+  - { id: T52, does: "plan razonado y ADR-0022 a ADR-0027", agent: coyote-sr-solution-architect, output: [docs/plan/EXECUTION_PLAN.md, coyote/decisions/] }
+  - { id: T53, does: web con clave por sesión, agent: coyote-devsecops, output: internal/web }
+  - { id: T54, does: amenazas e inyección, agent: coyote-security, output: [docs/security/threat-model.md, internal/index, internal/ci] }
+  - { id: T55, does: auditoría desde el ledger, agent: coyote-librarian, output: internal/audit }
+  - { id: T56, does: golden y evaluación del contexto, agent: coyote-qa, output: [evals/, internal/index] }
+  - { id: T57, does: compatibilidad 1.x y estándar 1.0, agent: coyote-architect, output: [docs/reference/compatibilidad.md, internal/project, internal/hub] }
+  - { id: T58, does: documentación Diátaxis, agent: coyote-analyst, output: docs/ }
+  - { id: T59, does: cadena de suministro del release, agent: coyote-devsecops, output: [Makefile, tools/distmeta] }
+  - { id: T60, does: piloto real de una feature R2 (hito H8a), agent: persona, output: close.md del piloto, gate: human }
+  - { id: T61, does: verificación y reporte de G8, agent: coyote-reviewer, output: docs/releases/v1.0.0.md, gate: human }
+close: { summary: close.md }
