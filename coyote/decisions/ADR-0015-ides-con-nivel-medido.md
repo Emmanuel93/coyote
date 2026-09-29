@@ -22,9 +22,11 @@ El gate (ADR-0009) vive en el hook previo del IDE y hoy se instala en Claude Cod
 
   Una herramienta que la tabla no conoce pide aprobación, como hasta ahora.
 - **Instalación.** `coyote install --ide` suma `codex`, `gemini`, `copilot`, `windsurf` y `devin`. Fusiona con la configuración existente sin pisarla, igual que con Claude Code y Cursor, y `--check` verifica que esté al día.
+  - El comando que corre el IDE falla cerrado: un hook que falta, está roto o no es el de coyote niega con 2, que es la negación de todos.
 - **El nivel se mide con un canario.** `coyote doctor --ide X` pide que el agente corra `coyote doctor canary <código>`, un comando que el gate niega siempre.
   - El gate anota la llamada en `.coyote/`. Si el comando llega a correr, deja constancia de que el IDE no respetó la negación.
   - Nivel 1: el IDE llamó al gate y el comando no corrió. Nivel 2: corrió de todos modos. Nivel 3: el gate nunca se enteró.
+  - Solo cuenta la shell del IDE medido corriendo el canario como programa: nombrarlo en un texto o correrlo desde otro IDE no da nivel.
 - **Junie** solo tiene hooks en su CLI, en EAP, y el plugin del IDE no los llama: en el IDE es nivel 3 hasta que los llame. **Kiro, Cline y Zed** quedan en la matriz de la spec, sin adaptador.
 
 ## Consecuencias

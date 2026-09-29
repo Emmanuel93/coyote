@@ -34,7 +34,7 @@ commands:
 - **Ambientes.** Cada uno declara su var-file, su presupuesto, su política de `apply` y sus marcas. Un ambiente sin `apply` es `reviewed`.
 - **Marcas.** Son palabras o tramos de ruta: `ENV=prod` no coincide con `ENV=production`. El var-file y las carpetas de sus stacks también cuentan como marcas.
 - **Stacks.** `active` tiene Terraform que se aplica; `scaffold` es andamiaje.
-- **Protección.** Un campo desconocido es un error. Ningún agente escribe el inventario: está protegido como `project.yaml`.
+- **Protección.** Un campo desconocido es un error. Ningún agente escribe el inventario: está protegido como `project.yaml`, también para los comandos de shell. Un inventario que es un symlink, no es un archivo regular o pesa más de 1 MiB no se lee: el gate bloquea los cambios de infraestructura hasta corregirlo.
 
 `coyote infra propose` arma el inventario desde el repo, sin escribir nada:
 
@@ -72,9 +72,11 @@ Cada recurso que cambia se clasifica:
 
 | Riesgo | Cambios |
 |--------|---------|
-| R3 | destruir o reemplazar; permisos (IAM, roles, políticas, llaves de cuentas de servicio); llaves y secretos (KMS, Secret Manager, Key Vault); reglas de red con `0.0.0.0/0`; acceso público (`allUsers`); bases de datos sin `deletion_protection` |
-| R2 | cualquier otra creación o cambio |
+| R3 | destruir o reemplazar; permisos (IAM, roles, políticas, llaves de cuentas de servicio); llaves y secretos (KMS, Secret Manager, Key Vault); reglas de entrada abiertas a internet (`0.0.0.0/0`, `::/0`, `*` en Azure), también en NACL; acceso público (`allUsers`, ACL `public-read`); bases de datos con `deletion_protection` o `deletion_protection_enabled` en `false` |
+| R2 | cualquier otra creación o cambio; sacar un recurso del estado sin destruirlo (`forget`) o importarlo; una acción que esta versión no conoce |
 | R1 | un plan sin cambios |
+
+La clasificación recorre el JSON del estado final de cada recurso, no su texto: un plan con sangría (`jq .`) da lo mismo que uno compacto. Una regla de salida abierta a internet (`egress`) es lo normal y no sube el riesgo.
 
 - **Solo metadatos.** El plan en JSON lleva los valores de los recursos, secretos incluidos. coyote lo lee sin copiarlo y solo reporta direcciones, tipos y acciones.
 - **Costo.** Los tipos que suelen mover el costo (clusters, grupos de nodos, bases de datos, balanceadores, NAT) se listan para compararlos con el presupuesto del ambiente.
@@ -85,7 +87,7 @@ Cada recurso que cambia se clasifica:
 | Comando de un agente | Decisión |
 |----------------------|----------|
 | `terraform` o `tofu` con `apply`, `destroy`, `import`, `refresh`, `taint`, `force-unlock` o `state mv/rm/push`; `terragrunt`, `pulumi up/destroy` y `cdk deploy/destroy` | bloqueado siempre, en cualquier proyecto |
-| Un comando de `commands.apply` del inventario (`make apply`) | bloqueado siempre |
+| Un comando de `commands.apply` del inventario (`make apply`), con el programa por su nombre y los targets entre sus argumentos: `make -C . apply`, `make ENV=prod apply`, `/usr/bin/make apply`, `sudo make apply`, `bash -c "make apply"` | bloqueado siempre |
 | Un cambio a la nube o al cluster (`kubectl apply`, `helm upgrade`, `gcloud … create`, `aws … delete-…`, `az … update`) con la marca de un ambiente `reviewed` | bloqueado siempre |
 | Ese mismo cambio sin marca de ambiente, o en un ambiente `local` | aprobación de un solo uso: `coyote approve --uses N` la deja en 1 |
 | `terraform plan`, `init`, `validate` | aprobación normal (corren código de proveedores y leen la nube) |
@@ -95,5 +97,7 @@ Si `coyote/infra.yaml` existe pero no se puede leer, los cambios de infraestruct
 ## Límites
 
 - Sin marca, el ambiente de un comando no se conoce: `kubectl` sin `--context` usa el contexto actual. En ese caso pide aprobación normal, y la revisión muestra el comando completo.
+- Un target que llega por la entrada (`echo apply | xargs make`) o un comando armado con una sustitución (`$(which terraform) apply`) no se reconocen: piden la aprobación normal.
+- `coyote infra` lee los archivos del repo con tope y solo si son regulares: un `.tf` o un `Makefile` que apuntan a un dispositivo no se leen.
 - La clasificación del plan va por tipos y acciones de recursos de GCP, AWS y Azure. Un proveedor con otros nombres cae en R2 si no destruye ni reemplaza.
 - coyote no estima costos en dólares: lista los recursos que los mueven. Una estimación (Infracost) puede sumarse en el pipeline del repo de infraestructura.

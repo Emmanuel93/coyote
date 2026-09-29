@@ -26,6 +26,18 @@ La regla A1 dice que ningún agente ejecuta acciones con efectos sin aprobación
 3. **Lectura libre.** Las herramientas que solo leen (Read, Grep, Glob, WebFetch, Task, TodoWrite y las MCP cuyo nombre empieza con get, list, search, read, fetch, view, show o describe) y una lista cerrada de comandos de solo lectura pasan sin registro.
 4. **Todo lo demás necesita una aprobación de la acción exacta.**
 
+### Cómo lee un comando
+
+Los bloqueos revisan el comando como lo correría el shell, segmento por segmento:
+
+- **Comillas y escapes.** No esconden una palabra: `terraform "apply"`, `t"erraform" apply`, `terraform ap\ply` y `$'\x61pply'` son `terraform apply`.
+- **Llaves y variables.** Se expanden las llaves (`terraform {apply,}`) y las variables asignadas antes en el mismo comando (`a=apply; terraform $a`).
+- **Comandos dentro de otros.** El texto entre comillas que recibe un programa que lo ejecuta (`bash -c`, `ssh`, `sudo`, `docker run … sh -c`, `eval`) se lee como otro comando; también el de `$(…)` y el de las comillas invertidas.
+- **Datos.** No cuentan: los mensajes y títulos (`-m`, `--body`), las notas de coyote, lo que imprime `echo` o `printf` (salvo sus redirecciones), el patrón de `grep`, `rg` o `git grep` y los valores de `git log --grep`, `--author` o `-S`. Si el comando tiene un programa que ejecuta lo que recibe (`sh`, `eval`, `xargs`, `python`…), los datos sí cuentan: `echo "…" | sh` corre el texto.
+- **Sustituciones.** Si el comando arma palabras al correr (`$(…)`), también se revisa el texto completo.
+- **Lectura.** Un comando de solo lectura puede mirar la configuración del gate (los hooks, `coyote/project.yaml`). No puede leer credenciales ni la configuración de un IDE que puede llevar tokens en el `env` de sus servidores MCP (`.claude/settings*.json`, `.codex/config.toml`, `.gemini/settings.json`, `~/.copilot/config.json`, `.devin/config*.json`, `.junie/config.json`, `managed-settings`, `~/.claude.json`, los archivos del shell).
+- **Claves.** Las que apagan el gate (`disableAllHooks`, `core.hooksPath`, `chat.useHooks`) bloquean aunque vayan en un dato: `echo '{"disableAllHooks": true}' > x.json` se bloquea.
+
 ### Comandos de solo lectura
 
 Un comando pasa sin aprobación solo si cada segmento (separados por `;`, `&&`, `||` o `|`) es un programa de la lista, llamado por su nombre, con argumentos que no escriben ni ejecutan:
@@ -115,7 +127,9 @@ El gate falla cerrado: una entrada ilegible, un error o un pánico bloquean las 
 
 - Lo que hace un comando aprobado es responsabilidad de quien lo aprueba: si apruebas `make x`, corre lo que diga el Makefile.
 - El análisis de solo lectura es conservador y puede pedir aprobación para comandos inocuos (`git config user.name` sin `--get`).
-- Los bloqueos por texto (rutas del gate o credenciales en un comando) pueden bloquear un mensaje de commit que solo las menciona.
+- Un comando que arma una palabra al correr con algo que el gate no ve (`$(which terraform) apply`, una variable del entorno) no se reconoce como bloqueo: pide la aprobación normal y la persona ve el comando completo.
+- El texto que el gate no sabe si es dato (el script de `sed` o de `awk`, el comando completo cuando hay sustituciones) todavía puede bloquear un comando que solo menciona una ruta del gate o una credencial.
+- La cola (`.coyote/proposals/`) guarda cada comando tal cual para que la persona lo revise: vive en `.coyote/`, nunca se versiona y se escribe con permisos 0600.
 - El gate lee el texto del comando, no lo que corre por dentro: un script que el agente escribió y la persona aprobó puede llamar a `coyote ws continue`. Por eso `coyote review` muestra el contenido de cada archivo que se aprueba escribir.
 - Las herramientas MCP de lectura se reconocen por su nombre; un servidor MCP mal nombrado queda del lado de la lectura.
 - WebFetch y WebSearch se tratan como lectura. La salida de datos del proyecto por red la controlan los permisos de dominio del IDE.

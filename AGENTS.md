@@ -46,7 +46,7 @@ CLI en Go para contexto versionado, gates humanos, estándar por capas y costo t
 - [inv] gate: un agente nunca aprueba, edita el gate ni lee credenciales; el gate falla cerrado (docs/specs/gate-v1.md)
 - [inv] approvals: una aprobación vale en la máquina que la firmó, por 24 h y usos contados en el ledger (docs/specs/gate-v1.md)
 - [dec] agents: una definición por agente y skill; coyote install la traduce a Claude Code y Cursor sin pisar su configuración (ADR-0010)
-- [gap] gate: los bloqueos por texto pueden bloquear un commit que solo menciona rutas del gate o credenciales (docs/specs/gate-v1.md)
+- [gap] gate: un comando que arma palabras al correr con sustituciones o variables del entorno baja de bloqueo a aprobación (docs/specs/gate-v1.md)
 - [inv] product: leer un repo del producto nunca lo modifica ni corre sus programas: git de plomería, sin filtros ni transportes (docs/specs/product-v1.md)
 - [dec] run: coyote run corre Claude Code headless con el gate, topes de turnos y dólares y evento run en el ledger (ADR-0012)
 - [gap] run: el costo de una corrida es la estimación de Claude Code, no la factura; sin precios queda todo como entrada (docs/specs/run-v1.md)
@@ -54,12 +54,13 @@ CLI en Go para contexto versionado, gates humanos, estándar por capas y costo t
 - [inv] ws: autonomous corre solo en una rama ws/, con tope de plan y la aprobación del plan exacto por su hash (docs/specs/workstream-v1.md)
 - [inv] ci: gate pr toma los dueños del CODEOWNERS de la rama base y nunca cuenta al autor del PR (docs/specs/ci-v1.md)
 - [gap] ws: retomar una sesión con --resume y --agent en headless no se probó contra Claude Code real (docs/specs/workstream-v1.md)
-- [inv] install: Codex, Gemini CLI y Windsurf dejan pasar la herramienta si el hook falta: el lanzador niega con salida 2 (docs/specs/install-v1.md)
+- [inv] install: el lanzador corre el hook con sh y vuelve 2 toda salida distinta de 0: un hook roto niega (docs/specs/install-v1.md)
 - [dec] gate: nivel de IDE medido con un canario que el gate siempre niega; nivel 2 o 3 cae en R17 (ADR-0015)
 - [inv] secrets: un agente no lee ni escribe archivos de secretos ni corre comandos que imprimen credenciales, aun con aprobación (ADR-0016)
 - [gap] secrets: el escáner solo reconoce formas conocidas; una contraseña de forma libre se protege declarando su archivo en secrets.files (docs/specs/secrets-v1.md)
 - [inv] infra: un agente nunca aplica infraestructura; un ambiente reviewed solo lo aplica la persona o un pipeline con revisor (ADR-0017)
 - [dec] infra: coyote infra plan lee el plan en JSON sin copiarlo y solo reporta direcciones, tipos y acciones (docs/specs/infra-v1.md)
+- [dec] gate: el gate lee cada comando como lo correría el shell; los mensajes, patrones y lo que imprime echo son datos (docs/specs/gate-v1.md)
 
 ## Reglas obligatorias (MUST)
 

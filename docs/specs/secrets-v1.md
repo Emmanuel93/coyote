@@ -16,12 +16,14 @@ Se reconocen por su nombre:
 |------|---------|
 | Variables de entorno | `.env`, `.env.*`, `*.env`, `.envrc` |
 | Estado de Terraform | `*.tfstate`, `*.tfstate.backup`, `*.tfstate.*` |
-| Llaves y certificados | `*.pem`, `*.key`, `*.p12`, `*.pfx`, `*.p8`, `*.ppk`, `id_rsa`, `id_ed25519` y parecidas |
+| Llaves y certificados | `*.pem` con llave privada, `*.key`, `*.p12`, `*.pfx`, `*.p8`, `*.ppk`, `id_rsa`, `id_ed25519` y parecidas |
 | Almacenes de llaves | `*.jks`, `*.keystore`, `key.properties`, `keystore.properties` |
 | Nube y Kubernetes | `kubeconfig`, `*.kubeconfig`, `*-key.json`, `service-account*.json`, `client_secret*.json`, `credentials.json` |
 | Otros | `secrets.*` y `secret.*` de datos (YAML, JSON, TOML…), `.npmrc`, `.pypirc`, `.netrc`, `.git-credentials`, `.docker/config.json`, `.htpasswd`, `.vault-token`, `*.ovpn` |
 
 Las plantillas (`.example`, `.sample`, `.template`, `.dist`, `.tmpl`, `.tpl`, `.defaults`) no son secretos: un agente las lee y las edita.
+
+Un `.pem` puede ser solo un certificado o una llave pública: cuenta como secreto si lleva el encabezado de una llave privada, o si el proyecto lo declara en `secrets.files`. Un `.pem` que no se puede leer (un symlink a un dispositivo, más de 1 MiB) cuenta como secreto. `*.p12` y `*.pfx` son binarios y cuentan siempre.
 
 El proyecto suma los suyos y dispensa falsos positivos en `coyote/project.yaml`, que ningún agente edita:
 
@@ -38,22 +40,22 @@ Una dispensa necesita un motivo real, igual que en el estándar.
 
 Se bloquea siempre, aun con aprobación:
 
-- **Leer un archivo de secretos.** Con cualquier herramienta de lectura, con un comando (`cat`, `source`, `cp`, `--env-file=…`, un script de `python -c`) o con una búsqueda cuyo patrón de nombres lo alcanza (`*.pem`, `**/.env*`). Un comodín del shell se juzga por los archivos que alcanzaría en ese momento.
+- **Leer un archivo de secretos.** Con cualquier herramienta de lectura, con un comando (`cat`, `source`, `cp`, `--env-file=…`, `grep -f.env`, un script de `python -c`) o con una búsqueda cuyo patrón de nombres lo alcanza (`*.pem`, `**/.env*`, `rg -g '*.env'`, `grep --include=*.env`). Un comodín del shell se juzga por los archivos que alcanzaría en ese momento. El comando se lee como lo correría el shell (docs/specs/gate-v1.md): las comillas no esconden un subcomando.
 - **Escribir un archivo de secretos.** Los valores los pone la persona.
 - **Escribir un secreto literal** en cualquier archivo: el escáner revisa el contenido nuevo (nunca lo que se reemplaza). Una línea marcada con `coyote:allow-secret` pide la aprobación normal.
 - **Correr un comando que imprime o crea credenciales:**
   - gcloud: `auth print-access-token`, `auth login`, `secrets versions access`, `iam service-accounts keys create`, `container clusters get-credentials`;
   - aws: `sts`, `configure get`, `secretsmanager get-secret-value`, `ssm get-parameter --with-decryption`, `ecr get-login-password`, `eks get-token`, `kms decrypt`;
   - az: `account get-access-token`, `keyvault secret show`, `aks get-credentials`;
-  - Kubernetes: `kubectl get secret`, `create token`, `config view --raw`;
+  - Kubernetes: `kubectl get secret`, `describe secret` (sus anotaciones pueden llevar los datos), `create token`, `config view --raw`;
   - Terraform u OpenTofu: `output`, `show`, `console`, `state pull` y `state show`;
   - `helm get values`, `vault read` y `kv get`, `docker login`, `docker inspect`, `docker compose config`, `gh auth status --show-token`;
   - gestores de contraseñas y descifrado: `op`, `bw`, `pass`, `sops -d`, `gpg --decrypt`;
-  - el entorno completo: `env` o `printenv` a secas, `export -p`, `declare -p`, `set` a secas, `/proc/*/environ` y `echo` de una variable con nombre de secreto (`$GITHUB_TOKEN`).
+  - el entorno completo: `env` o `printenv` a secas, `export -p`, `declare -p`, `readonly`, `set` a secas, `/proc/*/environ`, y `echo`, `printenv` o `declare -p` de una variable con nombre de secreto (`$GITHUB_TOKEN`).
 
 Los mensajes de commit, los títulos y las notas de coyote son datos: mencionar uno de estos comandos no lo corre. Usar una variable en un comando (`curl -H "Authorization: Bearer $GITHUB_TOKEN"`) no la imprime y pide la aprobación normal.
 
-Pide aprobación, con la razón a la vista: una búsqueda que lee todos los archivos de una carpeta con archivos de secretos, sin respetar `.gitignore` (`grep -r`, `diff -r`, `rg --hidden` o `-u`). `rg` y `git grep` a secas pasan libres.
+Pide aprobación, con la razón a la vista: una búsqueda que lee todos los archivos de una carpeta con archivos de secretos, sin respetar `.gitignore` (`grep -r`, `diff -r`, `rg --hidden`, `-u` o `--no-ignore*`, `git grep --no-index` o `--no-exclude-standard`). `rg` y `git grep` a secas pasan libres.
 
 Nombrar un archivo de secretos con programas que solo ven nombres o metadatos (`ls`, `find` sin `-exec`, `stat`, `wc`, `test`) no lo lee.
 
@@ -66,7 +68,7 @@ coyote secrets scan --staged             # en lo preparado para el commit
 coyote secrets scan --range base...head  # en lo que agrega un rango, como un PR
 ```
 
-- `list` muestra rutas, tipos y nombres: las variables de un `.env` o de un `.properties`, las claves de primer nivel de un JSON o un YAML y las salidas de un tfstate, nunca sus valores. Un nombre con forma de secreto se omite. Así un agente sabe qué variables existen sin leerlas.
+- `list` muestra rutas, tipos y nombres: las variables de un `.env` o de un `.properties`, las claves de primer nivel de un JSON o un YAML y las salidas de un tfstate, nunca sus valores. Un nombre con forma de secreto o de valor (un tramo de base64) se omite, y las líneas de una llave o de un valor de varias líneas no se leen como nombres. Así un agente sabe qué variables existen sin leerlas. Con `--no-names` no abre los archivos.
 - `scan` sale con 1 si encuentra algo. Lee con git de plomería, sin escribir: sirve en cualquier repo, también fuera de un proyecto coyote (con `-C <ruta>`).
 - Los dos subcomandos pasan el gate sin aprobación.
 
@@ -76,7 +78,7 @@ Solo patrones de alta confianza:
 
 | Tipo | Qué reconoce |
 |------|--------------|
-| Llave privada | los encabezados PEM de llaves privadas (RSA, EC, DSA, OpenSSH, PGP, cifradas) |
+| Llave privada | el encabezado PEM de una llave privada (RSA, EC, DSA, OpenSSH, PGP, cifrada) con su cuerpo: en las líneas siguientes, o en la misma tras un `\n` escapado, en cadenas concatenadas o aplanada con espacios |
 | AWS | llaves de acceso (`AKIA…`, `ASIA…`) y la llave secreta junto a su nombre |
 | GitHub, GitLab | `ghp_…`, `gho_…`, `github_pat_…`, `glpat-…` |
 | Slack | tokens `xox…` y webhooks |
@@ -84,7 +86,13 @@ Solo patrones de alta confianza:
 | APIs de modelos | llaves con prefijo `sk-ant-` y `sk-proj-` |
 | URL con contraseña | `esquema://usuario:contraseña@servidor`, si la contraseña es larga y mezcla caracteres; los ejemplos (`password`, `${TOKEN}`) no cuentan |
 
-Una llave de API de Google (`AIza…`) no cuenta: en Firebase va dentro de la app por diseño y se limita por app.
+No cuentan:
+
+- una llave de API de Google (`AIza…`): en Firebase va dentro de la app por diseño y se limita por app;
+- el encabezado PEM solo, sin cuerpo: lo menciona el código que lee llaves y su documentación;
+- los valores de ejemplo: la llave de ejemplo de AWS (`AKIA…EXAMPLE`), `xoxb-your-bot-token`, un valor con `example`, `your`, `dummy`, `xxxx` o un mismo caracter seis veces seguidas.
+
+El escáner revisa todas las líneas, de cualquier largo: una línea de más de 64 KiB (un archivo minificado) se revisa por tramos. En un cambio cuenta las líneas de cada hunk, así que una línea agregada que empieza con `++` no se confunde con el encabezado de otro archivo.
 
 Dónde corre:
 
@@ -92,7 +100,9 @@ Dónde corre:
 - **Hook `commit-msg`.** Detiene cualquier `git commit` con secretos, también el de un agente.
 - **Lint.** La regla R18 (MUST) revisa los archivos del proyecto: ninguno es un archivo de secretos ni lleva un secreto escrito.
 - **`coyote gate pr`.** Un PR que agrega secretos queda en R3 y no pasa con ninguna aprobación: el secreto ya está en GitHub y hay que rotarlo.
-- **Gate.** Cubre lo que escribe un agente.
+- **Gate.** Cubre lo que escribe un agente. Un encabezado PEM sin cuerpo pide la aprobación normal: si un agente escribe una llave en dos ediciones, la persona ve el encabezado al aprobar la primera, y el escáner detiene la llave completa en el commit.
+
+En un proyecto que vive en una subcarpeta de su repo, `secrets.files` y `secrets.allow` se toman relativas a la carpeta del proyecto; fuera de ella valen los nombres de siempre.
 
 ## Límites
 
