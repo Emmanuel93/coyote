@@ -127,6 +127,9 @@ func secretsList(a *app, args []string) error {
 	}
 	sort.Slice(list, func(i, j int) bool { return list[i].Path < list[j].Path })
 	if *asJSON {
+		if list == nil {
+			list = []secretEntry{}
+		}
 		b, _ := json.MarshalIndent(list, "", "  ")
 		fmt.Fprintln(a.stdout, string(b))
 		return nil

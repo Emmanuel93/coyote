@@ -257,3 +257,10 @@ func TestGatePRReglasDeUnProyectoEnSubcarpeta(t *testing.T) {
 		t.Errorf("gate pr con secrets.files de un proyecto en subcarpeta: %d\n%s", r.code, r.stdout)
 	}
 }
+
+func TestSecretsListVacio(t *testing.T) {
+	_, root := gateProject(t)
+	if r := run(t, root, "", "secrets", "list", "--json"); r.code != 0 || strings.TrimSpace(r.stdout) != "[]" {
+		t.Errorf("sin archivos de secretos, --json da []: %d %q", r.code, r.stdout)
+	}
+}
