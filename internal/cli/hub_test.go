@@ -195,3 +195,37 @@ func TestWebNoMuestraSecretos(t *testing.T) {
 		t.Fatalf("una línea visible, sin controles: %q", got)
 	}
 }
+
+func TestWebSoloLeeYAdminsDelProyecto(t *testing.T) {
+	base := setup(t)
+	state := filepath.Join(base, "estado")
+	t.Setenv("COYOTE_STATE_DIR", state)
+	root := filepath.Join(base, "shop")
+	must(t, run(t, base, "", "init", "shop", "--type", "backend", "--purpose", "API de la tienda demo"), 0, "init")
+	// Una propuesta vencida en la cola: mirar la web no la borra.
+	old := `{"id":"P-oldold","hash":"sha256:` + strings.Repeat("a", 64) + `","object":"Bash: make x","tool":"Bash","kind":"bash","requested_by":"@ana","first_seen":"2026-01-01T00:00:00Z","last_seen":"2026-01-01T00:00:00Z","attempts":1,"status":"pending"}`
+	write(t, root, ".coyote/proposals/P-oldold.json", old)
+	pages := webPages(t, root, "/gate")
+	if !strings.HasPrefix(pages["/gate"], "200") {
+		t.Fatalf("/gate: %s", pages["/gate"][:200])
+	}
+	if _, err := os.Stat(filepath.Join(root, ".coyote/proposals/P-oldold.json")); err != nil {
+		t.Fatal("la web no borra propuestas vencidas: solo mira")
+	}
+	if _, err := os.Stat(filepath.Join(state, "approvals.key")); err == nil {
+		t.Fatal("la web no crea la clave de firmas")
+	}
+	// Un admin del proyecto ve a todas sus personas, no la organización.
+	cfg := readFile(t, filepath.Join(root, "coyote/project.yaml"))
+	write(t, root, "coyote/project.yaml", cfg+"admins: [\"@ana\"]\n")
+	pages = webPages(t, root, "/org", "/")
+	if !strings.Contains(pages["/"], "eres admin") && !strings.Contains(pages["/"], "admin") {
+		t.Fatalf("admin del proyecto:\n%s", pages["/"])
+	}
+	if !strings.HasPrefix(pages["/org"], "404") {
+		t.Fatalf("sin hub, /org no existe: %s", pages["/org"][:3])
+	}
+	if got := webText("a\u2028b\u200bc"); strings.ContainsAny(got, "\u2028\u200b") || !strings.Contains(got, `\u2028`) || !strings.Contains(got, `\u200`) {
+		t.Fatalf("invisibles a la vista: %q", got)
+	}
+}

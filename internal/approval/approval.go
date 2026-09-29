@@ -329,7 +329,13 @@ func validID(id string) bool {
 }
 
 // Queue devuelve la cola, sin propuestas vencidas (que se borran).
-func (s *Store) Queue() ([]Proposal, error) {
+func (s *Store) Queue() ([]Proposal, error) { return s.scan(true) }
+
+// List devuelve la cola sin las vencidas y sin borrar nada: para quien solo
+// mira, como la web.
+func (s *Store) List() ([]Proposal, error) { return s.scan(false) }
+
+func (s *Store) scan(prune bool) ([]Proposal, error) {
 	entries, err := os.ReadDir(s.queueDir())
 	if os.IsNotExist(err) {
 		return nil, nil
@@ -357,7 +363,9 @@ func (s *Store) Queue() ([]Proposal, error) {
 		}
 		if (p.Status == "rejected" && now.Sub(p.RejectedAt) > RejectedTTL) ||
 			(p.Status != "rejected" && now.Sub(p.Last) > PendingTTL) {
-			_ = s.remove(p.ID)
+			if prune {
+				_ = s.remove(p.ID)
+			}
 			continue
 		}
 		out = append(out, p)

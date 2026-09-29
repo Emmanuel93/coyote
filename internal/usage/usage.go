@@ -118,6 +118,42 @@ func Filter(events []Event, since time.Time) []Event {
 	return out
 }
 
+// Between deja los eventos de [from, to) y sin resúmenes. Un evento con fecha
+// futura (un reloj adelantado en otra máquina) no cuenta.
+func Between(events []Event, from, to time.Time) []Event {
+	var out []Event
+	for _, e := range Filter(events, from) {
+		if !to.IsZero() && !e.Line.TS.Before(to) {
+			continue
+		}
+		out = append(out, e)
+	}
+	return out
+}
+
+// Month devuelve el mes UTC de now: su inicio y el límite de lo que cuenta,
+// el inicio del mes siguiente o un minuto después de now, lo que llegue antes.
+func Month(now time.Time) (start, end time.Time) {
+	now = now.UTC()
+	start = time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+	end = start.AddDate(0, 1, 0)
+	if limit := now.Add(time.Minute); limit.Before(end) {
+		end = limit
+	}
+	return start, end
+}
+
+// Cost suma el costo de los eventos.
+func Cost(events []Event) float64 {
+	var v float64
+	for _, e := range events {
+		if e.Line.Cost != nil {
+			v += e.Line.Cost.In + e.Line.Cost.Out
+		}
+	}
+	return v
+}
+
 // Group agrupa por dos claves: primero outer, luego inner.
 func Group(events []Event, outer, inner func(Event) string) ([]Row, Totals) {
 	type acc struct {

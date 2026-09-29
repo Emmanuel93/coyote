@@ -21,6 +21,19 @@ func StateDir() (string, error) {
 	return filepath.Join(d, "coyote"), nil
 }
 
+// ExistingKey devuelve la clave local si ya existe, sin crearla.
+func ExistingKey(name string) ([]byte, bool) {
+	dir, err := StateDir()
+	if err != nil {
+		return nil, false
+	}
+	data, err := os.ReadFile(filepath.Join(dir, name+".key"))
+	if err != nil || len(data) != 32 {
+		return nil, false
+	}
+	return data, true
+}
+
 // Key devuelve una clave local de 32 bytes, creada la primera vez con permisos
 // 0600. Sirve para firmar cachés: una caché copiada de otra máquina o
 // fabricada dentro de un repo no valida.

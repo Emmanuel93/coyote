@@ -47,6 +47,14 @@ func (s *Server) visible(events []usage.Event) []usage.Event {
 	return out
 }
 
+// events lee el ledger; sin fuente no hay eventos.
+func (s *Server) events() ([]usage.Event, error) {
+	if s.Load == nil {
+		return nil, nil
+	}
+	return s.Load()
+}
+
 func total(events []usage.Event) usage.Totals {
 	_, all := usage.Group(events, usage.ByRepo, usage.ByRepo)
 	return all
@@ -61,12 +69,17 @@ func (s *Server) buildCosts(r *http.Request) (*costsData, error) {
 	if !valid(periods, per) {
 		per = "30d"
 	}
-	events, err := s.Load()
+	events, err := s.events()
 	if err != nil {
 		return nil, err
 	}
-	events = usage.Filter(events, since(per, s.now()))
+	events = usage.Between(events, since(per, s.now()), s.now().Add(time.Minute))
 	d := &costsData{View: view, Since: per, Views: views, Periods: periods, Project: total(events), Mine: !s.Admin}
+	if d.Mine {
+		// Los totales del proyecto van sin desglose: tampoco dicen qué
+		// modelos usaron las demás personas.
+		d.Project.Models = nil
+	}
 	events = s.visible(events)
 	outer, inner, heading := usage.ByRepo, usage.ByPerson, "Proyecto › persona"
 	switch view {

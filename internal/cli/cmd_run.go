@@ -339,14 +339,8 @@ func monthSpend(root string, now time.Time) (float64, error) {
 	if err != nil {
 		return 0, err
 	}
-	since := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
-	total := 0.0
-	for _, e := range usage.Filter(usage.FromLedger("", entries), since) {
-		if e.Line.Cost != nil {
-			total += e.Line.Cost.Total()
-		}
-	}
-	return total, nil
+	start, end := usage.Month(now)
+	return usage.Cost(usage.Between(usage.FromLedger("", entries), start, end)), nil
 }
 
 // workstreamDir busca la carpeta de un workstream (W-0004 → coyote/workstreams/W-0004-…).

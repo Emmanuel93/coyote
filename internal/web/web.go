@@ -31,8 +31,11 @@ type Server struct {
 	Now     func() time.Time
 	// Viewer es la persona que corre la web (@usuario, su identidad de git).
 	Viewer string
-	// Admin dice si Viewer ve el desglose de todas las personas (D10).
+	// Admin dice si Viewer ve el desglose de todas las personas del proyecto
+	// (D10): admins del hub o del proyecto.
 	Admin bool
+	// OrgAdmin dice si Viewer es admin del hub: solo él ve la organización.
+	OrgAdmin bool
 	// Admins son los admins declarados en el hub y en el proyecto.
 	Admins []string
 	// Hub describe el hub que rige ("acme (main@abc1234)"), o "".
@@ -50,16 +53,20 @@ type Server struct {
 	Org func() (*Org, error)
 }
 
-// Budget son los topes que aplican al proyecto.
+// Budget son los topes que aplican al proyecto y el gasto del mes, contado
+// como lo cuenta coyote run: el ledger del proyecto, en el mes UTC.
 type Budget struct {
 	MonthlyUSD    float64 // tope mensual del proyecto (project.yaml); 0 = sin tope
 	RunUSD        float64 // tope por corrida del router; 0 = sin dato
 	OrgMonthlyUSD float64 // tope mensual de la organización (hub); 0 = sin tope
+	SpentUSD      float64 // gasto del mes del proyecto
+	MineUSD       float64 // la parte de quien mira
 }
 
 // Workstream es un plan con el estado de sus pasos.
 type Workstream struct {
 	ID, Title, Mode, Gate string
+	Owner                 string // @persona dueña del plan
 	Closed                bool
 	SpentUSD, BudgetUSD   float64 // BudgetUSD 0 = sin tope
 	Runs                  int
@@ -326,7 +333,7 @@ func (s *Server) now() time.Time {
 func (s *Server) page(section string, body any) pageData {
 	items := []navItem{{"/", "Costos", false}, {"/presupuesto", "Presupuesto", false}, {"/workstreams", "Workstreams", false},
 		{"/gate", "Gate", false}, {"/slo", "SLOs", false}}
-	if s.Admin && s.Org != nil {
+	if s.OrgAdmin && s.Org != nil {
 		items = append(items, navItem{"/org", "Organización", false})
 	}
 	for i := range items {

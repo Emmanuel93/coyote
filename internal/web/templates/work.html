@@ -1,15 +1,15 @@
 {{define "content"}}{{with .Body}}
 <h1>Workstreams</h1>
 <p class="sub">El estado de cada paso sale del ledger: corridas, revisiones y lo que quedó en la cola del gate.</p>
-{{range .Workstreams}}
+{{range $w := .Workstreams}}
 <details{{if not .Closed}} open{{end}}>
 <summary>{{.ID}} · {{.Title}} {{if .Closed}}<span class="tag">cerrado</span>{{else}}<span class="tag">{{.Mode}}</span>{{end}}{{with .Gate}} <span class="tag">{{.}}</span>{{end}}</summary>
 {{if .Problem}}<p class="bad">{{.Problem}}</p>{{else}}
-<p class="muted">{{.Done}} hechos · {{.Review}} por revisar · {{.Pending}} pendientes{{if .Trouble}} · <span class="bad">{{.Trouble}} con problemas</span>{{end}} · {{usd .SpentUSD}}{{if gt .BudgetUSD 0.0}} de {{usd .BudgetUSD}}{{end}} en {{.Runs}} corridas</p>
+<p class="muted">{{.Done}} hechos · {{.Review}} por revisar · {{.Pending}} pendientes{{if .Trouble}} · <span class="bad">{{.Trouble}} con problemas</span>{{end}} · {{if .CostsVisible}}{{usd .SpentUSD}}{{if gt .BudgetUSD 0.0}} de {{usd .BudgetUSD}}{{end}}{{else}}costo visible para {{with .Owner}}{{.}} y {{end}}los admins{{end}} en {{.Runs}} corridas</p>
 <div class="scroll"><table>
 <thead><tr><th>Paso</th><th class="text">Qué hace</th><th class="text hide-sm">Agente</th><th class="text">Estado</th><th class="hide-sm">Corridas</th><th>Costo</th><th class="hide-sm">Último</th></tr></thead>
 <tbody>
-{{range .Steps}}<tr><td>{{.ID}}</td><td class="text">{{.Does}}</td><td class="text hide-sm">{{.Agent}}</td><td class="text{{if eq .Status "failed" "blocked" "redo"}} bad{{else if eq .Status "review"}} warn{{else if eq .Status "done"}} ok{{end}}">{{status .Status}}</td><td class="hide-sm">{{.Runs}}</td><td>{{usd .CostUSD}}</td><td class="hide-sm">{{day .At}}</td></tr>{{end}}
+{{range .Steps}}<tr><td>{{.ID}}</td><td class="text">{{.Does}}</td><td class="text hide-sm">{{.Agent}}</td><td class="text{{if eq .Status "failed" "blocked" "redo"}} bad{{else if eq .Status "review"}} warn{{else if eq .Status "done"}} ok{{end}}">{{status .Status}}</td><td class="hide-sm">{{.Runs}}</td><td>{{if $w.CostsVisible}}{{usd .CostUSD}}{{else}}—{{end}}</td><td class="hide-sm">{{day .At}}</td></tr>{{end}}
 </tbody></table></div>{{end}}
 </details>
 {{else}}

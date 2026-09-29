@@ -115,17 +115,21 @@ func TestVisibilidadD10(t *testing.T) {
 		ProjectTotals usage.Totals `json:"project_totals"`
 	}
 	w := get(t, h, "127.0.0.1", "/api/usage?view=person&since=all")
-	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil || out.Scope != "@ana" || len(out.Rows) != 1 || out.Rows[0].Key != "@ana" || out.ProjectTotals.Events != 4 {
-		t.Fatalf("la API aplica D10: %s", w.Body)
+	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil || out.Scope != "@ana" || len(out.Rows) != 1 || out.Rows[0].Key != "@ana" || out.ProjectTotals.Events != 4 || out.ProjectTotals.Models != nil {
+		t.Fatalf("la API aplica D10, también a los modelos de los totales: %s", w.Body)
 	}
 	// La organización es solo para admins.
 	s.Org = func() (*Org, error) { return &Org{Name: "acme"}, nil }
 	if w := get(t, s.Handler(), "127.0.0.1", "/org"); w.Code != http.StatusForbidden {
 		t.Fatalf("/org sin ser admin: %d", w.Code)
 	}
-	s.Admin = true
+	s.Admin = true // admin del proyecto: ve su proyecto, no la organización
+	if w := get(t, s.Handler(), "127.0.0.1", "/org"); w.Code != http.StatusForbidden {
+		t.Fatalf("/org de un admin del proyecto: %d", w.Code)
+	}
+	s.OrgAdmin = true
 	if w := get(t, s.Handler(), "127.0.0.1", "/org"); w.Code != 200 {
-		t.Fatalf("/org de admin: %d %s", w.Code, w.Body)
+		t.Fatalf("/org de un admin del hub: %d %s", w.Code, w.Body)
 	}
 	s.Org = nil
 	if w := get(t, s.Handler(), "127.0.0.1", "/org"); w.Code != http.StatusNotFound {
@@ -136,7 +140,9 @@ func TestVisibilidadD10(t *testing.T) {
 func TestVistasDeOperacion(t *testing.T) {
 	s := server()
 	now := s.Now()
-	s.Budget = func() (Budget, error) { return Budget{MonthlyUSD: 0.03, RunUSD: 2, OrgMonthlyUSD: 100}, nil }
+	s.Budget = func() (Budget, error) {
+		return Budget{MonthlyUSD: 0.03, RunUSD: 2, OrgMonthlyUSD: 100, SpentUSD: 0.034, MineUSD: 0.02}, nil
+	}
 	s.Work = func() ([]Workstream, error) {
 		return []Workstream{
 			{ID: "W-0002", Title: "pagos", Mode: "supervised", BudgetUSD: 5, SpentUSD: 1.25, Runs: 3, Steps: []Step{
@@ -191,9 +197,9 @@ func TestVistasDeOperacion(t *testing.T) {
 }
 
 func TestProyeccionDelMes(t *testing.T) {
-	start, name, elapsed, days := monthOf(time.Date(2026, 2, 15, 12, 0, 0, 0, time.UTC))
-	if start.Day() != 1 || name != "febrero de 2026" || days != 28 || elapsed < 14.4 || elapsed > 14.6 {
-		t.Fatalf("mes: %v %s %v %d", start, name, elapsed, days)
+	start, end, name, elapsed, days := monthOf(time.Date(2026, 2, 15, 12, 0, 0, 0, time.UTC))
+	if start.Day() != 1 || name != "febrero de 2026" || days != 28 || elapsed < 14.4 || elapsed > 14.6 || !end.Equal(time.Date(2026, 2, 15, 12, 1, 0, 0, time.UTC)) {
+		t.Fatalf("mes: %v %v %s %v %d", start, end, name, elapsed, days)
 	}
 	for _, c := range []struct {
 		spent, proj, cap float64
@@ -202,5 +208,41 @@ func TestProyeccionDelMes(t *testing.T) {
 		if _, class := capState(c.spent, c.proj, c.cap); class != c.class {
 			t.Errorf("%+v: %s", c, class)
 		}
+	}
+}
+
+func TestGastoDeOtrosYFechasFuturas(t *testing.T) {
+	s := server()
+	s.Admin = false
+	now := s.Now()
+	load := s.Load
+	s.Load = func() ([]usage.Event, error) {
+		evs, _ := load()
+		// Un evento con fecha futura (otro reloj) no cuenta en ningún periodo.
+		evs = append(evs, usage.Event{Repo: "tienda", Line: ccf.Line{TS: now.AddDate(0, 5, 0), Actor: "@ana", Repo: "tienda", Type: "run",
+			Scope: "-", What: "futuro", Status: "ok", Cost: &ccf.Cost{In: 40, Out: 10}}})
+		return evs, nil
+	}
+	s.Work = func() ([]Workstream, error) {
+		return []Workstream{
+			{ID: "W-0003", Title: "de luis", Owner: "@luis", BudgetUSD: 10, SpentUSD: 4, Steps: []Step{{ID: "S1", Status: "done", CostUSD: 4}}},
+			{ID: "W-0004", Title: "de ana", Owner: "@ana", BudgetUSD: 10, SpentUSD: 2.5, Steps: []Step{{ID: "S1", Status: "done", CostUSD: 2.5}}},
+		}, nil
+	}
+	h := s.Handler()
+	if body := get(t, h, "127.0.0.1", "/?since=all").Body.String(); strings.Contains(body, "$50") {
+		t.Fatal("un evento futuro no cuenta")
+	}
+	work := get(t, h, "127.0.0.1", "/workstreams").Body.String()
+	if strings.Contains(work, "$4.00") || !strings.Contains(work, "costo visible para @luis y los admins") || !strings.Contains(work, "$2.50") {
+		t.Fatalf("el gasto de un plan lo ven su dueño y los admins:\n%s", work)
+	}
+	budget := get(t, h, "127.0.0.1", "/presupuesto").Body.String()
+	if strings.Contains(budget, "$4.00") || !strings.Contains(budget, "$2.50") {
+		t.Fatalf("presupuesto:\n%s", budget)
+	}
+	s.Admin = true
+	if work := get(t, s.Handler(), "127.0.0.1", "/workstreams").Body.String(); !strings.Contains(work, "$4.00") {
+		t.Fatal("un admin ve el gasto de todos los planes")
 	}
 }

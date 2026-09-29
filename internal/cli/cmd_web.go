@@ -13,7 +13,9 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 
+	"github.com/Emmanuel93/coyote/internal/approval"
 	"github.com/Emmanuel93/coyote/internal/fsx"
 	"github.com/Emmanuel93/coyote/internal/hub"
 	"github.com/Emmanuel93/coyote/internal/identity"
@@ -22,6 +24,7 @@ import (
 	"github.com/Emmanuel93/coyote/internal/router"
 	"github.com/Emmanuel93/coyote/internal/secrets"
 	"github.com/Emmanuel93/coyote/internal/usage"
+	"github.com/Emmanuel93/coyote/internal/userdir"
 	"github.com/Emmanuel93/coyote/internal/web"
 	"github.com/Emmanuel93/coyote/internal/workstream"
 )
@@ -53,10 +56,14 @@ func cmdWeb(a *app, args []string) error {
 	if err != nil {
 		return err
 	}
-	srv := &http.Server{Handler: s.Handler(), ReadHeaderTimeout: 5 * time.Second}
+	srv := &http.Server{Handler: s.Handler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second,
+		WriteTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second, DisableGeneralOptionsHandler: true}
 	role := "ves tu gasto y los totales (D10)"
-	if s.Admin {
-		role = "eres admin: ves el gasto de todas las personas"
+	switch {
+	case s.OrgAdmin:
+		role = "eres admin del hub: ves el gasto de todas las personas y la organización"
+	case s.Admin:
+		role = "eres admin del proyecto: ves el gasto de todas sus personas"
 	}
 	fmt.Fprintf(a.stdout, "coyote web en http://%s · %d fuentes (%v) · %s %s · solo esta máquina · Ctrl+C para salir\n",
 		ln.Addr(), len(names), names, s.Viewer, role)
@@ -124,12 +131,18 @@ func (a *app) webServer(root string, cfg *project.Config) (*web.Server, []string
 
 	admins := append([]string{}, cfg.Admins...)
 	h, herr := a.openHub(root, cfg)
-	if herr != nil {
+	switch {
+	case herr != nil:
 		s.Notices = append(s.Notices, "El hub no se pudo leer: "+herr.Error()+". Sin él no hay admins de la organización.")
+	case h != nil && h.Missing:
+		s.Notices = append(s.Notices, fmt.Sprintf("El hub %s no tiene coyote/hub.yaml en ese commit: no hay admins de la organización.", h))
 	}
 	if h != nil {
 		s.Hub = h.String()
 		admins = append(admins, h.Conf.Admins...)
+		// La organización la ven solo los admins del hub, que salen de su
+		// commit; un admin del proyecto ve su proyecto (D10).
+		s.OrgAdmin = h.Conf.IsAdmin(viewer)
 	}
 	sort.Strings(admins)
 	for i, x := range admins {
@@ -148,6 +161,20 @@ func (a *app) webServer(root string, cfg *project.Config) (*web.Server, []string
 		}
 		if h != nil {
 			b.OrgMonthlyUSD = h.Conf.Budgets.MonthlyUSD
+		}
+		// El gasto del mes se cuenta como lo cuenta coyote run: el ledger del
+		// proyecto, sin los repos registrados.
+		entries, _, err := ledger.Open(root).ReadAll()
+		if err != nil {
+			return b, err
+		}
+		start, end := usage.Month(a.now())
+		month := usage.Between(usage.FromLedger(cfg.Name, entries), start, end)
+		b.SpentUSD = usage.Cost(month)
+		for _, e := range month {
+			if usage.Person(e.Line.Actor) == viewer && e.Line.Cost != nil {
+				b.MineUSD += e.Line.Cost.In + e.Line.Cost.Out
+			}
 		}
 		return b, nil
 	}
@@ -178,7 +205,8 @@ func workViews(root string) ([]web.Workstream, error) {
 			continue
 		}
 		st := workstream.Fold(p, entries)
-		w := web.Workstream{ID: p.ID, Title: p.Title, Mode: p.Autonomy, Gate: p.Gate, Closed: st.Closed,
+		owner, _ := hub.NormalizeHandle(p.Owner)
+		w := web.Workstream{ID: p.ID, Title: p.Title, Mode: p.Autonomy, Gate: p.Gate, Owner: owner, Closed: st.Closed,
 			SpentUSD: st.Spent, BudgetUSD: p.BudgetUSD, Runs: st.Runs}
 		for _, x := range st.Steps {
 			w.Steps = append(w.Steps, web.Step{ID: x.ID, Does: x.Does, Agent: x.Agent, Status: x.Status, Runs: x.Runs, CostUSD: x.CostUSD, At: x.At})
@@ -191,22 +219,41 @@ func workViews(root string) ([]web.Workstream, error) {
 // webAction resume una acción para la web: una línea visible, corta y sin
 // secretos a la vista; el detalle completo se ve con coyote review.
 func webAction(id, object string) string {
-	text := oneLineVisible(shortText(object, 140))
-	if len(secrets.ScanLine("accion", 1, object)) > 0 {
+	// El marcador de dispensa no aplica aquí: solo decide si se muestra.
+	if len(secrets.ScanLine("accion", 1, strings.ReplaceAll(object, secrets.AllowMarker, ""))) > 0 {
 		return "(parece llevar un secreto; revísala con coyote review " + id + ")"
 	}
-	return text
+	return webText(shortText(object, 140))
+}
+
+// webText deja un texto en una línea visible: además de los controles, los
+// separadores de línea y los caracteres de formato invisibles se escriben
+// como su código.
+func webText(s string) string {
+	var b strings.Builder
+	for _, r := range oneLineVisible(s) {
+		if r == '\u2028' || r == '\u2029' || unicode.Is(unicode.Cf, r) {
+			fmt.Fprintf(&b, "\\u%04X", r)
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
 }
 
 // gateView arma la cola, las aprobaciones firmadas en esta máquina y los
 // gates de release.
 func (a *app) gateView(root string) (web.Gate, error) {
 	var g web.Gate
-	c, err := a.approvalCtx()
+	// Mirar no escribe: la cola se lee sin borrar las vencidas y la clave de
+	// firmas no se crea si no existe.
+	root2, cfg, err := a.project()
 	if err != nil {
 		return g, err
 	}
-	queue, err := c.store.Queue()
+	key, hasKey := userdir.ExistingKey("approvals")
+	store := &approval.Store{Root: root2, Project: cfg.Name, Key: key, Now: a.now}
+	queue, err := store.List()
 	if err != nil {
 		return g, err
 	}
@@ -215,13 +262,23 @@ func (a *app) gateView(root string) (web.Gate, error) {
 		if p.Status == "rejected" {
 			state = "rechazada: " + shortText(p.RejectReason, 60)
 		}
-		g.Pending = append(g.Pending, web.Pending{ID: p.ID, By: oneLineVisible(p.RequestedBy), Action: webAction(p.ID, p.Object),
-			State: oneLineVisible(state), First: p.First, Attempts: p.Attempts})
+		g.Pending = append(g.Pending, web.Pending{ID: p.ID, By: webText(p.RequestedBy), Action: webAction(p.ID, p.Object),
+			State: webText(state), First: p.First, Attempts: p.Attempts})
 	}
-	sts, problems, err := c.statuses()
+	g.Releases = releaseGates(root)
+	if !hasKey {
+		return g, nil // sin clave, esta máquina no ha firmado aprobaciones
+	}
+	records, problems, err := store.Records()
 	if err != nil {
 		return g, err
 	}
+	entries, _, err := ledger.Open(root2).ReadAll()
+	if err != nil {
+		return g, err
+	}
+	used, revoked := approval.Usage(entries)
+	sts := store.Statuses(records, used, revoked)
 	for _, st := range sts {
 		state := "vigente"
 		switch {
@@ -237,14 +294,13 @@ func (a *app) gateView(root string) (web.Gate, error) {
 		if left < 0 {
 			left = 0
 		}
-		g.Grants = append(g.Grants, web.Grant{ID: st.ID, Action: webAction(st.ID, st.Object), Approver: oneLineVisible(st.Approver), State: state, Left: left, Expires: exp})
+		g.Grants = append(g.Grants, web.Grant{ID: st.ID, Action: webAction(st.ID, st.Object), Approver: webText(st.Approver), State: state, Left: left, Expires: exp})
 	}
 	sort.SliceStable(g.Grants, func(i, j int) bool { return g.Grants[i].Expires.After(g.Grants[j].Expires) })
 	for name, perr := range problems {
-		g.Problems = append(g.Problems, fmt.Sprintf("%s: %v", name, perr))
+		g.Problems = append(g.Problems, webText(fmt.Sprintf("%s: %v", name, perr)))
 	}
 	sort.Strings(g.Problems)
-	g.Releases = releaseGates(root)
 	return g, nil
 }
 

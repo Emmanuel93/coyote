@@ -12,13 +12,13 @@ import (
 
 var months = []string{"enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"}
 
-// monthOf devuelve el inicio del mes (UTC), su nombre, los días que van y
-// los que tiene.
-func monthOf(now time.Time) (start time.Time, name string, elapsed float64, days int) {
-	start = time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+// monthOf devuelve el mes (UTC): su inicio, el límite de lo que cuenta, su
+// nombre, los días que van y los que tiene.
+func monthOf(now time.Time) (start, end time.Time, name string, elapsed float64, days int) {
+	start, end = usage.Month(now)
 	days = start.AddDate(0, 1, 0).Add(-time.Nanosecond).Day()
 	elapsed = math.Max(now.Sub(start).Hours()/24, 1)
-	return start, fmt.Sprintf("%s de %d", months[now.Month()-1], now.Year()), elapsed, days
+	return start, end, fmt.Sprintf("%s de %d", months[now.Month()-1], now.Year()), elapsed, days
 }
 
 // budgetData es la página de presupuesto del mes en curso.
@@ -29,7 +29,7 @@ type budgetData struct {
 	Cap, RunCap, OrgCap, OrgSpent float64
 	OrgKnown                      bool
 	State, StateClass             string
-	Workstreams                   []Workstream
+	Workstreams                   []workView
 }
 
 // capState dice cómo va un gasto contra su tope.
@@ -47,22 +47,12 @@ func capState(spent, projection, cap float64) (string, string) {
 	return "dentro del tope", "ok"
 }
 
-func sumCost(events []usage.Event) float64 {
-	var v float64
-	for _, e := range events {
-		if e.Line.Cost != nil {
-			v += e.Line.Cost.In + e.Line.Cost.Out
-		}
-	}
-	return v
-}
-
 func (s *Server) budget(w http.ResponseWriter, r *http.Request) {
 	if !only(w, r, "/presupuesto") {
 		return
 	}
 	now := s.now()
-	start, name, elapsed, days := monthOf(now)
+	start, end, name, elapsed, days := monthOf(now)
 	d := budgetData{Month: name, DaysElapsed: int(math.Ceil(elapsed)), DaysInMonth: days}
 	if s.Budget != nil {
 		b, err := s.Budget()
@@ -70,39 +60,59 @@ func (s *Server) budget(w http.ResponseWriter, r *http.Request) {
 			s.message(w, "/presupuesto", http.StatusInternalServerError, "No se pudo leer el presupuesto", err.Error())
 			return
 		}
-		d.Cap, d.RunCap, d.OrgCap = b.MonthlyUSD, b.RunUSD, b.OrgMonthlyUSD
-	}
-	events, err := s.Load()
-	if err != nil {
-		s.message(w, "/presupuesto", http.StatusInternalServerError, "No se pudo leer el ledger", err.Error())
-		return
-	}
-	month := usage.Filter(events, start)
-	// El gasto del proyecto es un total: lo ve cualquiera (D10); lo de cada
-	// persona, solo quien lo gastó y los admins.
-	d.Spent = sumCost(month)
-	for _, e := range month {
-		if usage.Person(e.Line.Actor) == s.Viewer {
-			d.Mine += costOf(e)
+		d.Cap, d.RunCap, d.OrgCap, d.Spent, d.Mine = b.MonthlyUSD, b.RunUSD, b.OrgMonthlyUSD, b.SpentUSD, b.MineUSD
+	} else {
+		// Sin fuente de presupuesto, el gasto sale de los eventos que se ven.
+		events, err := s.events()
+		if err != nil {
+			s.message(w, "/presupuesto", http.StatusInternalServerError, "No se pudo leer el ledger", err.Error())
+			return
+		}
+		month := usage.Between(events, start, end)
+		d.Spent = usage.Cost(month)
+		for _, e := range month {
+			if usage.Person(e.Line.Actor) == s.Viewer {
+				d.Mine += costOf(e)
+			}
 		}
 	}
 	d.Projection = d.Spent / elapsed * float64(days)
 	d.State, d.StateClass = capState(d.Spent, d.Projection, d.Cap)
-	if s.Admin && s.Org != nil {
+	if s.OrgAdmin && s.Org != nil {
 		if org, err := s.Org(); err == nil && org != nil {
-			d.OrgSpent, d.OrgKnown = sumCost(usage.Filter(org.Events, start)), true
+			d.OrgSpent, d.OrgKnown = usage.Cost(usage.Between(org.Events, start, end)), true
 		}
 	}
 	if s.Work != nil {
 		if ws, err := s.Work(); err == nil {
 			for _, x := range ws {
 				if !x.Closed && (x.BudgetUSD > 0 || x.SpentUSD > 0) {
-					d.Workstreams = append(d.Workstreams, x)
+					d.Workstreams = append(d.Workstreams, s.workView(x))
 				}
 			}
 		}
 	}
 	s.render(w, "budget", "/presupuesto", d)
+}
+
+// workView cuenta los pasos de un plan y decide si quien mira ve sus costos:
+// un plan suele ser de una persona, así que su gasto lo ven su dueño y los
+// admins (D10).
+func (s *Server) workView(x Workstream) workView {
+	v := workView{Workstream: x, CostsVisible: s.Admin || (x.Owner != "" && x.Owner == s.Viewer)}
+	for _, st := range x.Steps {
+		switch st.Status {
+		case "done":
+			v.Done++
+		case "review":
+			v.Review++
+		case "failed", "blocked", "redo":
+			v.Trouble++
+		default:
+			v.Pending++
+		}
+	}
+	return v
 }
 
 func costOf(e usage.Event) float64 {
@@ -120,6 +130,7 @@ type workData struct {
 type workView struct {
 	Workstream
 	Done, Review, Pending, Trouble int
+	CostsVisible                   bool
 }
 
 func (s *Server) work(w http.ResponseWriter, r *http.Request) {
@@ -134,20 +145,7 @@ func (s *Server) work(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		for _, x := range ws {
-			v := workView{Workstream: x}
-			for _, st := range x.Steps {
-				switch st.Status {
-				case "done":
-					v.Done++
-				case "review":
-					v.Review++
-				case "failed", "blocked", "redo":
-					v.Trouble++
-				default:
-					v.Pending++
-				}
-			}
-			d.Workstreams = append(d.Workstreams, v)
+			d.Workstreams = append(d.Workstreams, s.workView(x))
 		}
 		// Los abiertos primero, del más nuevo al más viejo.
 		sort.SliceStable(d.Workstreams, func(i, j int) bool {
@@ -217,9 +215,9 @@ func (s *Server) org(w http.ResponseWriter, r *http.Request) {
 		s.message(w, "/org", http.StatusNotFound, "Sin hub", "Este proyecto no declara el hub de la organización (ADR-0018).")
 		return
 	}
-	if !s.Admin {
-		s.message(w, "/org", http.StatusForbidden, "Solo para admins",
-			"La vista de la organización muestra el gasto de todas las personas: la ven los admins del hub o del proyecto (D10).")
+	if !s.OrgAdmin {
+		s.message(w, "/org", http.StatusForbidden, "Solo para admins del hub",
+			"La vista de la organización muestra el gasto de todas las personas en todos sus proyectos: la ven los admins de hub.yaml (D10).")
 		return
 	}
 	org, err := s.Org()
@@ -231,9 +229,9 @@ func (s *Server) org(w http.ResponseWriter, r *http.Request) {
 		s.message(w, "/org", http.StatusInternalServerError, "No se pudo leer la organización", msg)
 		return
 	}
-	start, name, elapsed, days := monthOf(s.now())
-	month := usage.Filter(org.Events, start)
-	d := orgData{Org: org, Month: name, Spent: sumCost(month)}
+	start, end, name, elapsed, days := monthOf(s.now())
+	month := usage.Between(org.Events, start, end)
+	d := orgData{Org: org, Month: name, Spent: usage.Cost(month)}
 	d.State, d.StateClass = capState(d.Spent, d.Spent/elapsed*float64(days), org.MonthlyUSD)
 	byProject := map[string]*orgRow{}
 	for _, p := range org.Projects {
