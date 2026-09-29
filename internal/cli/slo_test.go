@@ -2,6 +2,7 @@ package cli
 
 import (
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -167,5 +168,81 @@ func TestGatePRReglasFueraDelPatronYMarkdown(t *testing.T) {
 	// slo check también ve lo que sobra en la carpeta de reglas.
 	if r := run(t, svc, "", "slo", "check"); r.code == 0 || !strings.Contains(r.stdout, "solo va <servicio>.yaml") {
 		t.Fatalf("slo check:\n%s", r.stdout)
+	}
+}
+
+// TestGatePRSLOsDuplicadosYAnidados cubre la segunda revisión: un servicio
+// en dos archivos, archivos con forma de otro proyecto dentro de la carpeta
+// de reglas, reglas borradas de un SLO que ya no valida y enlaces sueltos.
+func TestGatePRSLOsDuplicadosYAnidados(t *testing.T) {
+	base := setup(t)
+	productoDemo(t, base)
+	svc := filepath.Join(base, "servicios")
+	write(t, svc, "coyote/slo/pedidos-service.yaml", sloPedidos)
+	write(t, svc, "coyote/runbooks/pedidos-disponibilidad.md", "# Pedidos\n")
+	must(t, run(t, svc, "", "slo", "rules"), 0, "slo rules")
+	git(t, svc, "add", "-A")
+	git(t, svc, "commit", "-qm", "feat(slo): SLOs de pedidos")
+	start := strings.TrimSpace(git(t, svc, "rev-parse", "HEAD"))
+	gatepr := func(from, to string) string {
+		return run(t, base, "", "gate", "pr", "--repo", "servicios="+svc, "--self", "servicios", "--base", from, "--head", to, "--event", "").stdout
+	}
+	commit := func(msg string) string {
+		git(t, svc, "add", "-A")
+		git(t, svc, "commit", "-qm", msg)
+		return strings.TrimSpace(git(t, svc, "rev-parse", "HEAD"))
+	}
+	reset := func() { git(t, svc, "reset", "-q", "--hard", start) }
+
+	// Una copia .yml más laxa del mismo servicio, con las reglas escritas desde ella.
+	weak := strings.Replace(strings.Replace(sloPedidos, "objective: 99.9", "objective: 90", 1), "page: { labels: { severity: page } }", "page: { disable: true }", 1)
+	write(t, svc, "coyote/slo/pedidos-service.yml", weak)
+	if r := run(t, svc, "", "slo", "rules"); r.code == 0 || !strings.Contains(r.stdout+r.stderr, "dos archivos de SLOs") {
+		t.Fatalf("slo rules con dos archivos para un servicio:\n%s%s", r.stdout, r.stderr)
+	}
+	r := run(t, svc, "", "slo", "rules", "pedidos-service", "--stdout")
+	write(t, svc, "coyote/slo/prometheus/pedidos-service.yaml", r.stdout)
+	twin := commit("chore(slo): copia")
+	if out := gatepr(start, twin); !strings.Contains(out, "### coyote: R3") || !strings.Contains(out, "está en más de un archivo de SLOs") {
+		t.Fatalf("una copia .yml del SLO es R3:\n%s", out)
+	}
+	reset()
+
+	// El mismo servicio en otra carpeta de proyecto: sus reglas se llaman igual.
+	write(t, svc, "otro/coyote/slo/pedidos-service.yaml", weak)
+	other := commit("chore(slo): otro proyecto")
+	if out := gatepr(start, other); !strings.Contains(out, "### coyote: R3") || !strings.Contains(out, "está en más de un archivo de SLOs") {
+		t.Fatalf("el mismo servicio en otra carpeta es R3:\n%s", out)
+	}
+	reset()
+
+	// Archivos con forma de otro proyecto dentro de la carpeta de reglas.
+	write(t, svc, "coyote/slo/prometheus/coyote/slo/pedidos-service.yaml", weak)
+	write(t, svc, "coyote/slo/prometheus/coyote/slo/prometheus/pedidos-service.yaml", "groups: []\n")
+	nested := commit("chore(slo): anidado")
+	if out := gatepr(start, nested); !strings.Contains(out, "### coyote: R3") || !strings.Contains(out, "no sale de ningún SLO") || strings.Contains(out, "agrega los SLOs") {
+		t.Fatalf("lo anidado en la carpeta de reglas es R3:\n%s", out)
+	}
+	reset()
+
+	// Un SLO que ya no valida (OFFSET en mayúsculas) y un PR que solo borra sus reglas.
+	old := strings.Replace(sloPedidos, `{job="pedidos-service"}[{{.window}}]))`, `{job="pedidos-service"}[{{.window}}] OFFSET 1m))`, 1)
+	write(t, svc, "coyote/slo/pedidos-service.yaml", old)
+	stale := commit("chore(slo): consulta vieja")
+	git(t, svc, "rm", "-q", "coyote/slo/prometheus/pedidos-service.yaml")
+	gone := commit("chore(slo): sin reglas")
+	if out := gatepr(stale, gone); !strings.Contains(out, "### coyote: R3") || !strings.Contains(out, "faltan las reglas generadas") {
+		t.Fatalf("borrar las reglas de un SLO que no valida es R3:\n%s", out)
+	}
+	reset()
+
+	// Un nombre de archivo con forma de dominio no arma un enlace en el
+	// comentario: fuera del código, GitHub enlaza www.… solo.
+	write(t, svc, "coyote/slo/www.evil-example.com.yaml", sloPedidos)
+	link := commit("chore(slo): enlace")
+	out := gatepr(start, link)
+	prose := regexp.MustCompile("`[^`]*`").ReplaceAllString(out, "")
+	if !strings.Contains(out, "no coincide con el archivo") || strings.Contains(prose, "www.evil-example.com") {
+		t.Fatalf("un dominio en el comentario queda cortado para que GitHub no lo enlace:\n%s", out)
 	}
 }

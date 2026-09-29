@@ -24,7 +24,7 @@ deciders: "@eramirezhdez"
   - page con consumo de 14.4 en 1h y 5m o de 6 en 6h y 30m; ticket con 3 en 1d y 2h o 1 en 3d y 6h;
   - si el periodo no es de 30 días, los factores se recalculan para gastar la misma parte del presupuesto.
 - **Revisión.** `coyote slo check` valida el formato, que lo generado esté vigente y que cada alerta page enlace un runbook que exista. La regla R19 lo pide en el lint.
-- **PR.** `gate pr` compara cada SLO de la base con el del PR. Relajar es R3: bajar el objetivo, apagar la alerta page, quitar un SLO o cambiar qué cuenta como error o como total. Lo demás es R2.
+- **PR.** `gate pr` compara cada SLO de la base con el del PR. Relajar es R3: bajar el objetivo, apagar una alerta, quitar un SLO, cambiar qué cuenta como error o como total, o declarar un servicio en dos archivos, cuyas reglas se pisarían al cargarlas. Lo demás es R2.
 - **Carga.** coyote no habla con Faro. Cargar reglas o silenciar alertas (`mimirtool`, `cortextool`, `amtool`) es un comando de infraestructura con efectos en el gate: un agente pide aprobación y, contra un ambiente `reviewed`, se bloquea siempre (ADR-0017).
 
 ## Consecuencias

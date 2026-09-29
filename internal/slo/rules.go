@@ -184,12 +184,15 @@ func Rules(s *Spec) ([]byte, error) {
 
 func sliExpr(q SLI, w string) string {
 	fill := func(s string) string { return strings.TrimSpace(strings.ReplaceAll(s, Window, w)) }
-	if q.ErrorRatio != "" {
-		return "(" + fill(q.ErrorRatio) + ")"
-	}
 	// Sin tráfico no hay muestra: 0/0 sería NaN y envenenaría el promedio del
 	// periodo durante todo el periodo.
-	return "(" + fill(q.Errors) + ")\n/\n((" + fill(q.Total) + ") > 0)"
+	if q.ErrorRatio != "" {
+		return "((" + fill(q.ErrorRatio) + ") >= 0)"
+	}
+	// La serie de errores suele aparecer con el primer error: mientras no
+	// existe, el error cuenta 0 y no deja al periodo sin esos minutos.
+	t := fill(q.Total)
+	return "((" + fill(q.Errors) + ") or (0 * (" + t + ")))\n/\n((" + t + ") > 0)"
 }
 
 func alertExpr(sel, budget string, days int, burns []burn) string {

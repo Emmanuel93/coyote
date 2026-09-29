@@ -402,21 +402,40 @@ func baseRules(dir, base, name string) func(string) (secrets.Rules, string) {
 // revisa que las reglas generadas del commit del PR salgan de su SLO.
 func sloRisks(dir, base, head string, changed []string) []ci.FileRisk {
 	var out []ci.FileRisk
+	add := func(p, risk, why string) { out = append(out, ci.FileRisk{Path: p, Risk: risk, Why: why}) }
+	// Un servicio declarado en dos archivos (x.yaml y x.yml, o en otra
+	// carpeta) genera reglas con los mismos nombres: al cargarlas, unas pisan
+	// a las otras. Se busca en todo el árbol del PR.
+	var dups map[string][]string
+	for _, f := range changed {
+		if slo.IsSpecPath(f) {
+			specs, err := product.ListFiles(dir, head, slo.IsSpecPath)
+			if err != nil {
+				add(f, ci.R3, "no pude listar los archivos de SLOs del PR para ver si un servicio se declara dos veces")
+			}
+			dups = slo.Duplicates(specs)
+			break
+		}
+	}
 	checked := map[string]bool{}
 	for _, f := range changed {
 		switch {
-		case slo.IsSpecPath(f):
-			oldText, hadOld := product.FileAt(dir, base, f)
-			newText, hasNew := product.FileAt(dir, head, f)
-			for _, c := range slo.CompareFile(f, oldText, hadOld, newText, hasNew) {
-				out = append(out, ci.FileRisk{Path: f, Risk: c.Risk, Why: c.Why})
-			}
 		case slo.IsRulesPath(f):
 		case slo.InRulesDir(f):
 			// Otro archivo en la carpeta de reglas: un cargador que recorre la
 			// carpeta lo cargaría sin que salga de ningún SLO.
-			out = append(out, ci.FileRisk{Path: f, Risk: ci.R3, Why: "archivo en la carpeta de reglas generadas que no sale de ningún SLO"})
+			add(f, ci.R3, "archivo en la carpeta de reglas generadas que no sale de ningún SLO")
 			continue
+		case slo.IsSpecPath(f):
+			oldText, hadOld := product.FileAt(dir, base, f)
+			newText, hasNew := product.FileAt(dir, head, f)
+			for _, c := range slo.CompareFile(f, oldText, hadOld, newText, hasNew) {
+				add(f, c.Risk, c.Why)
+			}
+			if ps := dups[slo.ServiceOf(f)]; hasNew && len(ps) > 1 {
+				add(f, ci.R3, fmt.Sprintf("el servicio %s está en más de un archivo de SLOs (%s): sus reglas se llaman igual y al cargarlas unas pisan a las otras",
+					slo.ServiceOf(f), strings.Join(ps, ", ")))
+			}
 		default:
 			continue
 		}
@@ -425,20 +444,27 @@ func sloRisks(dir, base, head string, changed []string) []ci.FileRisk {
 			continue
 		}
 		checked[rules] = true
-		specPath, specText, hasSpec := "", "", false
+		raw, hasRules := product.BlobAt(dir, head, rules, 16<<20)
+		// Las reglas tienen que salir de cada archivo de SLOs que las genera.
+		found := false
 		for _, sp := range specs {
-			if text, ok := product.FileAt(dir, head, sp); ok {
-				specPath, specText, hasSpec = sp, text, true
-				break
+			text, ok := product.FileAt(dir, head, sp)
+			if !ok {
+				continue
+			}
+			found = true
+			if c, bad := slo.CheckGenerated(text, true, raw, hasRules); bad {
+				p := rules
+				if !hasRules {
+					p = sp
+				}
+				add(p, c.Risk, c.Why)
 			}
 		}
-		raw, hasRules := product.BlobAt(dir, head, rules, 16<<20)
-		if c, bad := slo.CheckGenerated(specText, hasSpec, raw, hasRules); bad {
-			p := rules
-			if !hasRules && specPath != "" {
-				p = specPath
+		if !found {
+			if c, bad := slo.CheckGenerated("", false, raw, hasRules); bad {
+				add(rules, c.Risk, c.Why)
 			}
-			out = append(out, ci.FileRisk{Path: p, Risk: c.Risk, Why: c.Why})
 		}
 	}
 	return out

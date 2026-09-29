@@ -61,6 +61,18 @@ func LoadAll(root string) ([]File, error) {
 		out = append(out, f)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
+	// x.yaml y x.yml generan el mismo archivo de reglas: uno pisaría al otro.
+	paths := make([]string, len(out))
+	for i, f := range out {
+		paths[i] = f.Path
+	}
+	dups := Duplicates(paths)
+	for i, f := range out {
+		if ps := dups[ServiceOf(f.Path)]; ps != nil {
+			out[i].Spec = nil
+			out[i].Err = fmt.Errorf("el servicio %s tiene dos archivos de SLOs (%s): sus reglas generadas son el mismo archivo; deja uno", ServiceOf(f.Path), strings.Join(ps, " y "))
+		}
+	}
 	return out, nil
 }
 

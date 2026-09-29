@@ -637,6 +637,27 @@ func ChangedFiles(dir, diff string) ([]string, error) {
 	return out, nil
 }
 
+// ListFiles lista las rutas de los archivos de una revisión que cumplen keep,
+// sin tocar el árbol de trabajo.
+func ListFiles(dir, rev string, keep func(string) bool) ([]string, error) {
+	if rev == "" || strings.HasPrefix(rev, "-") {
+		return nil, fmt.Errorf("revisión inválida %q", rev)
+	}
+	var stdout, stderr bytes.Buffer
+	cmd := gitRead(dir, "ls-tree", "-r", "-z", "--name-only", "--full-tree", rev)
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("git ls-tree %s: %v %s", rev, err, strings.TrimSpace(stderr.String()))
+	}
+	var out []string
+	for _, p := range strings.Split(stdout.String(), "\x00") {
+		if p != "" && keep(p) {
+			out = append(out, p)
+		}
+	}
+	return out, nil
+}
+
 // FileAt lee un archivo de texto tal como está en una revisión, sin tocar el
 // árbol de trabajo: el CODEOWNERS que manda es el de la rama base.
 func FileAt(dir, rev, path string) (string, bool) {

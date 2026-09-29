@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -913,7 +914,7 @@ func breakingCount(im *product.Impact) int {
 func impactMarkdown(im *product.Impact, m *product.Map, total int) string {
 	var b bytes.Buffer
 	fmt.Fprintf(&b, "### Impacto en el producto\n\n**Cambio:** %s  \n**Repos afectados:** %s (%d de %d)  \n**Mapa:** %s\n",
-		mdCell(im.Query), mdCell(orDash(strings.Join(im.Repos, ", "))), len(im.Repos), total, mdCell(mapVersions(m)))
+		mdText(im.Query), mdText(orDash(strings.Join(im.Repos, ", "))), len(im.Repos), total, mdText(mapVersions(m)))
 	if n := breakingCount(im); n > 0 {
 		fmt.Fprintf(&b, "\n> **Atención:** %d %s usan algo que el cambio elimina.\n", n, pluralWord(n, "interfaz", "interfaces"))
 	}
@@ -923,7 +924,7 @@ func impactMarkdown(im *product.Impact, m *product.Map, total int) string {
 		}
 		fmt.Fprintf(&b, "\n#### %s (%d)\n\n| Repo | Módulo | Interfaz | Por qué | Dónde |\n|---|---|---|---|---|\n", s.title, len(s.hits))
 		for _, h := range s.hits {
-			why := mdCell(h.Why)
+			why := mdText(h.Why)
 			if h.Breaking {
 				why = "**se rompe:** " + why
 			}
@@ -934,20 +935,20 @@ func impactMarkdown(im *product.Impact, m *product.Map, total int) string {
 			if h.Entry.Module == "." || h.Entry.Module == "" {
 				mod = "—"
 			}
-			fmt.Fprintf(&b, "| %s | %s | %s `%s` | %s | `%s:%d` |\n", mdCell(h.Entry.Repo), mdCell(mod),
+			fmt.Fprintf(&b, "| %s | %s | %s `%s` | %s | `%s:%d` |\n", mdText(h.Entry.Repo), mdText(mod),
 				h.Entry.Role, mdCode(h.Entry.Describe()), why, mdCode(h.Entry.File), h.Entry.Line)
 		}
 	}
 	if len(im.Unresolved) > 0 {
 		fmt.Fprintf(&b, "\n#### Sin resolver en los módulos afectados (%d)\n\n", len(im.Unresolved))
 		for _, e := range im.Unresolved {
-			fmt.Fprintf(&b, "- %s · %s: %s `%s` (`%s:%d`)\n", mdCell(e.Repo), mdCell(product.ModuleName(e.Module)), e.Role, mdCode(e.Raw), mdCode(e.File), e.Line)
+			fmt.Fprintf(&b, "- %s · %s: %s `%s` (`%s:%d`)\n", mdText(e.Repo), mdText(product.ModuleName(e.Module)), e.Role, mdCode(e.Raw), mdCode(e.File), e.Line)
 		}
 	}
 	if len(im.Notes) > 0 {
 		b.WriteString("\n#### Notas\n\n")
 		for _, n := range im.Notes {
-			fmt.Fprintf(&b, "- %s\n", mdCell(n))
+			fmt.Fprintf(&b, "- %s\n", mdText(n))
 		}
 	}
 	return b.String()
@@ -961,10 +962,14 @@ func mdCell(s string) string {
 }
 
 // mdText es mdCell para texto libre en un comentario de GitHub: tampoco
-// menciona a nadie (@persona o @org/equipo).
+// menciona a nadie (@persona o @org/equipo), ni arma enlaces sueltos
+// (https://…, www.…) o referencias a issues (#123), que GitHub enlaza solo.
 func mdText(s string) string {
-	return strings.ReplaceAll(mdCell(s), "@", "@\u200b")
+	s = strings.NewReplacer("@", "@\u200b", "://", ":\u200b//", "#", "#\u200b").Replace(mdCell(s))
+	return wwwRe.ReplaceAllStringFunc(s, func(m string) string { return m[:3] + "\u200b." })
 }
+
+var wwwRe = regexp.MustCompile(`(?i)www\.`)
 
 // mdCode deja un texto apto para un bloque de código dentro de una celda:
 // ahí no se arman enlaces, pero un acento grave lo cerraría.

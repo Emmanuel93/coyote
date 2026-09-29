@@ -341,10 +341,14 @@ func scanQuery(q string) []string {
 				end++
 			}
 			inner := strings.TrimSpace(string(rs[i+1 : min(end, len(rs))]))
-			base, _, _ := strings.Cut(inner, ":")
-			if strings.TrimSpace(base) != sentinel {
+			rng, step, sub := strings.Cut(inner, ":")
+			switch {
+			case strings.TrimSpace(rng) != sentinel:
 				add("tiene una ventana fija [" + inner + "]; usa " + Window)
-			} else {
+			case sub && !shortStep(strings.TrimSpace(step)):
+				add("usa una subconsulta con paso " + strings.TrimSpace(step) + ": el paso va de 1s a 5m, o vacío")
+				windows++
+			default:
 				windows++
 			}
 			i = end
@@ -353,7 +357,11 @@ func scanQuery(q string) []string {
 			for j >= 0 && unicode.IsSpace(rs[j]) {
 				j--
 			}
-			if j < 0 || !(unicode.IsLetter(rs[j]) || unicode.IsDigit(rs[j]) || rs[j] == '_' || rs[j] == ':') {
+			k := j
+			for k >= 0 && (unicode.IsLetter(rs[k]) || unicode.IsDigit(rs[k]) || rs[k] == '_' || rs[k] == ':') {
+				k--
+			}
+			if j < 0 || k == j || operatorWord[strings.ToLower(string(rs[k+1:j+1]))] {
 				add("tiene un selector sin nombre de métrica: {…} elige varias métricas y rate() falla si comparten etiquetas; suma cada métrica con (sum(rate(m[" + Window + "])) or vector(0))")
 			}
 			end := i + 1
@@ -361,7 +369,7 @@ func scanQuery(q string) []string {
 			for end < len(rs) {
 				c := rs[end]
 				if inQuote != 0 {
-					if c == '\\' {
+					if c == '\\' && inQuote != '`' {
 						end += 2
 						continue
 					}
@@ -384,17 +392,40 @@ func scanQuery(q string) []string {
 			for j < len(rs) && (unicode.IsLetter(rs[j]) || unicode.IsDigit(rs[j]) || rs[j] == '_' || rs[j] == ':') {
 				j++
 			}
-			if string(rs[i:j]) == "offset" {
+			if strings.EqualFold(string(rs[i:j]), "offset") {
 				add("usa offset: la ventana es la de coyote")
 			}
 			i = j - 1
 		}
 	}
-	if windows == 0 && strings.Contains(q, sentinel) {
+	if strings.Count(q, sentinel) > windows {
 		add("usa " + Window + " fuera de una ventana [..]")
 	}
 	return out
 }
+
+// shortStep dice si el paso de una subconsulta es vacío o de 1s a 5m: un
+// paso más largo que la ventana más corta deja a las alertas sin muestras.
+func shortStep(step string) bool {
+	if step == "" {
+		return true
+	}
+	m := stepRe.FindStringSubmatch(step)
+	if m == nil {
+		return false
+	}
+	n, _ := strconv.Atoi(m[1])
+	if m[2] == "m" {
+		n *= 60
+	}
+	return n >= 1 && n <= 300
+}
+
+var stepRe = regexp.MustCompile(`^([0-9]{1,3})(s|m)$`)
+
+// operatorWord son las palabras de PromQL que pueden ir antes de un selector
+// sin ser el nombre de una métrica.
+var operatorWord = map[string]bool{"and": true, "or": true, "unless": true, "bool": true, "atan2": true}
 
 // balanced revisa paréntesis, corchetes, llaves y comillas, sin contar lo
 // que está entre comillas.

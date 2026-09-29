@@ -140,7 +140,7 @@ func TestSLOsRelajados(t *testing.T) {
 		{"cambia qué es error", strings.Replace(pagos, `=~"5.."`, `="503"`, 1), "R3"},
 		{"cambia las etiquetas del servicio", strings.Replace(pagos, "team: pagos", "team: nadie", 1), "R3"},
 		{"cambia el nombre de la alerta", strings.Replace(pagos, "    alerts:\n", "    alerts:\n      name: PagosOtra\n", 1), "R3"},
-		{"apaga el ticket", strings.Replace(pagos, "ticket: { labels: { severity: ticket } }", "ticket: { disable: true }", 1), "R2"},
+		{"apaga el ticket", strings.Replace(pagos, "ticket: { labels: { severity: ticket } }", "ticket: { disable: true }", 1), "R3"},
 		{"cambia el runbook", strings.Replace(pagos, "pagos-api-disponibilidad.md", "pagos.md", 1), "R2"},
 		{"solo formato", "# SLOs de pagos\n" + strings.Replace(pagos, "labels: { team: pagos }", "labels:\n  team: pagos   # dueño", 1), ""},
 		{"espacios en la consulta", strings.Replace(pagos, "sum(rate(", "sum( rate(", 1), "R3"},
@@ -276,6 +276,18 @@ func TestConsultasQueNoMidenLoQueDicen(t *testing.T) {
 		"__name__ entre comillas": `sum(rate({"__name__"=~"a|b", job="a"}[{{.window}}]))`,
 		"__name__ distinto":       `sum(rate(m{__name__!~"b", job="a"}[{{.window}}]))`,
 		"otro marcador":           `sum(rate(m{job="a"}[{{.window}}])) * {{.x}}`,
+		// Segunda revisión: mayúsculas, selectores después de un operador,
+		// la ventana en un literal, subconsultas con paso largo y un literal
+		// crudo que termina en barra invertida.
+		"OFFSET":                 `sum(rate(m{job="a"}[{{.window}}] OFFSET 1w))`,
+		"Offset":                 `sum(rate(m{job="a"}[{{.window}}] Offset 1w))`,
+		"or sin nombre":          `sum(rate(m{job="a"}[{{.window}}])) or {job="b"}`,
+		"and sin nombre":         `sum(rate(m{job="a"}[{{.window}}])) and {job="b"}`,
+		"bool sin nombre":        `sum(rate(m{job="a"}[{{.window}}])) > bool {job="b"}`,
+		"ventana en un string":   `sum(rate(m{job="a"}[{{.window}}])) + 0 * sum(rate(n{job="{{.window}}"}[{{.window}}]))`,
+		"subconsulta de un día":  `sum(rate(m{job="a"}[{{.window}}:1d]))`,
+		"subconsulta de ventana": `sum(rate(m{job="a"}[{{.window}}:{{.window}}]))`,
+		"crudo con barra":        "sum(rate(m{job=\"a\"}[{{.window}}])) + 0 * sum(rate(m{job=`a\\`}[5m] @ 100 offset 1w))",
 	}
 	for name, q := range bad {
 		text := strings.Replace(pagos, base, q, 1)
@@ -287,6 +299,8 @@ func TestConsultasQueNoMidenLoQueDicen(t *testing.T) {
 		`sum(rate(m{job="a", path=~"/api/(pagos|cobros)"}[{{.window}}]))`,
 		`sum by (route) (rate(m{job="a"}[{{.window}}]))`,
 		`sum(rate(m_bucket{job="a",le="0.5"}[{{.window}}:1m]))`,
+		`sum(rate(m_bucket{job="a",le="0.5"}[{{.window}}:]))`,
+		`sum(rate(orders_total{job="a"}[{{.window}}])) or sum(rate(and_total{job="a"}[{{.window}}]))`,
 		`(sum(rate(a_total{job="x"}[{{.window}}])) or vector(0)) + (sum(rate(b_total{job="x"}[{{.window}}])) or vector(0))`,
 	}
 	for _, q := range ok {

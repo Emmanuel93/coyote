@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path"
 	"reflect"
+	"sort"
 	"strings"
 )
 
@@ -17,12 +18,36 @@ type Change struct {
 }
 
 // IsSpecPath dice si una ruta de un repo es un archivo de SLOs: *.yaml en
-// coyote/slo/ del proyecto o de un proyecto en una subcarpeta, sin las reglas
-// generadas.
+// coyote/slo/ del proyecto o de un proyecto en una subcarpeta. Nada dentro de
+// una carpeta de reglas generadas es un archivo de SLOs.
 func IsSpecPath(p string) bool {
 	dir, file := path.Split(p)
 	ext := path.Ext(file)
-	return (dir == Dir+"/" || strings.HasSuffix(dir, "/"+Dir+"/")) && (ext == ".yaml" || ext == ".yml")
+	return !InRulesDir(p) && (dir == Dir+"/" || strings.HasSuffix(dir, "/"+Dir+"/")) && (ext == ".yaml" || ext == ".yml")
+}
+
+// ServiceOf es el servicio de un archivo de SLOs o de reglas: su nombre sin
+// extensión.
+func ServiceOf(p string) string {
+	return strings.TrimSuffix(strings.TrimSuffix(path.Base(p), ".yaml"), ".yml")
+}
+
+// Duplicates agrupa archivos de SLOs por servicio y devuelve los servicios
+// declarados en más de un archivo (x.yaml y x.yml, o en otra carpeta): sus
+// reglas se llaman igual y, al cargarlas, unas pisan a las otras.
+func Duplicates(specs []string) map[string][]string {
+	by := map[string][]string{}
+	for _, p := range specs {
+		by[ServiceOf(p)] = append(by[ServiceOf(p)], p)
+	}
+	out := map[string][]string{}
+	for svc, ps := range by {
+		if len(ps) > 1 {
+			sort.Strings(ps)
+			out[svc] = ps
+		}
+	}
+	return out
 }
 
 // Compare compara el archivo de la base con el del PR, como texto: nada se
@@ -36,7 +61,7 @@ func Compare(oldText string, hadOld bool, newText string, hasNew bool) []Change 
 func CompareFile(p, oldText string, hadOld bool, newText string, hasNew bool) []Change {
 	name := ""
 	if p != "" {
-		name = strings.TrimSuffix(strings.TrimSuffix(path.Base(p), ".yaml"), ".yml")
+		name = ServiceOf(p)
 	}
 	var out []Change
 	r3 := func(format string, a ...any) { out = append(out, Change{"R3", fmt.Sprintf(format, a...)}) }
@@ -114,7 +139,8 @@ func CompareFile(p, oldText string, hadOld bool, newText string, hasNew bool) []
 		}
 		switch {
 		case !oa.Ticket.Disable && na.Ticket.Disable:
-			r2("apaga la alerta ticket de %s", old.Name)
+			// Con la page apagada, sin ticket el SLO se queda sin ninguna alerta.
+			r3("apaga la alerta ticket de %s", old.Name)
 		case !oa.Ticket.Disable && !na.Ticket.Disable && !reflect.DeepEqual(nonNil(oa.Ticket.Labels), nonNil(na.Ticket.Labels)):
 			r2("cambia las etiquetas de la alerta ticket de %s", old.Name)
 		}
@@ -145,17 +171,33 @@ func shortErr(err error) string {
 	return s
 }
 
-// InRulesDir dice si una ruta está dentro de una carpeta de reglas generadas
-// (coyote/slo/prometheus/), en cualquier nivel.
-func InRulesDir(p string) bool {
-	return strings.HasPrefix(p, RulesDir+"/") || strings.Contains(p, "/"+RulesDir+"/")
+// rulesDirEnd devuelve dónde termina la primera carpeta de reglas generadas
+// (coyote/slo/prometheus/) de una ruta, o -1.
+func rulesDirEnd(p string) int {
+	if strings.HasPrefix(p, RulesDir+"/") {
+		return len(RulesDir) + 1
+	}
+	if i := strings.Index(p, "/"+RulesDir+"/"); i >= 0 {
+		return i + len(RulesDir) + 2
+	}
+	return -1
 }
 
+// InRulesDir dice si una ruta está dentro de una carpeta de reglas generadas
+// (coyote/slo/prometheus/), en cualquier nivel.
+func InRulesDir(p string) bool { return rulesDirEnd(p) >= 0 }
+
 // IsRulesPath dice si una ruta es el archivo de reglas generadas de un
-// servicio: <servicio>.yaml directo en coyote/slo/prometheus/.
+// servicio: <servicio>.yaml directo en la primera carpeta de reglas de la
+// ruta. Lo que está más abajo, aunque parezca otro proyecto, es un archivo
+// suelto en la carpeta de reglas.
 func IsRulesPath(p string) bool {
-	dir, file := path.Split(p)
-	return (dir == RulesDir+"/" || strings.HasSuffix(dir, "/"+RulesDir+"/")) && path.Ext(file) == ".yaml"
+	end := rulesDirEnd(p)
+	if end < 0 {
+		return false
+	}
+	rest := p[end:]
+	return rest != "" && !strings.Contains(rest, "/") && path.Ext(rest) == ".yaml"
 }
 
 // Pair devuelve, para una ruta de SLOs o de reglas generadas, las rutas
@@ -181,14 +223,17 @@ func CheckGenerated(specText string, hasSpec bool, rules []byte, hasRules bool) 
 		return Change{"R3", "reglas de alertas sin su archivo de SLOs: no salen de ningún SLO revisado"}, true
 	}
 	s, err := Parse([]byte(specText))
-	if err != nil {
-		if hasRules {
-			return Change{"R3", "las reglas generadas no se pueden comprobar: su archivo de SLOs no valida"}, true
-		}
-		return Change{}, false // Compare ya lo marca cuando el archivo cambia
-	}
 	if !hasRules {
-		return Change{"R3", fmt.Sprintf("faltan las reglas generadas de %s: sus alertas no se cargan; corre coyote slo rules", s.Service)}, true
+		// Aunque el SLO ya no valide (por ejemplo, después de subir coyote),
+		// borrar sus reglas apaga todas sus alertas.
+		name := "un servicio"
+		if err == nil {
+			name = s.Service
+		}
+		return Change{"R3", fmt.Sprintf("faltan las reglas generadas de %s: sus alertas no se cargan; corre coyote slo rules", name)}, true
+	}
+	if err != nil {
+		return Change{"R3", "las reglas generadas no se pueden comprobar: su archivo de SLOs no valida"}, true
 	}
 	want, err := Rules(s)
 	if err != nil || !bytes.Equal(want, rules) {
