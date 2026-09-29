@@ -23,6 +23,7 @@ import (
 
 	"github.com/Emmanuel93/coyote/internal/fsx"
 	"github.com/Emmanuel93/coyote/internal/hub"
+	"github.com/Emmanuel93/coyote/internal/yamlx"
 )
 
 // DefaultRef es el nombre del estándar que trae la herramienta.
@@ -128,6 +129,11 @@ type Standard struct {
 	Unjustified []string
 	// Hub es el hub que rige, con su commit; nil si el estándar no lo usa.
 	Hub *hub.Hub
+	// HubSkipped indica que coyote/project.yaml declara un hub y la cadena no
+	// pasa por él; HubSkipReason es el motivo declarado. Sin motivo, las
+	// reglas de la organización no rigen y el lint falla (S2).
+	HubSkipped    bool
+	HubSkipReason string
 }
 
 // placeholders son motivos de relleno que no cuentan como motivo.
@@ -169,6 +175,11 @@ func (s *Standard) warn(format string, a ...any) {
 // Una clave desconocida (por ejemplo Override: en vez de override:) es un
 // error: de otro modo la regla se redefiniría sin que nadie lo notara.
 func ParseFile(data []byte) (*File, error) {
+	// Un solo documento, sin anclas ni alias: un segundo documento se
+	// ignoraría sin aviso, con las reglas que traiga.
+	if err := yamlx.Check(data); err != nil {
+		return nil, err
+	}
 	var f File
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	dec.KnownFields(true)
@@ -194,6 +205,16 @@ func Load(root string, now time.Time) (*Standard, error) {
 		return nil, err
 	}
 	st := &Standard{Warnings: warnings, Hub: h}
+	// Un proyecto que declara hub lo tiene en su cadena: sin esa capa, las
+	// reglas de la organización no rigen (ADR-0018).
+	if ref, err := hub.FromProject(root); err == nil && !ref.Empty() && h == nil {
+		st.HubSkipped = true
+		for _, l := range chain {
+			if l.name == "proyecto" && Meaningful(l.file.Reason) {
+				st.HubSkipReason = strings.TrimSpace(l.file.Reason)
+			}
+		}
+	}
 	if len(chain) == 0 || chain[0].name != DefaultRef {
 		st.Detached = true
 		for _, l := range chain {
@@ -288,6 +309,12 @@ func resolve(root string) ([]layer, []string, *hub.Hub, error) {
 	var warnings []string
 	var chain []layer
 	var h *hub.Hub
+	// El clon del hub declarado: un extends que lo lee del disco tomaría su
+	// árbol de trabajo, con cambios sin commit.
+	hubDir := ""
+	if ref, err := hub.FromProject(root); err == nil && !ref.Empty() {
+		hubDir = ref.Dir(root)
+	}
 	seen := map[string]bool{}
 	cur := source{path: filepath.Join(root, "coyote", "standards", "rules.yaml")}
 	name := "proyecto"
@@ -365,6 +392,9 @@ func resolve(root string) ([]layer, []string, *hub.Hub, error) {
 		default:
 			if !filepath.IsAbs(next) {
 				next = filepath.Join(filepath.Dir(cur.path), next)
+			}
+			if hubDir != "" && hub.Inside(hubDir, next) {
+				return nil, warnings, h, fmt.Errorf("%s: extends %q lee el clon del hub del disco, con lo que tenga sin commit; usa extends: hub, que lee el commit que rige (ADR-0018)", cur, strings.TrimSpace(f.Extends))
 			}
 			cur, name = source{path: filepath.Clean(next)}, strings.TrimSpace(f.Extends)
 		}

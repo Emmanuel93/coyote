@@ -19,7 +19,7 @@ coyote repo add backoffice --path ../backoffice
 
 | Ruta | Qué es | Se versiona |
 |------|--------|-------------|
-| `coyote/project.yaml` | los repos, por ruta local (y URL si la tienen) | sí |
+| `coyote/project.yaml` | los repos, por ruta local (y URL si la tienen); cada nombre una vez, con letras, números, punto, guion o guion bajo, y sin caracteres de control ni invisibles en ruta, URL o rama | sí |
 | `coyote/map/<repo>.map` | las interfaces de cada repo | sí |
 | `coyote/repos/<repo>/` | README.coyote.md y CONTEXT.coyote.md propuestos para cada repo | sí |
 | `.coyote/` | cachés | no |

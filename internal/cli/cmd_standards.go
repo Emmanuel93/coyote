@@ -61,7 +61,7 @@ func standardsLint(a *app, args []string) error {
 			fmt.Fprintln(a.stdout, "aviso: "+w)
 		}
 		if profile, _ := profileAndWaivers(root, cfg); profile != cfg.Type {
-			fmt.Fprintf(a.stdout, "aviso: el perfil del estándar (%s) no es el tipo del proyecto (%s); las reglas de perfil siguen al perfil\n", profile, cfg.Type)
+			fmt.Fprintf(a.stdout, "aviso: el perfil del estándar (%s) no es el tipo del proyecto (%s); suma las reglas de ese perfil y las del tipo siguen rigiendo\n", profile, cfg.Type)
 		}
 		printFindings(a, res)
 		fmt.Fprintf(a.stdout, "Capas: %s · %d reglas verificadas · %d MUST · %d SHOULD · %d dispensadas\n",
@@ -347,6 +347,13 @@ func cmdDoctor(a *app, args []string) error {
 	if err != nil {
 		add("estándar", "fail", err.Error())
 	} else {
+		if st.HubSkipped {
+			state, why := "fail", "el estándar no pasa por extends: hub: las reglas de la organización no rigen (S2)"
+			if st.HubSkipReason != "" {
+				state, why = "warn", "el estándar no pasa por extends: hub; motivo: "+st.HubSkipReason
+			}
+			add("hub", state, why)
+		}
 		if f := checkAgentsMD(&standards.Context{Root: root, Standard: st, Autonomy: cfg.Autonomy}, standards.Check{}); len(f) > 0 {
 			add("AGENTS.md", "warn", f[0].Msg+"; corre coyote generate agents")
 		} else {

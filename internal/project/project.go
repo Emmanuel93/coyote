@@ -200,6 +200,18 @@ func (c *Config) Validate() error {
 			c.Admins[i] = h
 		}
 	}
+	seenRepo := map[string]bool{}
+	for _, r := range c.Repos {
+		switch {
+		case !nameRe.MatchString(r.Name):
+			errs = append(errs, fmt.Sprintf("repos: nombre inválido %q (letras, números, punto, guion o guion bajo)", r.Name))
+		case seenRepo[r.Name]:
+			errs = append(errs, fmt.Sprintf("repos: %s aparece dos veces", r.Name))
+		case hub.HasControl(r.Path) || hub.HasControl(r.URL) || hub.HasControl(r.Branch):
+			errs = append(errs, fmt.Sprintf("repos: %s tiene caracteres de control o invisibles en path, url o branch", r.Name))
+		}
+		seenRepo[r.Name] = true
+	}
 	for name := range c.Features {
 		if _, ok := KnownFeatures[name]; !ok {
 			names := make([]string, 0, len(KnownFeatures))

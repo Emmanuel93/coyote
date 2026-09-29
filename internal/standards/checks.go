@@ -79,8 +79,12 @@ func (r *Result) Failing(strict bool) int {
 
 // Context es lo que un check necesita del proyecto.
 type Context struct {
-	Root        string
-	Profile     string
+	Root    string
+	Profile string
+	// Type es el tipo del proyecto en coyote/project.yaml, que un agente no
+	// edita: sus reglas de perfil rigen aunque el perfil de README.coyote.md
+	// sea otro. El perfil suma reglas, no las apaga.
+	Type        string
 	Files       []string
 	Now         time.Time
 	Attribution *attribution.Config
@@ -163,6 +167,14 @@ func Lint(ctx *Context, st *Standard) *Result {
 				Fix: "usa extends: coyote:default o declara reason: con el motivo"})
 		}
 	}
+	if st.HubSkipped {
+		res.Checked++
+		if st.HubSkipReason == "" {
+			res.Findings = append(res.Findings, Finding{RuleID: "S2", Level: "MUST", Title: "Un proyecto con hub extiende el hub",
+				Path: "coyote/standards/rules.yaml", Msg: "coyote/project.yaml declara un hub, pero el estándar no pasa por extends: hub: las reglas de la organización no rigen",
+				Fix: "usa extends: hub, o declara reason: con el motivo"})
+		}
+	}
 	for _, id := range st.Unjustified {
 		res.Findings = append(res.Findings, Finding{RuleID: "S1", Level: "MUST", Title: "Una redefinición que relaja una MUST declara reason",
 			Path: "coyote/standards/rules.yaml", Msg: id + " se redefine con otros checks o perfiles sin reason; rige la definición anterior",
@@ -173,7 +185,7 @@ func Lint(ctx *Context, st *Standard) *Result {
 			res.Skipped = append(res.Skipped, r.ID+" desactivada")
 			continue
 		}
-		if !r.AppliesTo(ctx.Profile) {
+		if !r.AppliesTo(ctx.Profile) && (ctx.Type == "" || !r.AppliesTo(ctx.Type)) {
 			res.Skipped = append(res.Skipped, r.ID+" no aplica al perfil "+ctx.Profile)
 			continue
 		}

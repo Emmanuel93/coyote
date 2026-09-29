@@ -20,6 +20,10 @@ Valores de `extends`: `coyote:default` (o vacío), `hub`, `none` (sin capas prev
 
 `extends: none` deja fuera todo el default. Solo vale con `reason:` en el mismo archivo; sin motivo, el lint falla con el hallazgo **S0** y `coyote standards diff` lista cada regla que quedó fuera.
 
+Un proyecto que declara hub en `coyote/project.yaml` pasa por `extends: hub`. Si su cadena no incluye la capa del hub, el lint falla con **S2**, salvo con `reason:` en su `rules.yaml` (hub-v1).
+
+Cada `rules.yaml` es un solo documento YAML, sin anclas ni alias: un segundo documento se ignoraría sin aviso.
+
 ## Archivo rules.yaml
 
 ```yaml
@@ -58,7 +62,7 @@ Todo ajuste aparece en `coyote standards diff` y `coyote standards explain <id>`
 
 ## Perfiles
 
-El perfil del proyecto es `standards.profile` de README.coyote.md o, si falta, su `type`. Una regla con `profiles` solo aplica a esos perfiles; por ejemplo, R13 (inventario `coyote/infra.yaml`) solo aplica a `infra`. Si el perfil no coincide con el tipo del proyecto, `lint`, `show` y `diff` lo avisan.
+El perfil del proyecto es su `type` de `coyote/project.yaml`, que un agente no edita. Una regla con `profiles` solo aplica a esos perfiles; por ejemplo, R13 (inventario `coyote/infra.yaml`) solo aplica a `infra`. `standards.profile` de README.coyote.md suma las reglas de otro perfil, pero no apaga las del tipo: cambiar un texto del README no puede dejar sin efecto una MUST. Si el perfil no coincide con el tipo, `lint`, `show` y `diff` lo avisan.
 
 ## Tipos de check
 

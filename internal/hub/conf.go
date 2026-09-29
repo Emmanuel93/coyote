@@ -78,9 +78,13 @@ func quote(s string) string {
 	return fmt.Sprintf("%q", s)
 }
 
-func hasControl(s string) bool {
+// HasControl dice si un texto tiene caracteres de control, separadores de
+// línea Unicode o caracteres de formato invisibles (como los que cambian la
+// dirección del texto): en una ruta o un nombre solo sirven para engañar a
+// quien los lee en un terminal.
+func HasControl(s string) bool {
 	for _, r := range s {
-		if unicode.IsControl(r) {
+		if unicode.IsControl(r) || r == '\u2028' || r == '\u2029' || unicode.Is(unicode.Cf, r) {
 			return true
 		}
 	}
@@ -136,7 +140,7 @@ func (c *Conf) normalize() error {
 			errs = append(errs, fmt.Sprintf("projects: %s repetido", p.Name))
 		case p.Repo != "" && !repoRe.MatchString(p.Repo):
 			errs = append(errs, fmt.Sprintf("projects: repo inválido %s; usa owner/nombre", quote(p.Repo)))
-		case hasControl(p.Path) || strings.Contains(p.Path, "://"):
+		case HasControl(p.Path) || strings.Contains(p.Path, "://"):
 			errs = append(errs, fmt.Sprintf("projects: %s tiene una ruta inválida; va la ruta del clon local", p.Name))
 		}
 		names[strings.ToLower(p.Name)] = true

@@ -104,6 +104,8 @@ func (r Ref) Validate() error {
 		return nil
 	case r.Path == "":
 		return errors.New("hub: ref sin path; path es la ruta del clon del hub")
+	case HasControl(r.Path):
+		return fmt.Errorf("hub: path %q tiene caracteres de control o invisibles", r.Path)
 	case strings.Contains(r.Path, "://") || strings.HasPrefix(r.Path, "git@"):
 		return fmt.Errorf("hub: %q es una URL; clona el hub y pon en path la ruta del clon (y en ref la rama o el commit)", r.Path)
 	case r.Ref != "" && (!refRe.MatchString(r.Ref) || strings.Contains(r.Ref, "..") || strings.HasSuffix(r.Ref, "/") || strings.HasSuffix(r.Ref, ".lock")):
@@ -257,6 +259,21 @@ func revParse(dir, spec string) (string, bool) {
 	return sha, err == nil && shaRe.MatchString(sha)
 }
 
+// exactRef busca una ref por su nombre completo, sin las reglas de git para
+// completar nombres: refs/heads/x no puede resolver a una etiqueta llamada
+// refs/tags/refs/heads/x. Devuelve el commit al que apunta.
+func exactRef(dir, full string) (string, bool) {
+	out, err := product.GitRead(dir, "show-ref", "--verify", "--hash", full).Output()
+	if err != nil {
+		return "", false
+	}
+	obj := strings.TrimSpace(string(out))
+	if !shaRe.MatchString(obj) {
+		return "", false
+	}
+	return revParse(dir, obj+"^{commit}")
+}
+
 // resolve devuelve el commit que rige y el nombre completo de la ref. Una
 // ref corta se busca como rama, etiqueta y rama remota, y si existe en más de
 // uno es un error: git preferiría la etiqueta, y quien pueda empujar una
@@ -280,7 +297,7 @@ func resolve(dir, ref string) (commit, full string, err error) {
 	}
 	var found []string
 	for _, c := range cands {
-		if sha, ok := revParse(dir, c+"^{commit}"); ok {
+		if sha, ok := exactRef(dir, c); ok {
 			found = append(found, c)
 			commit = sha
 		}
