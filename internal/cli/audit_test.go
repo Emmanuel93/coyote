@@ -55,8 +55,8 @@ func TestAuditConHistoriaDeGit(t *testing.T) {
 	r = run(t, root, "", "audit", "--json")
 	must(t, r, 1, "atribución")
 	var rep struct {
-		Checks []struct{ Name, Result string } `json:"checks"`
-		Commits int                            `json:"commits"`
+		Checks  []struct{ Name, Result string } `json:"checks"`
+		Commits int                             `json:"commits"`
 	}
 	if err := json.Unmarshal([]byte(r.stdout), &rep); err != nil {
 		t.Fatalf("--json: %v\n%s", err, r.stdout)

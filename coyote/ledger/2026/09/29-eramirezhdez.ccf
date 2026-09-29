@@ -80,3 +80,4 @@
 2026-09-29T18:25Z|@eramirezhdez/coyote-scribe|W-0007|coyote|apr|release|G7 aprobado: v0.7.0, hub kredius, Faro en coyote/slo y v1.0; registro tardío|apr:P-0007 doc:docs/releases/v0.7.0.md|-|-|ok
 2026-09-29T18:27Z|@eramirezhdez/coyote-librarian|W-0008|coyote|note|audit|dec: coyote audit arma el reporte del mes desde el ledger, las…|doc:CONTEXT.coyote.md|-|-|ok
 2026-09-29T18:27Z|@eramirezhdez/coyote-librarian|W-0008|coyote|feat|audit|coyote audit, reporte del mes desde el ledger, las aprobaciones y git…|-|-|-|ok
+2026-09-29T18:28Z|@eramirezhdez/coyote-librarian|W-0008|coyote|chore|audit|gofmt de la prueba de coyote audit|-|-|-|ok
