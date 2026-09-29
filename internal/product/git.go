@@ -108,6 +108,10 @@ func filterOverrides(abs string) ([]string, error) {
 	return over, nil
 }
 
+// GitRead prepara un comando de git de solo lectura sobre un repo ajeno (del
+// producto o el hub): sin hooks, filtros, transportes ni candados opcionales.
+func GitRead(dir string, args ...string) *exec.Cmd { return gitRead(dir, args...) }
+
 // gitRead prepara un comando de solo lectura de git sobre un repo del producto.
 func gitRead(dir string, args ...string) *exec.Cmd {
 	abs := absDir(dir)

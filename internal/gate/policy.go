@@ -135,7 +135,7 @@ func NewPaths(root, home, stateDir string) Paths {
 	}
 	// Lo que desarma el gate de cualquier IDE: sus hooks y la configuración que
 	// los apaga o aprueba sola.
-	p.Protected = []string{".git", ".coyote", "coyote/approvals", "coyote/ledger", "coyote/project.yaml", "coyote/infra.yaml", ".claude/settings.json",
+	p.Protected = []string{".git", ".coyote", "coyote/approvals", "coyote/ledger", "coyote/project.yaml", "coyote/infra.yaml", "coyote/hub.yaml", ".claude/settings.json",
 		".claude/settings.local.json", ".claude/hooks", ".cursor/hooks.json", ".cursor/hooks",
 		".codex/hooks.json", ".codex/hooks", ".codex/config.toml", ".gemini/settings.json", ".gemini/hooks",
 		".github/hooks", ".windsurf/hooks.json", ".windsurf/hooks", ".devin/hooks.json", ".devin/hooks.v1.json",
@@ -395,6 +395,7 @@ var shellProtected = []struct {
 	{re: regexp.MustCompile(`(?i)coyote/approvals`), why: "los registros de aprobación"},
 	{re: regexp.MustCompile(`(?i)coyote/project\.yaml`), why: "la configuración del proyecto (autonomía)"},
 	{re: regexp.MustCompile(`(?i)coyote/infra\.yaml`), why: "el inventario de la infraestructura"},
+	{re: regexp.MustCompile(`(?i)coyote/hub\.yaml`), why: "los admins y el presupuesto de la organización"},
 	{re: regexp.MustCompile(`(?i)(^|[\s/'"=])\.coyote($|[\s/'";|&)])`), why: "el estado local de coyote"},
 	{re: regexp.MustCompile(`(?i)\.ssh/|\.gnupg|\.aws/|\.config/gh\b|\.git-credentials|\.netrc|\.docker/config\.json|\.kube/config|keychains/|\.password-store|\.vault-token`), why: "credenciales", cred: true},
 	{re: regexp.MustCompile(`(?i)\bsecurity\s+(find|dump|export)-|\bsecret-tool\s+lookup|\bgh\s+auth\s+token`), why: "credenciales del llavero o de gh", cred: true},

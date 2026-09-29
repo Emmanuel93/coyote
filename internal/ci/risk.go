@@ -33,7 +33,7 @@ var DefaultRules = []Rule{
 	{R3, []string{"**/*.tf", "**/*.tf.json", "**/*.tfvars", "**/*.tfvars.json", "**/terragrunt.hcl", "**/.terraform.lock.hcl",
 		"**/terraform/**", "**/helm/**", "**/k8s/**", "**/kubernetes/**", "**/Dockerfile", "**/docker-compose*.{yml,yaml}"}, "infraestructura"},
 	{R3, []string{".claude/**", ".cursor/**", ".codex/**", ".gemini/**", ".github/hooks/**", ".windsurf/**", ".devin/**",
-		"coyote/project.yaml", "coyote/infra.yaml", "coyote/standards/**", "coyote/approvals/**"}, "el gate o el estándar"},
+		"coyote/project.yaml", "coyote/infra.yaml", "coyote/hub.yaml", "coyote/standards/**", "coyote/approvals/**"}, "el gate o el estándar"},
 	{R2, []string{"**/openapi*.{yaml,yml,json}", "**/swagger*.{yaml,yml,json}", "**/asyncapi*.{yaml,yml}", "**/*.proto", "**/*.avsc", "**/*.graphql"}, "un contrato de API"},
 	{R2, []string{"go.mod", "**/pom.xml", "**/build.gradle", "**/build.gradle.kts", "**/package.json", "**/pubspec.yaml", "**/requirements*.txt", "**/pyproject.toml", "**/Cargo.toml"}, "las dependencias"},
 	{R2, []string{"**/application*.{yml,yaml,properties}", "**/bootstrap*.{yml,yaml,properties}"}, "la configuración del servicio"},

@@ -10,6 +10,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -21,6 +22,7 @@ import (
 	coyote "github.com/Emmanuel93/coyote"
 
 	"github.com/Emmanuel93/coyote/internal/fsx"
+	"github.com/Emmanuel93/coyote/internal/hub"
 )
 
 // DefaultRef es el nombre del estándar que trae la herramienta.
@@ -124,6 +126,8 @@ type Standard struct {
 	// Unjustified son reglas MUST que una capa intentó redefinir con otros checks
 	// o perfiles sin reason; se mantiene la definición anterior y el lint falla (S1).
 	Unjustified []string
+	// Hub es el hub que rige, con su commit; nil si el estándar no lo usa.
+	Hub *hub.Hub
 }
 
 // placeholders son motivos de relleno que no cuentan como motivo.
@@ -185,11 +189,11 @@ func LoadDefault() (*File, error) {
 
 // Load resuelve la cadena extends desde coyote/standards/rules.yaml del proyecto.
 func Load(root string, now time.Time) (*Standard, error) {
-	chain, warnings, err := resolve(root)
+	chain, warnings, h, err := resolve(root)
 	if err != nil {
 		return nil, err
 	}
-	st := &Standard{Warnings: warnings}
+	st := &Standard{Warnings: warnings, Hub: h}
 	if len(chain) == 0 || chain[0].name != DefaultRef {
 		st.Detached = true
 		for _, l := range chain {
@@ -205,6 +209,21 @@ func Load(root string, now time.Time) (*Standard, error) {
 		st.apply(l, now)
 	}
 	return st, nil
+}
+
+// Chain describe las capas para mostrarlas; la primera del hub lleva su
+// organización, ref y commit.
+func (s *Standard) Chain() string {
+	parts := make([]string, 0, len(s.Layers))
+	shown := false
+	for _, l := range s.Layers {
+		if s.Hub != nil && !shown && strings.HasPrefix(l, "hub") {
+			l += " " + s.Hub.String()
+			shown = true
+		}
+		parts = append(parts, l)
+	}
+	return strings.Join(parts, " → ")
 }
 
 // Dropped devuelve las reglas del default que no están en un estándar desprendido.
@@ -230,101 +249,127 @@ type layer struct {
 	file *File
 }
 
-func resolve(root string) ([]layer, []string, error) {
+// source es de dónde sale una capa: un archivo del disco o un archivo del
+// commit que rige en el hub.
+type source struct {
+	hub  *hub.Hub
+	path string // ruta absoluta en disco, o relativa dentro del hub
+}
+
+func (s source) key() string {
+	if s.hub != nil {
+		return "hub:" + s.hub.Commit + ":" + s.path
+	}
+	return s.path
+}
+
+func (s source) String() string {
+	if s.hub != nil {
+		return s.path + " del hub " + s.hub.String()
+	}
+	return s.path
+}
+
+func (s source) read() ([]byte, error) {
+	if s.hub != nil {
+		return s.hub.Read(s.path)
+	}
+	return fsx.ReadCapped(s.path, fsx.MaxText)
+}
+
+func (s source) missing(err error) bool {
+	if s.hub != nil {
+		return errors.Is(err, hub.ErrNotFound)
+	}
+	return os.IsNotExist(err)
+}
+
+func resolve(root string) ([]layer, []string, *hub.Hub, error) {
 	var warnings []string
 	var chain []layer
+	var h *hub.Hub
 	seen := map[string]bool{}
-	cur := filepath.Join(root, "coyote", "standards", "rules.yaml")
+	cur := source{path: filepath.Join(root, "coyote", "standards", "rules.yaml")}
 	name := "proyecto"
 	for depth := 0; depth <= 6; depth++ {
-		switch cur {
+		switch cur.path {
 		case DefaultRef:
 			f, err := LoadDefault()
 			if err != nil {
-				return nil, warnings, err
+				return nil, warnings, h, err
 			}
-			return append([]layer{{DefaultRef, f}}, chain...), warnings, nil
+			return append([]layer{{DefaultRef, f}}, chain...), warnings, h, nil
 		case "none":
-			return chain, warnings, nil
+			return chain, warnings, h, nil
 		}
-		if seen[cur] {
-			return nil, warnings, fmt.Errorf("ciclo en extends: %s", cur)
+		if seen[cur.key()] {
+			return nil, warnings, h, fmt.Errorf("ciclo en extends: %s", cur)
 		}
-		seen[cur] = true
-		data, err := fsx.ReadCapped(cur, fsx.MaxText)
+		seen[cur.key()] = true
+		data, err := cur.read()
 		if err != nil {
-			if os.IsNotExist(err) && depth == 0 {
-				cur = DefaultRef
+			switch {
+			case cur.missing(err) && depth == 0:
+				cur = source{path: DefaultRef}
+				continue
+			case cur.missing(err) && cur.hub != nil && cur.path == hub.StandardsFile:
+				warnings = append(warnings, fmt.Sprintf("el hub %s no tiene %s; debajo del proyecto rige coyote:default", cur.hub, hub.StandardsFile))
+				cur = source{path: DefaultRef}
 				continue
 			}
-			return nil, warnings, fmt.Errorf("estándar %s: %w", cur, err)
+			return nil, warnings, h, fmt.Errorf("estándar %s: %w", cur, err)
 		}
 		f, err := ParseFile(data)
 		if err != nil {
-			return nil, warnings, fmt.Errorf("%s: %w", cur, err)
+			return nil, warnings, h, fmt.Errorf("%s: %w", cur, err)
 		}
 		chain = append([]layer{{name, f}}, chain...)
 		next := strings.TrimSpace(f.Extends)
 		switch {
 		case next == "" || next == DefaultRef:
-			cur = DefaultRef
+			cur = source{path: DefaultRef}
 		case next == "none":
-			cur = "none"
+			cur = source{path: "none"}
 		case next == "hub":
-			if hub := hubRules(root); hub != "" {
-				cur, name = hub, "hub"
-				if inside(root, hub) {
-					name = "hub dentro del repo" // lo controla el propio proyecto: no tiene la exención del hub
-				}
-			} else {
-				warnings = append(warnings, "extends: hub sin hub local; se usa coyote:default (el hub remoto llega en v0.2)")
-				cur = DefaultRef
+			if cur.hub != nil {
+				return nil, warnings, h, fmt.Errorf("%s: el hub no puede extender otro hub", cur)
 			}
+			ref, err := hub.FromProject(root)
+			if err != nil {
+				return nil, warnings, h, err
+			}
+			if h, err = hub.Open(root, ref); err != nil {
+				return nil, warnings, nil, err
+			}
+			if h == nil {
+				warnings = append(warnings, "extends: hub, pero coyote/project.yaml no declara hub; rige coyote:default")
+				cur = source{path: DefaultRef}
+				continue
+			}
+			cur, name = source{hub: h, path: hub.StandardsFile}, "hub"
+			if hub.Inside(root, h.Dir) {
+				name = "hub dentro del repo" // lo controla el propio proyecto: no tiene la exención del hub
+			}
+		case cur.hub != nil:
+			// Dentro del hub, un extends relativo se lee del mismo commit y no
+			// sale del repo: la capa de la organización no depende de la
+			// máquina de nadie.
+			if strings.HasPrefix(next, "/") || filepath.IsAbs(next) {
+				return nil, warnings, h, fmt.Errorf("%s: extends %q es una ruta absoluta; dentro del hub va relativa", cur, next)
+			}
+			rel, err := hub.CleanRel(path.Join(path.Dir(cur.path), filepath.ToSlash(next)))
+			if err != nil {
+				return nil, warnings, h, fmt.Errorf("%s: extends %q sale del hub", cur, next)
+			}
+			cur = source{hub: cur.hub, path: rel}
 		default:
 			if !filepath.IsAbs(next) {
-				next = filepath.Join(filepath.Dir(cur), next)
+				next = filepath.Join(filepath.Dir(cur.path), next)
 			}
-			cur, name = filepath.Clean(next), strings.TrimSpace(f.Extends)
+			cur, name = source{path: filepath.Clean(next)}, strings.TrimSpace(f.Extends)
 		}
 	}
-	return nil, warnings, fmt.Errorf("cadena extends demasiado larga")
-}
-
-// inside informa si path queda dentro de root.
-func inside(root, path string) bool {
-	r, err := filepath.Rel(filepath.Clean(root), filepath.Clean(path))
-	return err == nil && r != ".." && !strings.HasPrefix(r, ".."+string(filepath.Separator))
-}
-
-// hubRules devuelve el rules.yaml del hub si project.yaml apunta a un hub local.
-func hubRules(root string) string {
-	data, err := fsx.ReadCapped(filepath.Join(root, "coyote", "project.yaml"), fsx.MaxText)
-	if err != nil {
-		return ""
-	}
-	var p struct {
-		Hub string `yaml:"hub"`
-	}
-	if yaml.Unmarshal(data, &p) != nil {
-		return ""
-	}
-	h := strings.TrimSpace(p.Hub)
-	if h == "" || strings.Contains(h, "://") || strings.HasPrefix(h, "git@") {
-		return ""
-	}
-	if strings.HasPrefix(h, "~/") {
-		if home, err := os.UserHomeDir(); err == nil {
-			h = filepath.Join(home, h[2:])
-		}
-	}
-	if !filepath.IsAbs(h) {
-		h = filepath.Join(root, h)
-	}
-	p2 := filepath.Join(h, "coyote", "standards", "rules.yaml")
-	if _, err := os.Stat(p2); err != nil {
-		return ""
-	}
-	return p2
+	return nil, warnings, h, fmt.Errorf("cadena extends demasiado larga")
 }
 
 func (s *Standard) apply(l layer, now time.Time) {

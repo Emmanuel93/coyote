@@ -39,13 +39,14 @@ var commands []*command
 
 func init() {
 	commands = []*command{
-		{"init", "[nombre] [--type T] [--purpose TEXTO] [--hub URL]", "crea o adopta un proyecto coyote", cmdInit},
+		{"init", "[nombre] [--type T] [--purpose TEXTO] [--hub RUTA]", "crea o adopta un proyecto coyote", cmdInit},
 		{"status", "[--json]", "estado: documentos, estándar, ledger, git", cmdStatus},
 		{"note", "<texto> --type T [--scope S] [--ref R] [--agent A]", "agrega una entrada a CONTEXT.coyote.md", cmdNote},
 		{"record", "<type> <qué> [--scope S] [--tokens e/c/s] [--cost e+s]", "escribe un evento en el ledger", cmdRecord},
 		{"log", "[--limit N] [--type T] [--user U] [--since 7d]", "muestra el ledger con totales", cmdLog},
 		{"commit", "-m <mensaje> [-a] [--ws W]", "commit con tu autoría, formato R2 y sin atribución de IA", cmdCommit},
 		{"standards", "lint | show | explain <id> | diff", "estándar por capas y su validación", cmdStandards},
+		{"hub", "init [carpeta] [--org NOMBRE] | status [--json]", "hub de la organización: estándar, admins, presupuesto y proyectos, leído en un commit (ADR-0018)", cmdHub},
 		{"attribution", "check [rutas] | scrub [archivo]", "detecta o quita atribución a herramientas de IA", cmdAttribution},
 		{"gate", "check [--ide IDE] < hook.json", "gate humano para los hooks previos de los IDEs (ADR-0009)", cmdGate},
 		{"secrets", "list | scan [--staged | --range base...head]", "archivos de secretos y sus nombres, sin valores; secretos escritos en el repo (ADR-0016)", cmdSecrets},

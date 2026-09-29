@@ -2,7 +2,7 @@
 version: 1
 name: {{.Name}}
 type: {{.Type}}
-hub: {{printf "%q" .Hub}}        # URL o ruta del hub de la organización; vacío si no hay
+hub: {{printf "%q" .Hub}}        # clon del hub de la organización, o { path, ref }; vacío si no hay (ADR-0018)
 language: { docs: es, code: en }
 autonomy: manual                 # manual | supervised | autonomous (A1, A4)
 budgets:

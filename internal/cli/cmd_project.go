@@ -32,7 +32,7 @@ func cmdInit(a *app, args []string) error {
 	fs := a.flags("init", "[nombre] [--type T] [--purpose TEXTO] [--hub URL]")
 	typ := fs.String("type", "other", "tipo: "+strings.Join(ccfdoc.ProjectTypes, ", "))
 	purpose := fs.String("purpose", "", "qué hace el repo, en una línea")
-	hub := fs.String("hub", "", "URL o ruta del hub de la organización")
+	hub := fs.String("hub", "", "ruta del clon del hub de la organización (ADR-0018)")
 	noGit := fs.Bool("no-git", false, "no inicializa git")
 	noHooks := fs.Bool("no-hooks", false, "no instala el hook commit-msg")
 	noClaude := fs.Bool("no-claude", false, "no crea .claude/settings.json")
@@ -87,17 +87,19 @@ type statusReport struct {
 	Features   map[string]bool   `json:"features"`
 	Documents  map[string]string `json:"documents"`
 	Layers     []string          `json:"layers"`
-	Must       int               `json:"must"`
-	Should     int               `json:"should"`
-	Waived     int               `json:"waived"`
-	Events     int               `json:"events"`
-	Today      int               `json:"events_today"`
-	Last       string            `json:"last_event,omitempty"`
-	Approvals  int               `json:"approvals"`
-	Gate       []string          `json:"gate"`
-	Pending    int               `json:"pending"`
-	Warnings   []string          `json:"warnings,omitempty"`
-	LedgerBugs int               `json:"ledger_invalid_lines"`
+	Hub        string            `json:"hub,omitempty"` // organización, ref y commit del hub que rige
+	chain      string
+	Must       int      `json:"must"`
+	Should     int      `json:"should"`
+	Waived     int      `json:"waived"`
+	Events     int      `json:"events"`
+	Today      int      `json:"events_today"`
+	Last       string   `json:"last_event,omitempty"`
+	Approvals  int      `json:"approvals"`
+	Gate       []string `json:"gate"`
+	Pending    int      `json:"pending"`
+	Warnings   []string `json:"warnings,omitempty"`
+	LedgerBugs int      `json:"ledger_invalid_lines"`
 }
 
 func cmdStatus(a *app, args []string) error {
@@ -128,7 +130,10 @@ func cmdStatus(a *app, args []string) error {
 	if f := checkAgentsMD(&standards.Context{Root: root, Standard: st, Autonomy: cfg.Autonomy}, standards.Check{}); len(f) > 0 {
 		r.Documents["AGENTS.md"] = f[0].Msg
 	}
-	r.Layers, r.Warnings = st.Layers, st.Warnings
+	r.Layers, r.Warnings, r.chain = st.Layers, st.Warnings, st.Chain()
+	if st.Hub != nil {
+		r.Hub = st.Hub.String()
+	}
 	r.Must, r.Should, r.Waived = res.Count("MUST", false), res.Count("SHOULD", false), res.Count("", true)
 	entries, probs, err := ledger.Open(root).ReadAll()
 	if err != nil {
@@ -175,7 +180,7 @@ func cmdStatus(a *app, args []string) error {
 	for _, name := range []string{ccfdoc.ReadmeFile, ccfdoc.ContextFile, "AGENTS.md"} {
 		fmt.Fprintf(tw, "  %s\t%s\n", name, r.Documents[name])
 	}
-	fmt.Fprintf(tw, "Estándar\t%s · %d MUST · %d SHOULD · %d dispensadas\n", strings.Join(r.Layers, " → "), r.Must, r.Should, r.Waived)
+	fmt.Fprintf(tw, "Estándar\t%s · %d MUST · %d SHOULD · %d dispensadas\n", r.chain, r.Must, r.Should, r.Waived)
 	ledgerLine := fmt.Sprintf("%d eventos · %d hoy", r.Events, r.Today)
 	if r.Last != "" {
 		ledgerLine += " · último " + shortText(r.Last, 60)

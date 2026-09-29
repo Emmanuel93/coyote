@@ -74,6 +74,14 @@ func TestInfraGate(t *testing.T) {
 	if d := ps.Evaluate(w); d.Verdict != Block {
 		t.Errorf("escribir coyote/infra.yaml: %s", d.Verdict)
 	}
+	// Tampoco los admins y el presupuesto de la organización (ADR-0018).
+	w = claude(t, "Edit", map[string]any{"file_path": filepath.Join(root, "coyote", "hub.yaml"), "old_string": "admins: []", "new_string": "admins: [\"@ana\"]"}, root)
+	if d := ps.Evaluate(w); d.Verdict != Block {
+		t.Errorf("editar coyote/hub.yaml: %s", d.Verdict)
+	}
+	if d := bash("sed -i 's/monthly_usd: 100/monthly_usd: 0/' coyote/hub.yaml"); d.Verdict != Block {
+		t.Errorf("sed sobre coyote/hub.yaml: %s", d.Verdict)
+	}
 	if !InfraEffect("helm install x ./chart") || InfraEffect("helm list") {
 		t.Error("InfraEffect")
 	}

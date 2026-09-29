@@ -13,7 +13,7 @@ coyote:default  →  hub de la organización  →  proyecto
 ```
 
 - **coyote:default** viene embebido en el binario: reglas R1–R17 (repo, commits, documentos, atribución) y A1–A4 (agentes). Se lee con `coyote standards show`.
-- **hub**: el estándar de la organización. En v0.1 se usa si `coyote/project.yaml` apunta a un hub local (`hub: ../acme-hub` o `~/Documents/acme-hub`); el hub remoto llega en v0.2.
+- **hub**: el estándar de la organización, en `coyote/standards/rules.yaml` del hub. Se usa si `coyote/project.yaml` declara el hub (`hub: { path: ../acme-hub, ref: main }`) y se lee del commit de esa ref, nunca del árbol de trabajo (ver hub-v1 y ADR-0018).
 - **proyecto**: `coyote/standards/rules.yaml` del repo. Si no existe, rige el default.
 
 Valores de `extends`: `coyote:default` (o vacío), `hub`, `none` (sin capas previas) o una ruta a otro `rules.yaml`, relativa al archivo que la declara. La cadena admite hasta seis saltos y rechaza ciclos.

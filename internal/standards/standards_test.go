@@ -2,6 +2,7 @@ package standards
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -230,10 +231,32 @@ func TestMeaningful(t *testing.T) {
 	}
 }
 
+// commitAll inicializa un repo git en dir (rama main) y hace commit de todo.
+func commitAll(t *testing.T, dir string) string {
+	t.Helper()
+	run := func(args ...string) string {
+		cmd := exec.Command("git", append([]string{"-C", dir, "-c", "user.name=Ana", "-c", "user.email=ana@example.com", "-c", "commit.gpgsign=false"}, args...)...)
+		cmd.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1", "HOME="+dir)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".git")); err != nil {
+		run("init", "-q")
+		run("checkout", "-q", "-b", "main")
+	}
+	run("add", "-A")
+	run("commit", "-q", "--allow-empty", "-m", "chore: hub")
+	return run("rev-parse", "HEAD")
+}
+
 func TestHubDentroDelRepo(t *testing.T) {
 	root := t.TempDir()
 	write(t, root, "coyote/project.yaml", "version: 1\nname: demo\nhub: coyote/fakehub\n")
 	write(t, root, "coyote/fakehub/coyote/standards/rules.yaml", "version: 1\nrules:\n  - id: R15\n    level: MUST\n    profiles: [nadie]\n")
+	commitAll(t, filepath.Join(root, "coyote/fakehub"))
 	write(t, root, "coyote/standards/rules.yaml", "version: 1\nextends: hub\nrules: []\n")
 	st, err := Load(root, now)
 	if err != nil {
@@ -241,5 +264,100 @@ func TestHubDentroDelRepo(t *testing.T) {
 	}
 	if len(st.Unjustified) != 1 {
 		t.Fatalf("un hub dentro del repo no tiene la exención del hub: %v %v", st.Layers, st.Unjustified)
+	}
+}
+
+func TestHubSeLeeDeSuCommit(t *testing.T) {
+	base := t.TempDir()
+	hubDir := filepath.Join(base, "acme-hub")
+	write(t, hubDir, "coyote/hub.yaml", "version: 1\norg: acme\nadmins: [\"@ana\"]\n")
+	write(t, hubDir, "coyote/standards/rules.yaml", "version: 1\nextends: base.yaml\nrules:\n  - id: H1\n    title: Regla de la organización\n    level: SHOULD\n")
+	write(t, hubDir, "coyote/standards/base.yaml", "version: 1\nrules:\n  - id: H0\n    title: Base de la organización\n    level: MAY\n")
+	first := commitAll(t, hubDir)
+	root := filepath.Join(base, "shop")
+	write(t, root, "coyote/project.yaml", "version: 1\nname: shop\nhub: ../acme-hub\n")
+	write(t, root, "coyote/standards/rules.yaml", "version: 1\nextends: hub\nrules: []\n")
+
+	st, err := Load(root, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Hub == nil || st.Hub.Commit != first || st.Find("H1") == nil || st.Find("H0") == nil {
+		t.Fatalf("el hub rige desde su commit, con su extends relativo: %+v %v", st.Hub, st.Layers)
+	}
+	if got := strings.Join(st.Layers, " > "); got != "coyote:default > hub > hub > proyecto" {
+		t.Fatalf("capas: %s", got)
+	}
+
+	// Un cambio sin commit en el hub no rige.
+	write(t, hubDir, "coyote/standards/rules.yaml", "version: 1\nrules:\n  - id: R15\n    level: MAY\n")
+	if st, err = Load(root, now); err != nil || st.Find("H1") == nil || st.Find("R15").Level != "MUST" {
+		t.Fatalf("lo que no tiene commit en el hub no rige: %v", err)
+	}
+
+	// Con commit, rige; y un ref fijado sigue leyendo el commit viejo.
+	commitAll(t, hubDir)
+	if st, err = Load(root, now); err != nil || st.Find("H1") != nil {
+		t.Fatalf("el commit nuevo del hub rige: %v", err)
+	}
+	write(t, root, "coyote/project.yaml", "version: 1\nname: shop\nhub: { path: ../acme-hub, ref: "+first+" }\n")
+	if st, err = Load(root, now); err != nil || st.Find("H1") == nil || st.Hub.Commit != first {
+		t.Fatalf("un ref fijado lee ese commit: %v", err)
+	}
+}
+
+func TestHubQueNoSeLeeEsError(t *testing.T) {
+	base := t.TempDir()
+	root := filepath.Join(base, "shop")
+	write(t, root, "coyote/standards/rules.yaml", "version: 1\nextends: hub\nrules: []\n")
+	cases := map[string]string{
+		"sin clon":             "hub: ../no-existe\n",
+		"URL":                  "hub: https://github.com/acme/hub\n",
+		"ref que no existe":    "hub: { path: ../acme-hub, ref: v9 }\n",
+		"ref con opciones":     "hub: { path: ../acme-hub, ref: --output=x }\n",
+		"carpeta de otro repo": "hub: ../acme-hub/coyote\n",
+		"clave desconocida":    "hub: { path: ../acme-hub, rama: main }\n",
+	}
+	hubDir := filepath.Join(base, "acme-hub")
+	write(t, hubDir, "coyote/standards/rules.yaml", "version: 1\nrules: []\n")
+	commitAll(t, hubDir)
+	for name, decl := range cases {
+		write(t, root, "coyote/project.yaml", "version: 1\nname: shop\n"+decl)
+		if _, err := Load(root, now); err == nil {
+			t.Errorf("%s: un hub declarado que no se puede leer es un error, no coyote:default", name)
+		}
+	}
+	// Sin hub declarado, extends: hub avisa y rige el default.
+	write(t, root, "coyote/project.yaml", "version: 1\nname: shop\nhub: \"\"\n")
+	st, err := Load(root, now)
+	if err != nil || len(st.Warnings) == 0 {
+		t.Fatalf("sin hub declarado: aviso y default: %v %v", err, st)
+	}
+}
+
+func TestHubNoSaleDeSuRepo(t *testing.T) {
+	base := t.TempDir()
+	hubDir := filepath.Join(base, "acme-hub")
+	write(t, base, "fuera.yaml", "version: 1\nrules:\n  - id: R15\n    level: MAY\n")
+	root := filepath.Join(base, "shop")
+	write(t, root, "coyote/project.yaml", "version: 1\nname: shop\nhub: ../acme-hub\n")
+	write(t, root, "coyote/standards/rules.yaml", "version: 1\nextends: hub\nrules: []\n")
+	for _, ext := range []string{"../../../fuera.yaml", filepath.Join(base, "fuera.yaml")} {
+		write(t, hubDir, "coyote/standards/rules.yaml", "version: 1\nextends: "+ext+"\nrules: []\n")
+		commitAll(t, hubDir)
+		if _, err := Load(root, now); err == nil {
+			t.Errorf("extends %s desde el hub: no sale del repo del hub", ext)
+		}
+	}
+	// Un symlink en el hub no se sigue.
+	if err := os.Remove(filepath.Join(hubDir, "coyote/standards/rules.yaml")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(base, "fuera.yaml"), filepath.Join(hubDir, "coyote/standards/rules.yaml")); err != nil {
+		t.Fatal(err)
+	}
+	commitAll(t, hubDir)
+	if _, err := Load(root, now); err == nil || !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("un symlink en el hub no se sigue: %v", err)
 	}
 }

@@ -11,6 +11,7 @@ import (
 	"github.com/Emmanuel93/coyote/internal/ccfdoc"
 	"github.com/Emmanuel93/coyote/internal/fsx"
 	"github.com/Emmanuel93/coyote/internal/gitx"
+	"github.com/Emmanuel93/coyote/internal/hub"
 	"github.com/Emmanuel93/coyote/internal/identity"
 	"github.com/Emmanuel93/coyote/internal/project"
 	"github.com/Emmanuel93/coyote/internal/standards"
@@ -64,7 +65,7 @@ func standardsLint(a *app, args []string) error {
 		}
 		printFindings(a, res)
 		fmt.Fprintf(a.stdout, "Capas: %s · %d reglas verificadas · %d MUST · %d SHOULD · %d dispensadas\n",
-			strings.Join(st.Layers, " → "), res.Checked, res.Count("MUST", false), res.Count("SHOULD", false), res.Count("", true))
+			st.Chain(), res.Checked, res.Count("MUST", false), res.Count("SHOULD", false), res.Count("", true))
 		if n := res.ScriptsSkipped(); n > 0 {
 			fmt.Fprintf(a.stdout, "%d checks script sin correr: revísalos en rules.yaml y usa --scripts\n", n)
 		}
@@ -128,7 +129,7 @@ func standardsShow(a *app, onlyDiff bool, args []string) error {
 		return err
 	}
 	profile, _ := profileAndWaivers(root, cfg)
-	head := fmt.Sprintf("Capas: %s · perfil %s", strings.Join(st.Layers, " → "), profile)
+	head := fmt.Sprintf("Capas: %s · perfil %s", st.Chain(), profile)
 	if profile != cfg.Type {
 		head += fmt.Sprintf(" (el tipo del proyecto es %s)", cfg.Type)
 	}
@@ -332,6 +333,16 @@ func cmdDoctor(a *app, args []string) error {
 		}
 		add(name, state, detail)
 	}
+	switch h, err := a.openHub(root, cfg); {
+	case err != nil:
+		add("hub", "fail", err.Error())
+	case h == nil:
+		add("hub", "ok", "sin hub: el estándar parte de coyote:default y la web no tiene admins de la organización")
+	case h.Missing:
+		add("hub", "warn", fmt.Sprintf("%s no tiene %s en ese commit: sin admins, presupuesto ni proyectos", h, hub.ConfFile))
+	default:
+		add("hub", "ok", fmt.Sprintf("%s · rige lo que tiene commit, no el árbol de trabajo", h))
+	}
 	st, res, err := a.lint(root, cfg, false)
 	if err != nil {
 		add("estándar", "fail", err.Error())
@@ -341,7 +352,7 @@ func cmdDoctor(a *app, args []string) error {
 		} else {
 			add("AGENTS.md", "ok", "vigente")
 		}
-		state, detail := "ok", fmt.Sprintf("%s · %d reglas verificadas", strings.Join(st.Layers, " → "), res.Checked)
+		state, detail := "ok", fmt.Sprintf("%s · %d reglas verificadas", st.Chain(), res.Checked)
 		if n := res.Count("SHOULD", false); n > 0 {
 			state, detail = "warn", detail+fmt.Sprintf(" · %d SHOULD", n)
 		}

@@ -1,0 +1,11 @@
+# Hub de la organización (ADR-0018). Cada proyecto lo declara en coyote/project.yaml
+# (hub: { path: <clon>, ref: main }) y rige lo que tiene commit en esa ref, nunca el
+# árbol de trabajo: un cambio aquí rige cuando llega a la rama por su PR.
+version: 1
+org: {{.Org}}
+admins: ["@{{.User}}"]      # ven en la web los costos de todas las personas (D10)
+budgets:
+  monthly_usd: 0             # tope mensual de la organización, suma de sus proyectos; 0 = sin tope
+projects: []                 # proyectos de la organización, con la ruta de su clon relativa al hub
+# projects:
+#   - { name: shop, path: ../shop, repo: owner/shop }

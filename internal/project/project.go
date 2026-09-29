@@ -23,6 +23,7 @@ import (
 	"github.com/Emmanuel93/coyote/internal/ccfdoc"
 	"github.com/Emmanuel93/coyote/internal/fsx"
 	"github.com/Emmanuel93/coyote/internal/gitx"
+	"github.com/Emmanuel93/coyote/internal/hub"
 	"github.com/Emmanuel93/coyote/internal/identity"
 	"github.com/Emmanuel93/coyote/internal/ledger"
 	"github.com/Emmanuel93/coyote/internal/secrets"
@@ -51,10 +52,14 @@ type RepoRef struct {
 
 // Config es coyote/project.yaml.
 type Config struct {
-	Version  int    `yaml:"version"`
-	Name     string `yaml:"name"`
-	Type     string `yaml:"type"`
-	Hub      string `yaml:"hub,omitempty"`
+	Version int    `yaml:"version"`
+	Name    string `yaml:"name"`
+	Type    string `yaml:"type"`
+	// Hub es el clon del hub de la organización y la ref que rige (ADR-0018).
+	Hub hub.Ref `yaml:"hub,omitempty"`
+	// Admins ven en la web los costos de todas las personas del proyecto,
+	// además de los admins del hub (D10).
+	Admins   []string `yaml:"admins,omitempty"`
 	Language struct {
 		Docs string `yaml:"docs,omitempty"`
 		Code string `yaml:"code,omitempty"`
@@ -175,6 +180,17 @@ func (c *Config) Validate() error {
 	if !valid {
 		errs = append(errs, fmt.Sprintf("autonomy %q inválido (%s)", c.Autonomy, strings.Join(Autonomies, ", ")))
 	}
+	if err := c.Hub.Validate(); err != nil {
+		errs = append(errs, err.Error())
+	}
+	for i, a := range c.Admins {
+		h, err := hub.NormalizeHandle(a)
+		if err != nil {
+			errs = append(errs, "admins: "+err.Error())
+			continue
+		}
+		c.Admins[i] = h
+	}
 	for name := range c.Features {
 		if _, ok := KnownFeatures[name]; !ok {
 			names := make([]string, 0, len(KnownFeatures))
@@ -212,6 +228,7 @@ func (c *Config) Validate() error {
 // InitOptions configura coyote init.
 type InitOptions struct {
 	Dir, Name, Type, Hub, Purpose string
+	Org                           string // organización de un hub; por defecto, el nombre
 	User                          identity.Person
 	NoGit, NoHooks, NoClaude      bool
 	Now                           time.Time
@@ -254,6 +271,15 @@ func Init(o InitOptions) (*InitResult, error) {
 	if o.Purpose == "" {
 		o.Purpose = "TODO: qué hace este repo en una línea"
 	}
+	if err := (hub.Ref{Path: strings.TrimSpace(o.Hub)}).Validate(); err != nil {
+		return nil, err
+	}
+	if o.Org == "" {
+		o.Org = o.Name
+	}
+	if !hub.ValidOrg(o.Org) {
+		return nil, fmt.Errorf("organización %q inválida: letras, números, punto, guion o guion bajo", o.Org)
+	}
 	res := &InitResult{Root: dir, Name: o.Name}
 	if !o.NoGit && !gitx.IsRepo(dir) {
 		if err := gitx.Init(dir); err != nil {
@@ -261,7 +287,7 @@ func Init(o InitOptions) (*InitResult, error) {
 		}
 		res.GitInit = true
 	}
-	data := map[string]string{"Name": o.Name, "Type": o.Type, "Hub": o.Hub, "User": o.User.Slug,
+	data := map[string]string{"Name": o.Name, "Type": o.Type, "Hub": strings.TrimSpace(o.Hub), "User": o.User.Slug, "Org": o.Org,
 		"Date": o.Now.Format("2006-01-02"), "Purpose": strings.ReplaceAll(o.Purpose, "|", "/")}
 	files := []struct {
 		tmpl, dst string
@@ -275,6 +301,8 @@ func Init(o InitOptions) (*InitResult, error) {
 		{"project.yaml.tmpl", ConfigPath, false},
 		{"rules.yaml.tmpl", "coyote/standards/rules.yaml", false},
 		{"claude-settings.json.tmpl", ".claude/settings.json", o.NoClaude},
+		{"hub.yaml.tmpl", hub.ConfFile, o.Type != "hub"},
+		{"domains-README.md.tmpl", hub.DomainsDir + "/README.md", o.Type != "hub"},
 	}
 	for _, f := range files {
 		if f.skip {
