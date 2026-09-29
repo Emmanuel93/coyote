@@ -35,3 +35,5 @@
 2026-09-29T05:20Z|@eramirezhdez/coyote-dev|W-0006|coyote|doc|release|reporte de v0.6.0 para G6 y secrets list --json vacío|-|-|-|ok
 2026-09-29T06:03Z|@eramirezhdez|W-0006|coyote|close|-|cierre de W-0006: 0 corridas, $0.00|doc:coyote/workstreams/W-0006-security/close.md|0/0/0|$0+$0|ok
 2026-09-29T06:03Z|@eramirezhdez/claude-code|W-0006|coyote|doc|release|aprobación de G6 para v0.6.0|-|-|-|ok
+2026-09-29T06:04Z|@eramirezhdez/claude-code|-|coyote|rel|release|v0.6.0 etiquetada en la rama v0.6 y binarios generados|tag:v0.6.0 sha:5d20669|-|-|ok
+2026-09-29T06:04Z|@eramirezhdez/claude-code|W-0006|coyote|chore|release|registra el release v0.6.0 en el ledger|-|-|-|ok
