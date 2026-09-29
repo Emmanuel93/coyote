@@ -100,3 +100,64 @@ func TestInfraGate(t *testing.T) {
 		}
 	}
 }
+
+// TestInfraGateSegundaRevision: binarios con sufijo, imágenes con etiqueta,
+// escrituras por HTTP a las APIs de alertas y subcomandos que llegan al
+// correr.
+func TestInfraGateSegundaRevision(t *testing.T) {
+	ps, root, _ := testPaths(t)
+	bash := func(cmd string) Decision {
+		return ps.Evaluate(claude(t, "Bash", map[string]any{"command": cmd}, root))
+	}
+	// Sin saber el subcomando, una herramienta de apply se bloquea.
+	for _, c := range []string{
+		"echo apply -auto-approve | xargs terraform",
+		`f() { terraform "$@"; }; f apply -auto-approve`,
+		`set -- apply -auto-approve; terraform "$@"`,
+		"shopt -s expand_aliases\nalias t=terraform\nt apply -auto-approve",
+		"terraform ${x:-apply} -auto-approve",
+		"terraform $(printf 'ap%s' ply) -auto-approve",
+		"tofu $VERB",
+	} {
+		if d := bash(c); d.Verdict != Block {
+			t.Errorf("%q: %s (%s)", c, d.Verdict, d.Reason)
+		}
+	}
+	// Lo que nombra terraform sin correrlo no se bloquea.
+	for _, c := range []string{"cat terraform.tfvars", `git commit -m "chore: xargs terraform plan"`, "terraform plan -var \"region=$REGION\"", `echo "terraform $1"`} {
+		if d := bash(c); d.Verdict == Block {
+			t.Errorf("%q no se bloquea: %s", c, d.Reason)
+		}
+	}
+	// Contra el ambiente con revisor, cargar reglas o silenciar alertas se bloquea
+	// también con el binario de un release, una imagen con etiqueta, por HTTP o
+	// con el subcomando en una variable.
+	inv, err := infra.Parse([]byte(gateInventory + "  alertas:\n    match: [\"mimir.prod.example\", \"am.prod.example\"]\n"))
+	if err != nil {
+		inv, err = infra.Parse([]byte(strings.Replace(gateInventory, `match: ["ENV=prod", "gke_tienda-prod"]`, `match: ["ENV=prod", "gke_tienda-prod", "mimir.prod.example", "am.prod.example"]`, 1)))
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	ps.Infra = inv
+	for _, c := range []string{
+		"./mimirtool-linux-amd64 rules sync --address=https://mimir.prod.example --id=t r.yaml",
+		"docker run grafana/mimirtool:2.14.0 rules sync --address=https://mimir.prod.example --id=t r.yaml",
+		"docker run grafana/mimirtool@sha256:abc rules load --address=https://mimir.prod.example r.yaml",
+		"curl -X POST --data-binary @r.yaml https://mimir.prod.example/prometheus/config/v1/rules/pagos",
+		"curl -XDELETE https://mimir.prod.example/prometheus/config/v1/rules/pagos",
+		`curl -d '{"matchers":[]}' https://am.prod.example/api/v2/silences`,
+		"wget --method=DELETE https://am.prod.example/api/v2/silence/abc",
+		"http POST https://am.prod.example/api/v2/silences matchers:='[]'",
+		"promtool push metrics https://mimir.prod.example/api/v1/push m.txt",
+		"amtool silence ${x:-add} --alertmanager.url=https://am.prod.example alertname=x",
+	} {
+		if d := bash(c); d.Verdict != Block {
+			t.Errorf("%q: %s (%s)", c, d.Verdict, d.Reason)
+		}
+	}
+	// Leer la API de alertas no es un efecto.
+	if d := bash("curl -s https://am.prod.example/api/v2/silences"); d.Verdict == Block {
+		t.Errorf("leer silencios no se bloquea: %s", d.Reason)
+	}
+}

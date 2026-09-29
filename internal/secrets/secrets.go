@@ -465,6 +465,46 @@ func ScanLine(p string, n int, line string) []Finding {
 	return out
 }
 
+// Mask tapa con *** los valores de los secretos que reconoce el escáner en
+// una línea, para mostrarla o guardarla. El marcador de dispensa no aplica:
+// dispensar un hallazgo no es publicar su valor. Tapa también los valores de
+// ejemplo: tapar de más no cuesta nada.
+func Mask(line string) string {
+	type span struct{ a, b int }
+	var spans []span
+	for _, d := range detectors {
+		for _, m := range d.re.FindAllStringSubmatchIndex(line, -1) {
+			if a, b := m[2*d.val], m[2*d.val+1]; a >= 0 && b > a {
+				spans = append(spans, span{a, b})
+			}
+		}
+	}
+	for _, loc := range pemHeaderRe.FindAllStringIndex(line, -1) {
+		if keyBody(line[loc[1]:]) {
+			spans = append(spans, span{loc[1], len(line)})
+		}
+	}
+	if len(spans) == 0 {
+		return line
+	}
+	sort.Slice(spans, func(i, j int) bool { return spans[i].a < spans[j].a })
+	var b strings.Builder
+	last := 0
+	for _, sp := range spans {
+		if sp.b <= last {
+			continue
+		}
+		if sp.a < last {
+			sp.a = last
+		}
+		b.WriteString(line[last:sp.a])
+		b.WriteString("***")
+		last = sp.b
+	}
+	b.WriteString(line[last:])
+	return b.String()
+}
+
 // Binary informa si un contenido parece binario: no se escanea.
 func Binary(data []byte) bool {
 	n := len(data)

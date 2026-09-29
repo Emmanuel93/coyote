@@ -119,11 +119,79 @@ type Paths struct {
 	// existe pero no se puede leer.
 	Infra    *infra.Inventory
 	InfraErr error
+	// GitDirs son las carpetas de git reales del proyecto y del hub
+	// (absolutas): la del checkout, la de un worktree enlazado y su carpeta
+	// común. Nadie las escribe y su configuración no se lee: puede llevar un
+	// token en la URL de un remoto.
+	GitDirs []string
+	// HubDir es el clon del hub declarado (absoluto) y HubPath, como lo
+	// escribe coyote/project.yaml: un comando con efectos sobre el clon se
+	// bloquea (ADR-0018).
+	HubDir, HubPath string
+}
+
+// GitDirsOf devuelve la carpeta .git de dir y, si es un archivo (worktree
+// enlazado o submódulo), la carpeta a la que apunta y su carpeta común.
+func GitDirsOf(dir string) []string {
+	p := filepath.Join(dir, ".git")
+	fi, err := os.Lstat(p)
+	if err != nil {
+		return nil
+	}
+	out := []string{p}
+	if fi.IsDir() {
+		return out
+	}
+	data, err := os.ReadFile(p)
+	if err != nil || len(data) > 4096 {
+		return out
+	}
+	line := strings.TrimSpace(string(data))
+	if !strings.HasPrefix(line, "gitdir:") {
+		return out
+	}
+	gd := strings.TrimSpace(strings.TrimPrefix(line, "gitdir:"))
+	if !filepath.IsAbs(gd) {
+		gd = filepath.Join(dir, gd)
+	}
+	gd = filepath.Clean(gd)
+	out = append(out, gd)
+	if c, err := os.ReadFile(filepath.Join(gd, "commondir")); err == nil && len(c) < 4096 {
+		cd := strings.TrimSpace(string(c))
+		if !filepath.IsAbs(cd) {
+			cd = filepath.Join(gd, cd)
+		}
+		out = append(out, filepath.Clean(cd))
+	}
+	return out
+}
+
+// inGitDir dice si abs está dentro de una carpeta de git: una conocida o
+// cualquier ruta con un componente .git.
+func (ps Paths) inGitDir(abs string) bool {
+	for _, part := range strings.Split(filepath.ToSlash(abs), "/") {
+		if strings.EqualFold(part, ".git") {
+			return true
+		}
+	}
+	for _, g := range ps.GitDirs {
+		if within(abs, g) || within(abs, resolve(g, "/", ps.Home)) {
+			return true
+		}
+	}
+	return false
+}
+
+// gitConfig dice si abs es la configuración de un repo de git.
+func (ps Paths) gitConfig(abs string) bool {
+	base := strings.ToLower(filepath.Base(abs))
+	return (base == "config" || base == "config.worktree") && ps.inGitDir(abs)
 }
 
 // NewPaths arma las listas para root. stateDir es donde coyote guarda sus claves.
 func NewPaths(root, home, stateDir string) Paths {
 	p := Paths{Root: filepath.Clean(root), Home: filepath.Clean(home)}
+	p.GitDirs = GitDirsOf(p.Root)
 	for _, rel := range []string{".ssh", ".gnupg", ".aws", ".azure", ".config/gcloud", ".kube", ".docker",
 		".netrc", ".git-credentials", ".config/gh", ".config/hub", ".npmrc", ".pypirc", ".gem/credentials",
 		"Library/Keychains", ".password-store", ".vault-token", ".config/git/credentials"} {
@@ -227,6 +295,11 @@ func (ps Paths) protected(abs string) (string, bool) {
 	for _, g := range ps.Global {
 		if within(abs, g) || within(abs, resolve(g, "/", ps.Home)) {
 			return g, true
+		}
+	}
+	for _, g := range ps.GitDirs {
+		if within(abs, g) || within(abs, resolve(g, "/", ps.Home)) {
+			return "la carpeta de git " + g, true
 		}
 	}
 	if s, ok := ps.sensitive(abs); ok {
@@ -436,6 +509,27 @@ func (ps Paths) protectedIn(cmd string, readOnly bool) (string, bool) {
 	return check(view(cmd, false), true)
 }
 
+// touchesHub dice si un comando nombra el clon del hub: su ruta como la
+// escribe coyote/project.yaml o su ruta absoluta. Uno que llega por otro
+// camino (cd .. y luego cd) no se reconoce y pide aprobación.
+func (ps Paths) touchesHub(cmd string) bool {
+	if ps.HubDir == "" {
+		return false
+	}
+	lower := strings.ToLower(cmd)
+	for _, m := range []string{ps.HubPath, ps.HubDir, resolve(ps.HubDir, "/", ps.Home)} {
+		m = strings.TrimRight(strings.ToLower(filepath.ToSlash(filepath.Clean(m))), "/")
+		if m == "" || m == "." || m == ".." || m == "/" {
+			continue
+		}
+		re := regexp.MustCompile(regexp.QuoteMeta(m) + `($|[/\s'";&|)<>])`)
+		if re.MatchString(lower) {
+			return true
+		}
+	}
+	return false
+}
+
 // agentFlag extrae el agente que declara un comando de coyote.
 var agentFlag = regexp.MustCompile(`--?agent(?:=|\s+)["']?([A-Za-z0-9._/-]+)`)
 
@@ -453,6 +547,9 @@ func (ps Paths) hardShell(a Action) *Hard {
 	}
 	if why, ok := ps.protectedIn(cmd, notRead == nil); ok {
 		return hard("el comando toca %s", why)
+	}
+	if notRead != nil && ps.touchesHub(cmd) {
+		return hard("el comando cambia el clon del hub de la organización: sus admins, su presupuesto y su estándar los cambia la persona en ese repo, con su PR (ADR-0018)")
 	}
 	if what, ok := credCommand(cmd); ok {
 		return hard("el comando imprime o crea %s; las credenciales las maneja la persona", what)
@@ -488,6 +585,11 @@ func (ps Paths) hardInfra(cmd string) *Hard {
 	for _, t := range texts {
 		if what, ok := infra.ApplyCommand(t); ok {
 			return hard("un agente nunca aplica infraestructura (%s): lo corre la persona en su terminal o un pipeline con revisor", what)
+		}
+		// Un subcomando que llega al correr (xargs, "$@", un alias, una
+		// variable) podría ser apply: falla cerrado.
+		if what, ok := infra.DynamicApply(t); ok {
+			return hard("el comando corre %s con un subcomando que coyote no puede leer (xargs, argumentos de una función, un alias o una variable); escribe el subcomando tal cual: un agente nunca aplica infraestructura", what)
 		}
 		effect = effect || infra.Effect(t)
 	}
@@ -554,7 +656,7 @@ func (ps Paths) readShell(a Action) (ok bool, why string, cred bool) {
 	if cwd == "" {
 		cwd = ps.Root
 	}
-	var contentDirs []string
+	var contentDirs, gitDirs []string
 	for _, s := range segs {
 		args := make([]string, len(s.args))
 		for i, w := range s.args {
@@ -654,12 +756,25 @@ func (ps Paths) readShell(a Action) (ok bool, why string, cred bool) {
 				}
 			}
 		}
+		// Leer dentro de .git: su configuración puede llevar un token. Los
+		// programas que solo ven nombres pueden mirarla.
+		if !names && s.prog != "git" && s.prog != "cd" {
+			for _, t := range targets {
+				if ps.inGitDir(resolve(t, segCwd, ps.Home)) {
+					return false, "lee dentro de una carpeta de git, cuya configuración puede llevar credenciales; usa comandos de git", true
+				}
+			}
+		}
 		if readsAll {
 			if len(targets) == 0 {
 				targets = []string{"."}
 			}
 			for _, t := range targets {
-				contentDirs = append(contentDirs, resolve(t, segCwd, ps.Home))
+				d := resolve(t, segCwd, ps.Home)
+				contentDirs = append(contentDirs, d)
+				if !excludesGit(args) && ps.hasGitDir(d) {
+					gitDirs = append(gitDirs, d)
+				}
 			}
 		}
 	}
@@ -668,7 +783,54 @@ func (ps Paths) readShell(a Action) (ok bool, why string, cred bool) {
 			return false, "busca en todos los archivos de una carpeta con archivos de secretos (" + what + "); usa rg o git grep, que respetan .gitignore", false
 		}
 	}
+	if len(gitDirs) > 0 {
+		return false, "busca en todos los archivos de una carpeta que contiene .git, cuya configuración puede llevar credenciales; usa rg o git grep, o excluye .git (--exclude-dir=.git)", false
+	}
 	return true, "", false
+}
+
+// hasGitDir dice si una búsqueda que recorre dir entraría a una carpeta de
+// git: dir la tiene adentro, está dentro de una o contiene una conocida.
+func (ps Paths) hasGitDir(dir string) bool {
+	if ps.inGitDir(dir) {
+		return true
+	}
+	if fi, err := os.Lstat(filepath.Join(dir, ".git")); err == nil && fi.IsDir() {
+		return true
+	}
+	for _, g := range ps.GitDirs {
+		if within(g, dir) {
+			return true
+		}
+	}
+	return false
+}
+
+// excludesGit dice si una búsqueda deja fuera .git (--exclude-dir=.git o un
+// glob !.git).
+func excludesGit(args []string) bool {
+	for i, a := range args {
+		flag, val := a, ""
+		if k, v, ok := strings.Cut(a, "="); ok && strings.HasPrefix(a, "--") {
+			flag, val = k, v
+		} else if strings.HasPrefix(a, "-g") && len(a) > 2 {
+			flag, val = "-g", a[2:]
+		} else if i+1 < len(args) {
+			val = args[i+1]
+		}
+		val = strings.Trim(val, `"'`)
+		switch flag {
+		case "--exclude-dir":
+			if strings.TrimSuffix(val, "/") == ".git" {
+				return true
+			}
+		case "-g", "--glob", "--iglob":
+			if strings.HasPrefix(val, "!") && gitGlob.MatchString(strings.TrimPrefix(val, "!")) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // secretArg revisa un argumento de un comando de lectura: un archivo de
@@ -715,6 +877,9 @@ func (ps Paths) readArg(w word, cwd string, recursive bool) (string, bool) {
 	}
 	return "", false
 }
+
+// gitGlob reconoce un patrón de nombres que entra a una carpeta .git.
+var gitGlob = regexp.MustCompile(`(?i)(^|[/{,])\.git($|[/},])`)
 
 // searchTools recorren carpetas: además de no leer credenciales, no pueden
 // partir de una carpeta que las contenga.
@@ -769,6 +934,14 @@ func (ps Paths) readTool(a Action) *Hard {
 					return hard("busca en una carpeta que contiene credenciales (%s)", cred)
 				}
 			}
+			if ps.inGitDir(r) {
+				return hard("busca dentro de una carpeta de git, cuya configuración puede llevar credenciales; usa comandos de git")
+			}
+		}
+		for _, k := range []string{"glob", "include", "includePattern", "file_pattern"} {
+			if g, ok := a.Input[k].(string); ok && gitGlob.MatchString(g) {
+				return hard("busca dentro de una carpeta de git, cuya configuración puede llevar credenciales; usa comandos de git")
+			}
 		}
 	}
 	for _, t := range texts {
@@ -786,8 +959,8 @@ func (ps Paths) readTool(a Action) *Hard {
 		// La configuración de git del proyecto puede llevar un token en la URL
 		// de un remoto: leerla se bloquea igual que cat .git/config. Buscar en
 		// el proyecto sigue libre (los buscadores no entran a .git).
-		if strings.EqualFold(abs, filepath.Join(ps.Root, ".git", "config")) || strings.EqualFold(abs, filepath.Join(resolve(ps.Root, "/", ps.Home), ".git", "config")) {
-			return hard("lee la configuración de git del proyecto, que puede llevar credenciales")
+		if ps.gitConfig(abs) {
+			return hard("lee la configuración de un repo de git, que puede llevar credenciales")
 		}
 	}
 	return nil

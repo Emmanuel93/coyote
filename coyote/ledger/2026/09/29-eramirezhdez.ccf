@@ -53,3 +53,4 @@
 2026-09-29T09:01Z|@eramirezhdez/coyote-sre|W-0007|coyote|fix|slo|un servicio en un solo archivo, reglas anidadas y borradas en R3,…|-|-|-|ok
 2026-09-29T09:02Z|@eramirezhdez/coyote-devsecops|W-0007|coyote|fix|ci|configuración de gitleaks por ruta absoluta, commit neto sin identidad del runner…|-|-|-|ok
 2026-09-29T09:02Z|@eramirezhdez/coyote-architect|W-0007|coyote|fix|hub|el hub rige aunque el proyecto cambie extends o perfil, refs exactas…|-|-|-|ok
+2026-09-29T09:02Z|@eramirezhdez/coyote-security|W-0007|coyote|fix|gate|carpetas de git y clon del hub protegidos, subcomandos que llegan al…|-|-|-|ok

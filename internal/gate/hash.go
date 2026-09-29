@@ -7,6 +7,9 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"unicode"
+
+	"github.com/Emmanuel93/coyote/internal/secrets"
 )
 
 // Normalized es la forma de una acción que se aprueba: lo que decide su efecto
@@ -191,12 +194,18 @@ func oneLine(s string, max int) string {
 	return s
 }
 
-// secretRes reconocen credenciales comunes en un comando.
+// secretRes reconocen credenciales comunes en un comando: formas conocidas
+// de tokens, encabezados de autorización, variables y banderas con nombre de
+// secreto (DB_PASSWORD=…, --password …, -u usuario:clave, mysql -p…) y URLs
+// con contraseña.
 var secretRes = []*regexp.Regexp{
-	regexp.MustCompile(`\b(gh[pousr]_[A-Za-z0-9]{16,}|github_pat_[A-Za-z0-9_]{20,}|glpat-[A-Za-z0-9_-]{16,}|sk-[A-Za-z0-9_-]{16,}|xox[abposr]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{30,})\b`),
+	regexp.MustCompile(`\b(gh[pousr]_[A-Za-z0-9]{16,}|github_pat_[A-Za-z0-9_]{20,}|glpat-[A-Za-z0-9_-]{16,}|sk-[A-Za-z0-9_-]{16,}|xox[abposr]-[A-Za-z0-9-]{10,}|(?:AKIA|ASIA)[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{30,})\b`),
 	regexp.MustCompile(`(?i)\b(bearer|token|basic)\s+[A-Za-z0-9._~+/=-]{12,}`),
-	regexp.MustCompile(`(?i)\b(password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key)(\s*[=:]\s*)\S+`),
+	regexp.MustCompile(`(?i)\b([A-Za-z0-9_]*(?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|credentials?)[A-Za-z0-9_]*)(\s*[=:]\s*)\S+`),
 	regexp.MustCompile(`://[^/\s:@]+:[^/\s@]+@`),
+	regexp.MustCompile(`(?i)(\s--?(?:password|passwd|pass|pwd|token|secret|api-key)(?:=|\s+))\S+`),
+	regexp.MustCompile(`(\s(?:-u|--user)(?:=|\s*))([^\s:]+):\S+`),
+	regexp.MustCompile(`(?i)(\b(?:mysql|mariadb|mysqldump|mysqladmin)\b[^|;&\n]*?\s-p)\S+`),
 }
 
 var longSecret = regexp.MustCompile(`[A-Za-z0-9+/_=-]{32,}`)
@@ -204,10 +213,14 @@ var longSecret = regexp.MustCompile(`[A-Za-z0-9+/_=-]{32,}`)
 // Redact oculta credenciales antes de escribir una descripción en el ledger o
 // en un registro versionado.
 func Redact(s string) string {
+	s = secrets.Mask(s)
 	s = secretRes[0].ReplaceAllString(s, "***")
 	s = secretRes[1].ReplaceAllString(s, "$1 ***")
 	s = secretRes[2].ReplaceAllString(s, "$1$2***")
 	s = secretRes[3].ReplaceAllString(s, "://***@")
+	s = secretRes[4].ReplaceAllString(s, "$1***")
+	s = secretRes[5].ReplaceAllString(s, "$1$2:***")
+	s = secretRes[6].ReplaceAllString(s, "$1***")
 	return longSecret.ReplaceAllStringFunc(s, func(m string) string {
 		lower, upper, digit := false, false, false
 		for _, r := range m {
@@ -239,7 +252,9 @@ func Visible(s string) string {
 			b.WriteRune(r)
 		case r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f):
 			fmt.Fprintf(&b, "\\x%02x", r)
-		case (r >= 0x200b && r <= 0x200f) || (r >= 0x202a && r <= 0x202e) || (r >= 0x2066 && r <= 0x2069) || r == 0xfeff || r == 0x061c:
+		case r == 0x2028 || r == 0x2029 || unicode.Is(unicode.Cf, r):
+			// Separadores de línea y caracteres de formato invisibles, como
+			// los que cambian la dirección del texto.
 			fmt.Fprintf(&b, "\\u%04x", r)
 		default:
 			b.WriteRune(r)

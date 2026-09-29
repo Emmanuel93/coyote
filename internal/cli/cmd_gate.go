@@ -170,10 +170,13 @@ func (a *app) newGateRun(act gate.Action) (*gateRun, error) {
 	}
 	paths := gate.NewPaths(root, gate.Home(), state)
 	if !cfg.Hub.Empty() {
-		// El clon del hub declarado: sus admins y su estándar tampoco los
-		// escribe un agente desde el proyecto (ADR-0018).
+		// El clon del hub declarado: un agente del proyecto no escribe nada en
+		// él, tampoco en su carpeta de git, que decide qué commit rige
+		// (ADR-0018).
 		dir := cfg.Hub.Dir(root)
-		paths.Global = append(paths.Global, filepath.Join(dir, "coyote", "hub.yaml"), filepath.Join(dir, "coyote", "standards"))
+		paths.Global = append(paths.Global, dir)
+		paths.GitDirs = append(paths.GitDirs, gate.GitDirsOf(dir)...)
+		paths.HubDir, paths.HubPath = dir, cfg.Hub.Path
 	}
 	paths.Secrets = cfg.Secrets
 	paths.Infra, _, paths.InfraErr = infra.Load(root)

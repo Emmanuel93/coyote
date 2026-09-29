@@ -89,8 +89,9 @@ La clasificación recorre el JSON del estado final de cada recurso, no su texto,
 | Comando de un agente | Decisión |
 |----------------------|----------|
 | `terraform` o `tofu` con `apply`, `destroy`, `import`, `refresh`, `taint`, `force-unlock` o `state mv/rm/push`; `terragrunt`, `pulumi up/destroy` y `cdk deploy/destroy` | bloqueado siempre, en cualquier proyecto |
+| Una de esas herramientas con un subcomando que llega al correr: `… \| xargs terraform`, `terraform "$@"` (una función o `set --`), un alias, `terraform $VERBO` o `$(…)` en el lugar del subcomando | bloqueado siempre: podría ser apply |
 | Un comando de `commands.apply` del inventario (`make apply`), con el programa por su nombre y los targets entre sus argumentos: `make -C . apply`, `make ENV=prod apply`, `/usr/bin/make apply`, `sudo make apply`, `bash -c "make apply"` | bloqueado siempre |
-| Un cambio a la nube o al cluster (`kubectl apply`, `helm upgrade`, `gcloud … create`, `aws … delete-…`, `az … update`) con la marca de un ambiente `reviewed` | bloqueado siempre |
+| Un cambio a la nube o al cluster (`kubectl apply`, `helm upgrade`, `helmfile apply`, `gcloud … create`, `aws … delete-…`, `az … update`), o a las alertas (docs/specs/slo-v1.md), con la marca de un ambiente `reviewed`. El programa cuenta también con un sufijo de release o de imagen (`mimirtool-linux-amd64`, `grafana/mimirtool:2.14.0`) y con un subcomando o argumento que llega al correr | bloqueado siempre |
 | Ese mismo cambio sin marca de ambiente, o en un ambiente `local` | aprobación de un solo uso: `coyote approve --uses N` la deja en 1 |
 | `terraform plan`, `init`, `validate` | aprobación normal (corren código de proveedores y leen la nube) |
 
@@ -99,7 +100,7 @@ Si `coyote/infra.yaml` existe pero no se puede leer, los cambios de infraestruct
 ## Límites
 
 - Sin marca, el ambiente de un comando no se conoce: `kubectl` sin `--context` usa el contexto actual. En ese caso pide aprobación normal, y la revisión muestra el comando completo.
-- Un target que llega por la entrada (`echo apply | xargs make`) o un comando armado con una sustitución (`$(which terraform) apply`) no se reconocen: piden la aprobación normal.
+- Un target de `make` que llega por la entrada (`echo apply | xargs make`) o un programa armado con una sustitución (`$(which terraform) apply`) no se reconocen: piden la aprobación normal. Cuando lo que llega al correr es el subcomando de una herramienta de apply conocida, se bloquea.
 - `coyote infra` lee los archivos del repo con tope y solo si son regulares: un `.tf` o un `Makefile` que apuntan a un dispositivo no se leen. En total lee a lo sumo 256 MiB de `.tf` y 256 por stack, y no sigue los symlinks al buscar backends fuera del inventario.
 - La clasificación del plan va por tipos y acciones de recursos de GCP, AWS y Azure. Un proveedor con otros nombres cae en R2 si no destruye ni reemplaza.
 - coyote no estima costos en dólares: lista los recursos que los mueven. Una estimación (Infracost) puede sumarse en el pipeline del repo de infraestructura.

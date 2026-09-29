@@ -317,6 +317,18 @@ func TestRedact(t *testing.T) {
 		"export API_KEY=supersecreto123":                                      "supersecreto123",
 		"git clone https://ana:clave123@github.com/x/y":                       "clave123",
 		"echo AbCdEfGhIjKlMnOpQrStUvWxYz0123456789":                           "AbCdEfGh",
+		// Segunda revisión: nombres de variable con el secreto adentro,
+		// banderas de clientes y llaves temporales de AWS.
+		"PGPASSWORD=hunter2hunter2 psql -h db":                           "hunter2",
+		"export DB_PASSWORD=otraClave99":                                 "otraClave99",
+		"GITHUB_TOKEN=abc123def456 gh pr list":                           "abc123def456",
+		"curl -u admin:pa55word https://api.x/y":                         "pa55word",
+		"curl --user=admin:pa55word https://api.x/y":                     "pa55word",
+		"mysql -h db -u root -pS3cretoMysql app":                         "S3cretoMysql",
+		"psql --password hunter2hunter2":                                 "hunter2",
+		"make deploy KEY=ASIA" + "Q3VZ7T2M9KX4B8JN":                      "Q3VZ7T2M9KX4B8JN",
+		"echo " + "xoxb-" + "1234567890-abcdefghij":                      "abcdefghij",
+		"deploy --hook https://hooks.slack.com/services/T1/B2/" + "c3d4": "c3d4",
 	}
 	for in, leaked := range cases {
 		if out := Redact(in); strings.Contains(out, leaked) {

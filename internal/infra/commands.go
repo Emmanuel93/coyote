@@ -6,8 +6,11 @@ import (
 	"strings"
 )
 
-// sub es un programa seguido, después de sus opciones, de un subcomando.
-const sub = `\b(?:\s+\S+)*?\s+`
+// sub es un programa seguido, después de sus opciones, de un subcomando. El
+// nombre del programa puede llevar un sufijo: el binario de un release
+// (mimirtool-linux-amd64), una versión o la imagen de un contenedor
+// (grafana/mimirtool:2.14.0, …@sha256:…).
+const sub = `(?:[-_:@][^\s'"]*)?\b(?:\s+\S+)*?\s+`
 
 // applyRes aplican, destruyen o cambian el estado de la infraestructura: un
 // agente nunca los corre; los corre la persona o un pipeline con revisor.
@@ -35,6 +38,82 @@ var effectRes = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)\b(?:mimirtool|cortextool)` + sub + `(?:load|sync|delete)\b`),
 	regexp.MustCompile(`(?i)\bamtool` + sub + `(?:add|expire|import|update)\b`),
 	regexp.MustCompile(`(?i)\b(?:mimirtool|cortextool|amtool)` + sub + `@\S`),
+	// promtool push manda muestras a un remote write: puede tapar un SLI.
+	regexp.MustCompile(`(?i)\bpromtool` + sub + `push\b`),
+	regexp.MustCompile(`(?i)\bhelmfile` + sub + `(?:apply|sync|destroy|delete)\b`),
+}
+
+// alertPathRe son las rutas de las APIs de reglas, alertas, silencios y
+// remote write de Prometheus, Mimir y Alertmanager.
+var alertPathRe = regexp.MustCompile(`(?i)/(?:api/v[12]/(?:silences?|alerts)|(?:prometheus/)?config/v1/rules|api/v1/rules|-/reload|api/v1/(?:push|write)|api/prom/push)(?:\b|$)`)
+
+// httpWriteRes reconocen un cliente HTTP que escribe: curl con otro método o
+// con datos, wget con --method o --post-*, y httpie (http, https, xh), que
+// escribe salvo con GET.
+var httpWriteRes = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)\bcurl\b.*(?:\s-X\s*["']?|\s--request(?:=|\s+)["']?)(?:POST|PUT|DELETE|PATCH)\b`),
+	regexp.MustCompile(`(?i)\bcurl\b.*\s(?:-d|-F|-T|--data(?:-raw|-binary|-urlencode|-ascii)?|--form(?:-string)?|--upload-file|--json)(?:\s|=|@|["']|$|[^\s-])`),
+	regexp.MustCompile(`(?i)\bwget\b.*\s(?:--method(?:=|\s+)["']?(?:POST|PUT|DELETE|PATCH)|--post-(?:data|file)|--body-(?:data|file))`),
+	regexp.MustCompile(`(?i)\b(?:http|https|xh)\b(?:\s+-\S+)*\s+(?:POST|PUT|DELETE|PATCH)\b`),
+}
+
+// httpWrite dice si un comando escribe por HTTP en la API de reglas, alertas,
+// silencios o remote write.
+func httpWrite(cmd string) bool {
+	if !alertPathRe.MatchString(cmd) {
+		return false
+	}
+	for _, re := range httpWriteRes {
+		if re.MatchString(cmd) {
+			return true
+		}
+	}
+	return false
+}
+
+// Programas cuyos subcomandos coyote reconoce: los que aplican
+// infraestructura y los que cambian recursos o alertas.
+const (
+	applyProgs  = `terraform|tofu|terragrunt|pulumi|cdk|cdktf`
+	effectProgs = `kubectl|oc|helm|helmfile|mimirtool|cortextool|amtool|promtool`
+)
+
+// dynamicRes reconocen un programa cuyo subcomando llega al correr: por
+// xargs, por los argumentos de una función o de set -- ("$@"), por un alias
+// o por una variable o sustitución en el lugar del subcomando. coyote no
+// sabe qué corre (docs/specs/gate-v1.md). Con anyWord, cualquier palabra
+// después del programa cuenta: amtool silence ${x:-add} lleva el verbo en la
+// segunda.
+func dynamicRes(progs string, anyWord bool) []*regexp.Regexp {
+	// El programa como palabra entera: terraform.tfvars o notas-terraform.md
+	// no son el programa.
+	name := `(?:^|[\s/=])(?:` + progs + `)(?:[-_:@][^\s'"]*)?`
+	out := []*regexp.Regexp{
+		regexp.MustCompile(`(?i)\bxargs\b[^;&|\n]*?\s(?:[\w./-]*/)?(?:` + progs + `)(?:[-_:@][^\s'"]*)?(?:\s|$)`),
+		regexp.MustCompile(`(?i)` + name + `(?:\s[^;&|\n]*?)?\$(?:[@*#]|[0-9]|\{[@*#0-9])`),
+		regexp.MustCompile(`(?i)\balias\s+[^=\s]+=["']?(?:[\w./-]*/)?(?:` + progs + `)(?:[-_:@][^\s'"]*)?(?:\s|$|["';])`),
+		regexp.MustCompile(`(?i)` + name + `(?:\s+-\S+)*\s+["']?(?:\$|` + "`" + `)`),
+	}
+	if anyWord {
+		out = append(out, regexp.MustCompile(`(?i)`+name+`(?:\s+\S+)*?\s+["']?(?:\$|`+"`"+`)`))
+	}
+	return out
+}
+
+var (
+	dynamicApplyRes  = dynamicRes(applyProgs, false)
+	dynamicEffectRes = dynamicRes(effectProgs, true)
+)
+
+// DynamicApply dice si un comando corre una herramienta de infraestructura
+// como código con un subcomando que coyote no puede leer: podría ser apply.
+func DynamicApply(cmd string) (string, bool) {
+	for _, re := range dynamicApplyRes {
+		if m := re.FindString(cmd); m != "" {
+			return strings.Join(strings.Fields(m), " "), true
+		}
+	}
+	return "", false
 }
 
 // ApplyCommand dice si un comando aplica o destruye infraestructura como
@@ -48,9 +127,14 @@ func ApplyCommand(cmd string) (string, bool) {
 	return "", false
 }
 
-// Effect dice si un comando cambia recursos de una nube o de un cluster.
+// Effect dice si un comando cambia recursos de una nube o de un cluster, o
+// las reglas y alertas de un ambiente. Uno con un subcomando que llega al
+// correr cuenta como efecto.
 func Effect(cmd string) bool {
 	if _, ok := ApplyCommand(cmd); ok {
+		return true
+	}
+	if _, ok := DynamicApply(cmd); ok {
 		return true
 	}
 	for _, re := range effectRes {
@@ -58,7 +142,12 @@ func Effect(cmd string) bool {
 			return true
 		}
 	}
-	return false
+	for _, re := range dynamicEffectRes {
+		if re.MatchString(cmd) {
+			return true
+		}
+	}
+	return httpWrite(cmd)
 }
 
 // DeclaredApply dice si un segmento de un comando, palabra por palabra y sin

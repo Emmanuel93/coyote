@@ -298,3 +298,15 @@ func TestNamesSinFragmentosDeLlaves(t *testing.T) {
 		t.Errorf("un tramo de base64 no es un nombre: %s", got)
 	}
 }
+
+func TestMaskTapaLosValores(t *testing.T) {
+	tok := "ghp_" + strings.Repeat("aB3dE5gH7jK9", 3)
+	in := "x=" + tok + " y=AKIA" + "Q3VZ7T2M9KX4B8JN # coyote:allow-secret"
+	out := Mask(in)
+	if strings.Contains(out, "aB3dE5") || strings.Contains(out, "Q3VZ7T") || !strings.Contains(out, "x=*** y=***") {
+		t.Fatalf("Mask: %q", out)
+	}
+	if Mask("make test") != "make test" {
+		t.Fatal("sin secretos no cambia")
+	}
+}
