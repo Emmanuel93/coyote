@@ -1,0 +1,27 @@
+{
+  "id": "P-0007",
+  "gate": "G7",
+  "release": "v0.7.0",
+  "workstream": "W-0007",
+  "decision": "approved",
+  "approver": "@eramirezhdez",
+  "date": "2026-09-29",
+  "reviewed_commit": "7bcdd16",
+  "authorizes": [
+    "etiquetar v0.7.0 sobre la rama v0.7 de coyote; main queda en v0.4.0",
+    "aceptar ADR-0018, ADR-0019, ADR-0020 y ADR-0021 y entregar los binarios",
+    "crear el hub kredius en ~/Documents/kredius-hub desde la propuesta del piloto y apuntar fintech-producto a él en su rama coyote/hub",
+    "inicializar git en observability-platform y dejar en la rama coyote/slo los SLOs del gateway, sus reglas, las alertas de umbral, el runbook y la propuesta, sin aplicar nada al Faro que corre",
+    "confirmar D10, D12, D34 y D35",
+    "arrancar v1.0 en su propia rama"
+  ],
+  "conditions": [
+    "el ejercicio se hace en ramas: nada se integra a main de coyote ni de los repos del producto, y en observability-platform no se crea main",
+    "el push de las ramas y de la etiqueta, el repo del hub en GitHub y la instalación del binario los hace la persona",
+    "fuera de G7: la recolección de métricas del gateway y el Alertmanager de Mimir, y prender features.gitleaks en el pipeline; D36 queda sin prender",
+    "cargar reglas en Faro nunca lo hace un agente (D35)",
+    "los nombres de la organización y de sus repos no entran al código de la herramienta (C1)"
+  ],
+  "response": "sí, apruebo v0.7.0; crear el hub y apuntar; Faro con git init y rama; arrancar v1.0",
+  "evidence": "docs/releases/v0.7.0.md"
+}

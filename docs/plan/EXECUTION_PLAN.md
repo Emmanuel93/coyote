@@ -1,6 +1,6 @@
 # Plan de ejecución — Coyote
 
-Estado: v0.6.0 aprobada en G6 (P-0006), en la rama `v0.6`; `main` sigue en v0.4.0 · v0.7.0 lista en la rama `v0.7`, esperando G7 · actualizado 2026-09-29
+Estado: v0.7.0 aprobada en G7 (P-0007), en la rama `v0.7`; `main` sigue en v0.4.0 · v1.0 por arrancar en su rama · actualizado 2026-09-29
 
 Este plan ejecuta la propuesta aprobada ("Plan de construcción — Framework Coyote"). Cada release se razona con la plantilla de cinco partes que usarán los agentes de Coyote (problema, restricciones, opciones, decisión, riesgos) y cierra con un gate humano: nada se etiqueta, se publica ni toca otros proyectos sin autorización explícita.
 
@@ -541,7 +541,7 @@ G6 autorizaría:
 | T48 | SLOs y alertas como código | Un SLO sin alertas generadas y revisadas es una promesa | `slo/*.yaml` v1, `slo rules`, `slo check` y R19; `gate pr` con SLOs relajados; comandos de alertas en el gate; `promtool check` y `test` en el entorno de construcción | Hecho |
 | T49 | gitleaks en el pipeline | Más patrones en el PR sin que el autor lo pueda apagar | `features.gitleaks`, paso fijado por hash con la configuración de la base y `gate pr --gitleaks`; probado con gitleaks real | Hecho |
 | T50 | Piloto en solo lectura | Evidencia sobre tus proyectos antes de G7 | Hub propuesto para `kredius`, fuera de `Documents` hasta G7; la web v1 sobre el ledger del piloto; los SLOs de Faro con sus reglas y lo que le falta a Faro | Hecho |
-| T51 | Verificación y G7 | Evidencia antes de crear el hub y tocar Faro | Pruebas, revisión adversarial y `docs/releases/v0.7.0.md` | Hecho; espera G7 |
+| T51 | Verificación y G7 | Evidencia antes de crear el hub y tocar Faro | Pruebas, revisión adversarial y `docs/releases/v0.7.0.md` | Hecho: tres pasadas adversariales, todo lo confirmado corregido con prueba; G7 aprobado (P-0007) |
 
 G7 autorizaría:
 
@@ -550,6 +550,8 @@ G7 autorizaría:
 3. Llevar las alertas a Faro. Como Faro no es un repo, eliges entre inicializarlo con git y trabajar en una rama, o cargar las reglas con `mimirtool` sin cambiar sus archivos. También decides si se agregan la recolección de métricas del gateway y el Alertmanager.
 4. Prender `features.gitleaks` en el pipeline del producto, en la rama `coyote/pipeline`.
 5. Arrancar v1.0.
+
+**Decisión en G7 (P-0007).** Aprobados v0.7.0, el hub `kredius` con `fintech-producto` apuntando a él en `coyote/hub`, Faro con `git init` y la rama `coyote/slo`, y el arranque de v1.0. Quedan fuera las métricas del gateway con el Alertmanager, y gitleaks en el pipeline.
 
 ## v1.0
 
@@ -564,8 +566,8 @@ Endurecimiento, auditoría y documentación. Recibirá su razonamiento completo 
 | D4 embeddings | Ninguno en v0.2 (BM25 local); locales cuando lleguen | No sacar código a terceros sin autorización || Confirmado en G2 |
 | D6 aprobación R2–R3 | CLI con registro firmado en v0.3; pull request con `coyote gate pr` en CI después | La CLI funciona sin red; el PR agrega revisión de equipo | Confirmado en G3 |
 | D11 IDE del piloto | Claude Code | Es el de nivel 1 con hooks más completos | Confirmado en G3 |
-| D10 visibilidad de costos | Cada persona ve lo suyo y los totales; los admins del hub o del proyecto ven todo. Es visibilidad por defecto, no control de acceso: el ledger está en git (ADR-0019) | Menor exposición por defecto | G7 |
-| D12 hub | `kredius`: un repo coyote de tipo `hub`, leído en un commit con git de plomería; se crea después de G7 (ADR-0018) | Aislamiento; solo rige lo que tiene commit | G7 |
+| D10 visibilidad de costos | Cada persona ve lo suyo y los totales; los admins del hub o del proyecto ven todo. Es visibilidad por defecto, no control de acceso: el ledger está en git (ADR-0019) | Menor exposición por defecto | Confirmado en G7 |
+| D12 hub | `kredius`: un repo coyote de tipo `hub`, leído en un commit con git de plomería; se crea después de G7 (ADR-0018) | Aislamiento; solo rige lo que tiene commit | Confirmado en G7 |
 | D13 nombres de archivo | `README.coyote.md` y `CONTEXT.coyote.md` | Coherente con `README.md` y `AGENTS.md` | Confirmado en G1 |
 | D14 alcance de R15 | Commits, PRs, comentarios, docs, releases y autoría del commit | Es lo que pediste | Confirmado en G1 |
 | D15 web | Plantillas Go embebidas, solo lectura y solo en 127.0.0.1 | Un solo binario, sin superficie de red || Confirmado en G2 |
@@ -583,9 +585,9 @@ Endurecimiento, auditoría y documentación. Recibirá su razonamiento completo 
 | D31 secretos del proyecto | Se tratan como credenciales: ningún agente los lee, ni con aprobación; `secrets list` da los nombres (ADR-0016) | Un agente que lee un secreto lo puede filtrar en lo que escribe | Confirmado en G6 |
 | D32 `apply` de infraestructura | Nunca lo corre un agente; un ambiente `reviewed` solo lo aplican la persona o un pipeline con revisor (ADR-0017) | Lo piden R13 y la definición de `coyote-infra` | Confirmado en G6 |
 | D33 corte de v0.6 | Seguridad (IDEs, secretos e infraestructura) en v0.6; SRE, web v1 y hub en v0.7 | Releases que un gate pueda verificar por sí solos | Confirmado en G6 |
-| D34 formato de SLOs | `coyote/slo/<servicio>.yaml` v1, propio y cercano a los formatos conocidos; reglas de Prometheus generadas por coyote y versionadas en `coyote/slo/prometheus/` (ADR-0020) | Un generador sin binarios externos que el gate y `gate pr` entienden | G7 |
-| D35 cargar alertas | Nunca un agente: la persona o un pipeline cargan las reglas en Faro (ADR-0020) | Una alerta cambiada en producción es un cambio de infraestructura | G7 |
-| D36 gitleaks | Opcional (`features.gitleaks`), fijado por hash, con la configuración de la rama base y su reporte en `gate pr` (ADR-0021) | Más patrones en el PR sin que el autor lo apague | G7 |
+| D34 formato de SLOs | `coyote/slo/<servicio>.yaml` v1, propio y cercano a los formatos conocidos; reglas de Prometheus generadas por coyote y versionadas en `coyote/slo/prometheus/` (ADR-0020) | Un generador sin binarios externos que el gate y `gate pr` entienden | Confirmado en G7 |
+| D35 cargar alertas | Nunca un agente: la persona o un pipeline cargan las reglas en Faro (ADR-0020) | Una alerta cambiada en producción es un cambio de infraestructura | Confirmado en G7 |
+| D36 gitleaks | Opcional (`features.gitleaks`), fijado por hash, con la configuración de la rama base y su reporte en `gate pr` (ADR-0021) | Más patrones en el PR sin que el autor lo apague | Aceptado en G7 (ADR-0021); prenderlo en el pipeline del producto queda para después |
 | D23 unidad de trabajo | Producto multi-repo: servicios, app y backoffice juntos, en un proyecto aparte que lee los tres (ADR-0011) | Un cambio en uno afecta a los otros (G3) | Confirmado en G4 |
 | D20 lectura sin aprobación | Lista cerrada de comandos de solo lectura en la herramienta; sin patrones propios del proyecto | Leer no tiene efectos y evita la fatiga | Confirmado en G3 |
 | D21 validez de una aprobación | Solo en la máquina donde se dio (firma con clave local), 24 h como máximo | Un registro copiado o fabricado no sirve | Confirmado en G3 |
