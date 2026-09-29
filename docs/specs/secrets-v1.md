@@ -106,11 +106,11 @@ Cada ruta de un cambio lleva las reglas del proyecto coyote que la contiene (su 
 
 Un cuerpo de llave que se pega bajo un encabezado que ya estaba en el archivo también se detiene: en el commit se busca el encabezado en la versión nueva del archivo, y en el gate, en el archivo actual.
 
-Un archivo en UTF-16 con BOM (lo que escribe PowerShell 5) se revisa como texto. La plantilla `templates/secret.yaml` de un chart de Helm no es un archivo de secretos: arma el secreto con valores que vienen de afuera.
+Un archivo en UTF-16 con BOM (lo que escribe PowerShell 5) se revisa como texto, también si `.gitattributes` le pone `diff` y git lo muestra con bytes 0. La plantilla `templates/secret.yaml` de un chart de Helm no es un archivo de secretos: arma el secreto con valores que vienen de afuera.
 
 ## Límites
 
 - El escáner reconoce formas conocidas. Un secreto de forma libre, como una contraseña corta en un `application.yml`, no se reconoce por patrón. La defensa principal es no dejar leer los archivos de secretos y declararlos en `secrets.files`.
 - Una búsqueda recursiva de una herramienta del IDE (Grep) depende de que respete `.gitignore`: los archivos de secretos deben estar ignorados, y R18 lo revisa.
 - `docker compose up`, `npm run dev` o un programa que carga `.env` por dentro no nombran el archivo: piden la aprobación normal y la persona ve el comando.
-- `gate pr` usa las reglas de siempre y las marcas `coyote:allow-secret`; las dispensas de `project.yaml` aplican en la máquina, en el commit y en el lint.
+- `gate pr` toma `secrets.files` y `secrets.allow` del `coyote/project.yaml` de la rama base, el del proyecto que contiene cada ruta: un PR no se dispensa a sí mismo.

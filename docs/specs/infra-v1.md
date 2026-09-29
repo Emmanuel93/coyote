@@ -35,6 +35,7 @@ commands:
 - **Marcas.** Son palabras o tramos de ruta: `ENV=prod` no coincide con `ENV=production`. El var-file y las carpetas de sus stacks también cuentan como marcas.
 - **Stacks.** `active` tiene Terraform que se aplica; `scaffold` es andamiaje.
 - **Protección.** Un campo desconocido es un error. Ningún agente escribe el inventario: está protegido como `project.yaml`, también para los comandos de shell. Un inventario que es un symlink, no es un archivo regular o pesa más de 1 MiB no se lee: el gate bloquea los cambios de infraestructura hasta corregirlo.
+- **Stacks repetidos.** `p`, `p/` y `./p` son el mismo stack: repetirlo es un error.
 - **Topes.** Hasta 64 ambientes, 32 marcas por ambiente (de 3 a 128 caracteres), 256 stacks, 64 comandos de apply y 64 dueños: el gate lee el inventario en cada comando. Un comando de infraestructura de más de 64 KiB se bloquea: es demasiado largo para saber a qué ambiente toca.
 
 `coyote infra propose` arma el inventario desde el repo, sin escribir nada:
@@ -77,7 +78,7 @@ Cada recurso que cambia se clasifica:
 | R2 | cualquier otra creación o cambio; sacar un recurso del estado sin destruirlo (`forget`) o importarlo; una acción que esta versión no conoce |
 | R1 | un plan sin cambios |
 
-La clasificación recorre el JSON del estado final de cada recurso, no su texto, y en orden: un plan con sangría (`jq .`) da lo mismo que uno compacto, y dos lecturas del mismo plan dan lo mismo. Una regla de salida (`egress`) o una ruta abierta a internet son lo normal y no suben el riesgo.
+La clasificación recorre el JSON del estado final de cada recurso, no su texto, y en orden. Un estado que no se puede leer entero cuenta como R3: un plan con sangría (`jq .`) da lo mismo que uno compacto, y dos lecturas del mismo plan dan lo mismo. Una regla de salida (`egress`) o una ruta abierta a internet son lo normal y no suben el riesgo.
 
 - **Solo metadatos.** El plan en JSON lleva los valores de los recursos, secretos incluidos. coyote lo lee sin copiarlo y solo reporta direcciones, tipos y acciones.
 - **Costo.** Los tipos que suelen mover el costo (clusters, grupos de nodos, bases de datos, balanceadores, NAT) se listan para compararlos con el presupuesto del ambiente.
@@ -99,6 +100,6 @@ Si `coyote/infra.yaml` existe pero no se puede leer, los cambios de infraestruct
 
 - Sin marca, el ambiente de un comando no se conoce: `kubectl` sin `--context` usa el contexto actual. En ese caso pide aprobación normal, y la revisión muestra el comando completo.
 - Un target que llega por la entrada (`echo apply | xargs make`) o un comando armado con una sustitución (`$(which terraform) apply`) no se reconocen: piden la aprobación normal.
-- `coyote infra` lee los archivos del repo con tope y solo si son regulares: un `.tf` o un `Makefile` que apuntan a un dispositivo no se leen.
+- `coyote infra` lee los archivos del repo con tope y solo si son regulares: un `.tf` o un `Makefile` que apuntan a un dispositivo no se leen. En total lee a lo sumo 256 MiB de `.tf` y 256 por stack, y no sigue los symlinks al buscar backends fuera del inventario.
 - La clasificación del plan va por tipos y acciones de recursos de GCP, AWS y Azure. Un proveedor con otros nombres cae en R2 si no destruye ni reemplaza.
 - coyote no estima costos en dólares: lista los recursos que los mueven. Una estimación (Infracost) puede sumarse en el pipeline del repo de infraestructura.

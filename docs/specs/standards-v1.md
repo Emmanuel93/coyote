@@ -92,6 +92,8 @@ Los checks `script` ejecutan comandos escritos en rules.yaml, que puede venir de
 | `coyote standards diff` | solo lo que difiere del default | 0 |
 | `coyote standards explain <id>` | nivel, capa, ajustes, por qué, arreglo y verificación | 1 si no existe |
 
+El lint lee cada archivo con un tope de 2 MiB y, en total, hasta 256 MiB. Solo lee archivos regulares y lee una sola vez el destino de un symlink: un repo con miles de symlinks o uno que apunta a `/dev/zero` no lo cuelga. Lo que no alcanza a leer lo revisa por su nombre.
+
 ## El default y su origen
 
 El default generaliza las prácticas de repos reales de backend, móvil e infraestructura: empezar por el dominio y sus contratos (R11, R16), un README corto con el detalle citado (R10), sin respaldos ni volcados en el código (R5), IaC con inventario (R13), decisiones de riesgo con ADR (R8), commits con formato (R2) y CI con pruebas y lint (R3.ci, R9). No contiene nombres de organizaciones ni de repos: cada organización pone lo suyo en su hub.
