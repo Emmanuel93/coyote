@@ -1,12 +1,13 @@
-// Package web sirve la vista FinOps de coyote: consumo de tokens y costo por
-// proyecto y por persona, leído del ledger en cada petición. Solo lectura,
-// solo en la interfaz de loopback y con verificación de Host contra DNS
-// rebinding; sin JavaScript.
+// Package web sirve la vista de operación de coyote (ADR-0019): costos,
+// presupuesto, workstreams, gate, SLOs y, para admins, la organización.
+// Todo se lee en cada petición del ledger, de los planes y de la cola que ya
+// existen. Solo lectura, solo en loopback, con verificación de Host contra DNS
+// rebinding y sin JavaScript. Decidir (aprobar, rechazar, revocar) se hace en
+// la terminal.
 package web
 
 import (
-	_ "embed"
-	"encoding/json"
+	"embed"
 	"fmt"
 	"html/template"
 	"net"
@@ -19,26 +20,128 @@ import (
 	"github.com/Emmanuel93/coyote/internal/usage"
 )
 
-//go:embed page.html
-var pageHTML string
+//go:embed templates/*.html
+var templatesFS embed.FS
 
-// Server arma las vistas a partir de los eventos que entrega Load.
+// Server arma las vistas. La CLI llena las fuentes; una fuente nil muestra
+// la sección vacía con cómo llenarla.
 type Server struct {
 	Title   string
 	Sources []string
-	Load    func() ([]usage.Event, error)
 	Now     func() time.Time
+	// Viewer es la persona que corre la web (@usuario, su identidad de git).
+	Viewer string
+	// Admin dice si Viewer ve el desglose de todas las personas (D10).
+	Admin bool
+	// Admins son los admins declarados en el hub y en el proyecto.
+	Admins []string
+	// Hub describe el hub que rige ("acme (main@abc1234)"), o "".
+	Hub string
+	// Notices son avisos para todas las páginas (un hub que no se pudo leer).
+	Notices []string
+
+	Load   func() ([]usage.Event, error)
+	Budget func() (Budget, error)
+	Work   func() ([]Workstream, error)
+	Gate   func() (Gate, error)
+	SLOs   func() ([]SLO, error)
+	// Org devuelve la organización con los eventos de todos sus proyectos;
+	// solo se llama para un admin.
+	Org func() (*Org, error)
+}
+
+// Budget son los topes que aplican al proyecto.
+type Budget struct {
+	MonthlyUSD    float64 // tope mensual del proyecto (project.yaml); 0 = sin tope
+	RunUSD        float64 // tope por corrida del router; 0 = sin dato
+	OrgMonthlyUSD float64 // tope mensual de la organización (hub); 0 = sin tope
+}
+
+// Workstream es un plan con el estado de sus pasos.
+type Workstream struct {
+	ID, Title, Mode, Gate string
+	Closed                bool
+	SpentUSD, BudgetUSD   float64 // BudgetUSD 0 = sin tope
+	Runs                  int
+	Steps                 []Step
+	Problem               string // el plan no se pudo leer
+}
+
+// Step es un paso de un plan.
+type Step struct {
+	ID, Does, Agent, Status string
+	Runs                    int
+	CostUSD                 float64
+	At                      time.Time
+}
+
+// Gate es la cola del gate, las aprobaciones y los gates de release.
+type Gate struct {
+	Pending  []Pending
+	Grants   []Grant
+	Releases []Release
+	Problems []string
+}
+
+// Pending es una acción que espera decisión de una persona.
+type Pending struct {
+	ID, By, Action, State string
+	First                 time.Time
+	Attempts              int
+}
+
+// Grant es una aprobación firmada.
+type Grant struct {
+	ID, Action, Approver, State string
+	Left                        int
+	Expires                     time.Time
+}
+
+// Release es la decisión de un gate de release (G1, G2…).
+type Release struct {
+	ID, Gate, Release, Decision, Approver, Date string
+	Authorizes                                  []string
+}
+
+// SLO es un objetivo de un servicio y el estado de sus alertas.
+type SLO struct {
+	Service, Name string
+	Objective     float64 // porcentaje
+	PeriodDays    int
+	Page, Ticket  bool
+	Runbook       string
+	Current       bool   // las reglas generadas están vigentes
+	Problem       string // el archivo no valida o las reglas no están al día
+}
+
+// BudgetMinutes es el presupuesto de error del periodo en minutos: lo que
+// el servicio puede fallar sin romper el objetivo.
+func (s SLO) BudgetMinutes() float64 {
+	return (100 - s.Objective) / 100 * float64(s.PeriodDays) * 24 * 60
+}
+
+// Org es la organización del hub con los eventos de sus proyectos.
+type Org struct {
+	Name, Hub  string
+	MonthlyUSD float64
+	Projects   []OrgProject
+	Events     []usage.Event // de todos los proyectos con clon, con Repo = su nombre
+}
+
+// OrgProject es un proyecto de la organización.
+type OrgProject struct {
+	Name, State string // State: "ok" o por qué no se lee
+	MonthlyUSD  float64
 }
 
 type option struct{ Key, Label string }
 
 var (
-	views = []option{{"project", "Proyecto › Persona"}, {"person", "Persona › Proyecto"}, {"model", "Modelos › Persona"}, {"agent", "Agentes › Proyecto"}}
-	// periods: la clave es lo que va en ?since=.
+	views   = []option{{"project", "Proyecto › Persona"}, {"person", "Persona › Proyecto"}, {"model", "Modelos › Persona"}, {"agent", "Agentes › Proyecto"}}
 	periods = []option{{"7d", "7 días"}, {"30d", "30 días"}, {"90d", "90 días"}, {"all", "Todo"}}
 )
 
-var page = template.Must(template.New("page").Funcs(template.FuncMap{
+var funcs = template.FuncMap{
 	"usd":   func(v float64) string { return "$" + usd(v) },
 	"count": func(n int64) string { return ccf.FormatCount(n) },
 	"pct":   func(v float64) string { return fmt.Sprintf("%.0f%%", 100*v) },
@@ -52,6 +155,15 @@ var page = template.Must(template.New("page").Funcs(template.FuncMap{
 		}
 		return fmt.Sprintf("%.1f", 100*v/max)
 	},
+	"width": func(part, whole float64) string {
+		if whole <= 0 || part <= 0 {
+			return "0"
+		}
+		if part > whole {
+			return "100"
+		}
+		return fmt.Sprintf("%.1f", 100*part/whole)
+	},
 	"models": func(m map[string]int) string {
 		keys := make([]string, 0, len(m))
 		for k := range m {
@@ -60,7 +172,64 @@ var page = template.Must(template.New("page").Funcs(template.FuncMap{
 		sort.Strings(keys)
 		return strings.Join(keys, " · ")
 	},
-}).Parse(pageHTML))
+	"day": func(t time.Time) string {
+		if t.IsZero() {
+			return "—"
+		}
+		return t.UTC().Format("2006-01-02 15:04")
+	},
+	"minutes": func(m float64) string {
+		switch {
+		case m >= 120:
+			return fmt.Sprintf("%.1f h", m/60)
+		case m >= 1:
+			return fmt.Sprintf("%.0f min", m)
+		}
+		return fmt.Sprintf("%.0f s", m*60)
+	},
+	"objective": func(v float64) string {
+		return strings.TrimRight(strings.TrimRight(fmt.Sprintf("%.4f", v), "0"), ".") + " %"
+	},
+	"status": statusLabel,
+	"decision": func(d string) string {
+		switch d {
+		case "approved":
+			return "aprobado"
+		case "rejected":
+			return "rechazado"
+		}
+		return d
+	},
+	"inc": func(i int) int { return i + 1 },
+}
+
+// statusLabel traduce el estado de un paso.
+func statusLabel(s string) string {
+	switch s {
+	case "pending":
+		return "pendiente"
+	case "review":
+		return "por revisar"
+	case "done":
+		return "hecho"
+	case "failed":
+		return "falló"
+	case "blocked":
+		return "en la cola del gate"
+	case "redo":
+		return "rehacer"
+	}
+	return s
+}
+
+var pages = map[string]*template.Template{}
+
+func init() {
+	layout := template.Must(template.New("layout.html").Funcs(funcs).ParseFS(templatesFS, "templates/layout.html"))
+	for _, name := range []string{"costs", "budget", "work", "gate", "slo", "org", "message"} {
+		pages[name] = template.Must(template.Must(layout.Clone()).ParseFS(templatesFS, "templates/"+name+".html"))
+	}
+}
 
 func usd(v float64) string {
 	s := ccf.FormatUSD(v)
@@ -92,8 +261,13 @@ func Loopback(addr string) error {
 // Handler devuelve el manejador HTTP con las protecciones aplicadas.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/", s.page)
+	mux.HandleFunc("/", s.costs)
 	mux.HandleFunc("/api/usage", s.api)
+	mux.HandleFunc("/presupuesto", s.budget)
+	mux.HandleFunc("/workstreams", s.work)
+	mux.HandleFunc("/gate", s.gate)
+	mux.HandleFunc("/slo", s.slo)
+	mux.HandleFunc("/org", s.org)
 	return protect(mux)
 }
 
@@ -104,6 +278,7 @@ func protect(next http.Handler) http.Handler {
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("Referrer-Policy", "no-referrer")
 		h.Set("Cache-Control", "no-store")
+		h.Set("Cross-Origin-Resource-Policy", "same-origin")
 		host := r.Host
 		if hh, _, err := net.SplitHostPort(r.Host); err == nil {
 			host = hh
@@ -126,114 +301,59 @@ func protect(next http.Handler) http.Handler {
 	})
 }
 
-type viewData struct {
-	Title, View, Since, PeriodLabel, Heading, Sources string
-	All                                               usage.Totals
-	Rows                                              []usage.Row
-	Max                                               float64
-	Views, Periods                                    []option
+type navItem struct {
+	Path, Label string
+	On          bool
 }
 
-func (s *Server) build(r *http.Request) (*viewData, error) {
-	view := r.URL.Query().Get("view")
-	if !valid(views, view) {
-		view = "project"
-	}
-	since := r.URL.Query().Get("since")
-	if !valid(periods, since) {
-		since = "30d"
-	}
-	events, err := s.Load()
-	if err != nil {
-		return nil, err
-	}
-	now := time.Now().UTC()
+// pageData es lo que comparten todas las páginas.
+type pageData struct {
+	Title, Section, Viewer, Hub, Sources string
+	Admin                                bool
+	Admins                               []string
+	Nav                                  []navItem
+	Notices                              []string
+	Body                                 any
+}
+
+func (s *Server) now() time.Time {
 	if s.Now != nil {
-		now = s.Now()
+		return s.Now().UTC()
 	}
-	var from time.Time
-	switch since {
-	case "7d":
-		from = now.AddDate(0, 0, -7)
-	case "30d":
-		from = now.AddDate(0, 0, -30)
-	case "90d":
-		from = now.AddDate(0, 0, -90)
-	}
-	events = usage.Filter(events, from)
-	outer, inner, heading := usage.ByRepo, usage.ByPerson, "Proyecto › persona"
-	switch view {
-	case "person":
-		outer, inner, heading = usage.ByPerson, usage.ByRepo, "Persona › proyecto"
-	case "model":
-		outer, inner, heading = usage.ByModel, usage.ByPerson, "Modelo › persona"
-	case "agent":
-		outer, inner, heading = usage.ByAgent, usage.ByRepo, "Agente › proyecto"
-	}
-	rows, all := usage.Group(events, outer, inner)
-	if view == "model" || view == "agent" {
-		// Estas vistas son de consumo: los eventos sin tokens ni costo (notas,
-		// aprobaciones) no tienen modelo y solo agregarían ruido.
-		kept := rows[:0]
-		for _, r := range rows {
-			if r.Tokens.In+r.Tokens.Out > 0 || r.CostTotal() > 0 {
-				kept = append(kept, r)
-			}
-		}
-		rows = kept
-	}
-	d := &viewData{Title: s.Title, View: view, Since: since, Heading: heading, All: all, Rows: rows,
-		Views: views, Periods: periods, Sources: strings.Join(s.Sources, ", ")}
-	for _, p := range periods {
-		if p.Key == since {
-			d.PeriodLabel = p.Label
-		}
-	}
-	for _, r := range rows {
-		v := r.CostTotal()
-		if v == 0 {
-			v = float64(r.Tokens.In + r.Tokens.Out)
-		}
-		if v > d.Max {
-			d.Max = v
-		}
-	}
-	return d, nil
+	return time.Now().UTC()
 }
 
-func valid(opts []option, key string) bool {
-	for _, o := range opts {
-		if o.Key == key {
-			return true
-		}
+func (s *Server) page(section string, body any) pageData {
+	items := []navItem{{"/", "Costos", false}, {"/presupuesto", "Presupuesto", false}, {"/workstreams", "Workstreams", false},
+		{"/gate", "Gate", false}, {"/slo", "SLOs", false}}
+	if s.Admin && s.Org != nil {
+		items = append(items, navItem{"/org", "Organización", false})
 	}
-	return false
+	for i := range items {
+		items[i].On = items[i].Path == section
+	}
+	return pageData{Title: s.Title, Section: section, Viewer: s.Viewer, Hub: s.Hub, Admin: s.Admin, Admins: s.Admins,
+		Sources: strings.Join(s.Sources, ", "), Nav: items, Notices: s.Notices, Body: body}
 }
 
-func (s *Server) page(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != "/" {
-		http.NotFound(w, r)
-		return
-	}
-	d, err := s.build(r)
-	if err != nil {
-		http.Error(w, "no se pudo leer el ledger: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
+func (s *Server) render(w http.ResponseWriter, name, section string, body any) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := page.Execute(w, d); err != nil {
+	if err := pages[name].ExecuteTemplate(w, "layout.html", s.page(section, body)); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
 }
 
-func (s *Server) api(w http.ResponseWriter, r *http.Request) {
-	d, err := s.build(r)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+// message muestra una página con un texto, con su código de estado.
+func (s *Server) message(w http.ResponseWriter, section string, code int, title, text string) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(code)
+	_ = pages["message"].ExecuteTemplate(w, "layout.html", s.page(section, map[string]string{"Heading": title, "Text": text}))
+}
+
+func only(w http.ResponseWriter, r *http.Request, path string) bool {
+	if r.URL.Path != path {
+		http.NotFound(w, r)
+		return false
 	}
-	w.Header().Set("Content-Type", "application/json")
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
-	_ = enc.Encode(map[string]any{"view": d.View, "since": d.Since, "totals": d.All, "rows": d.Rows})
+	return true
 }

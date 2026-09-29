@@ -72,7 +72,7 @@ func init() {
 		{"push", "[--remote origin] [--agent A] [--dry-run]", "publica con autoría, estándar y ritmo humano revisados", cmdPush},
 		{"pull", "[--remote origin]", "trae cambios y resume el contexto nuevo", cmdPull},
 		{"auth", "login | status [--check] | logout", "token de GitHub en el llavero, nunca en archivos", cmdAuth},
-		{"web", "[--addr 127.0.0.1:7410]", "costos por proyecto y por persona en el navegador", cmdWeb},
+		{"web", "[--addr 127.0.0.1:7410]", "costos, presupuesto, workstreams, gate y SLOs en el navegador, con la visibilidad de D10 (ADR-0019)", cmdWeb},
 		{"generate", "agents [--check]", "genera AGENTS.md desde los documentos coyote", cmdGenerate},
 		{"install", "--ide IDE|all | --ci github [--check]", "instala el gate, los agentes y las skills en el IDE, o el pipeline del producto", cmdInstall},
 		{"hooks", "install [--force]", "instala el hook commit-msg", cmdHooks},

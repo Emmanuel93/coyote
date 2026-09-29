@@ -1,0 +1,34 @@
+# Web v1
+
+Estado: nuevo en v0.7.0 (la web v0 llegó en v0.2.0) · Implementación: `internal/web`, `coyote web` · Decisión: ADR-0019
+
+`coyote web` sirve la operación del proyecto en el navegador: costos, presupuesto, workstreams, gate, SLOs y, para admins, la organización. Todo se lee en cada petición del ledger, de los planes, de la cola del gate y del hub; la web no guarda nada ni agrega comandos.
+
+## Secciones
+
+| Ruta | Muestra | Fuente |
+| --- | --- | --- |
+| `/` | Costos por proyecto, persona, modelo o agente, en 7, 30 o 90 días o todo | el ledger del proyecto y de sus repos registrados |
+| `/presupuesto` | Gasto del mes (UTC), tope del proyecto, proyección a fin de mes, tu parte, tope por corrida y de la organización, workstreams abiertos con su tope | `project.yaml`, `router.yaml`, el hub y los planes |
+| `/workstreams` | Cada plan con el estado de sus pasos, corridas y costo | `coyote/workstreams/*/plan.yaml` y el ledger |
+| `/gate` | La cola, las aprobaciones firmadas en esta máquina y los gates de release | `.coyote/proposals`, `coyote/approvals` y el ledger |
+| `/slo` | Objetivos, presupuesto de error y estado de las alertas generadas | `coyote/slo/*.yaml` (slo-v1) |
+| `/org` | Solo admins: gasto del mes de cada proyecto de la organización y por persona, contra el tope del hub | `hub.yaml` y el ledger del clon de cada proyecto |
+| `/api/usage` | Los costos en JSON, con la misma visibilidad | el ledger |
+
+## Visibilidad (D10)
+
+- La persona es la identidad de git de quien corre `coyote web`, como en el ledger: `COYOTE_USER`, `git config coyote.user` o el correo.
+- Los admins son los de `hub.yaml` y los de `admins:` en `project.yaml`.
+- Una persona que no es admin ve sus eventos con desglose y los totales del proyecto sin desglose. `/org` le responde 403.
+- Un admin ve todo.
+- Un hub que no se puede leer deja un aviso y a nadie como admin del hub: por defecto se muestra menos, no más.
+- Es visibilidad por defecto, no control de acceso: el ledger está en git y quien lee el repo lo lee. Cada página lo dice.
+
+## Superficie
+
+- Escucha solo en loopback; `localhost` se traduce a 127.0.0.1.
+- Rechaza un `Host` que no sea loopback (DNS rebinding) y las peticiones en forma absoluta.
+- Solo GET y HEAD. No hay formularios: aprobar, rechazar y revocar se hacen en la terminal, donde coyote verifica que decide una persona.
+- Sin JavaScript. La CSP es `default-src 'none'` con estilos en línea; `frame-ancestors 'none'`, `no-referrer` y `no-store`.
+- Todo texto del ledger, de los planes o de la cola se escapa. Una acción de la cola se muestra en una línea visible y corta; si parece llevar un secreto, se oculta y se revisa con `coyote review <id>`.

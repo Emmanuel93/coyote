@@ -2,6 +2,10 @@ package cli
 
 import (
 	"encoding/json"
+	"fmt"
+	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -85,4 +89,94 @@ func TestHubDeLaOrganizacion(t *testing.T) {
 	// init valida lo que escribe.
 	must(t, run(t, base, "", "init", "otro", "--hub", "https://github.com/acme/hub"), 1, "hub como URL")
 	must(t, run(t, base, "", "hub", "init", "h2", "--org", "acme: x"), 1, "organización inválida")
+}
+
+// webPages arranca coyote web y pide varias rutas.
+func webPages(t *testing.T, root string, paths ...string) map[string]string {
+	t.Helper()
+	old := webServe
+	defer func() { webServe = old }()
+	pages := map[string]string{}
+	webServe = func(srv *http.Server, ln net.Listener) error {
+		defer ln.Close()
+		for _, p := range paths {
+			req := httptest.NewRequest(http.MethodGet, p, nil)
+			req.Host = "127.0.0.1"
+			rec := httptest.NewRecorder()
+			srv.Handler.ServeHTTP(rec, req)
+			pages[p] = fmt.Sprintf("%d\n%s", rec.Code, rec.Body.String())
+		}
+		return nil
+	}
+	must(t, run(t, root, "", "web", "--addr", "127.0.0.1:0"), 0, "web")
+	return pages
+}
+
+func TestWebV1ConHubYVisibilidad(t *testing.T) {
+	base := setup(t)
+	hubDir := filepath.Join(base, "acme-hub")
+	must(t, run(t, base, "", "hub", "init", "acme-hub", "--org", "acme"), 0, "hub init")
+	conf := readFile(t, filepath.Join(hubDir, "coyote/hub.yaml"))
+	conf = strings.Replace(conf, "monthly_usd: 0", "monthly_usd: 50", 1)
+	conf = strings.Replace(conf, "projects: []", "projects:\n  - { name: shop, path: ../shop }\n  - { name: lejos, path: ../no-esta }", 1)
+	if err := os.WriteFile(filepath.Join(hubDir, "coyote/hub.yaml"), []byte(conf), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, hubDir, "add", "-A")
+	git(t, hubDir, "commit", "-q", "-m", "chore(hub): organización")
+
+	root := filepath.Join(base, "shop")
+	must(t, run(t, base, "", "init", "shop", "--type", "backend", "--purpose", "API de la tienda demo", "--hub", "../acme-hub"), 0, "init")
+	must(t, run(t, root, "", "record", "run", "implementa pedidos", "--agent", "coyote-dev", "--tokens", "12k/8k/1k", "--cost", "0.01+0.02", "--refs", "model:sonnet-5"), 0, "record ana")
+	t.Setenv("COYOTE_USER", "luis")
+	must(t, run(t, root, "", "record", "run", "revisa pagos", "--agent", "coyote-reviewer", "--tokens", "2k/0/1k", "--cost", "0.2+0.3", "--refs", "model:opus-5.5"), 0, "record luis")
+	must(t, run(t, root, "", "propose", "--bash", "make deploy TOKEN=ghp_"+strings.Repeat("a", 36)), 0, "propose")
+	must(t, run(t, root, "", "propose", "--bash", "make test <b>x</b>"), 0, "propose 2")
+	if err := os.WriteFile(filepath.Join(root, "coyote/approvals/P-0001.json"), []byte(`{"id":"P-0001","gate":"G1","release":"v0.1.0","decision":"approved","approver":"@ana","date":"2026-09-01","authorizes":["etiquetar v0.1.0"]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ws := filepath.Join(root, "coyote/workstreams/W-0001-pedidos")
+	if err := os.MkdirAll(ws, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	plan := "id: W-0001\ntitle: pedidos\nowner: \"@ana\"\nautonomy: manual\nrisk: R2\nbudget_usd: 5\nsteps:\n  - { id: S1, does: diseña pedidos, agent: coyote-architect, max_usd: 1 }\n"
+	if err := os.WriteFile(filepath.Join(ws, "plan.yaml"), []byte(plan), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Luis no es admin: ve lo suyo y los totales; no ve la organización.
+	pages := webPages(t, root, "/?since=all", "/org", "/gate", "/workstreams", "/presupuesto")
+	if p := pages["/?since=all"]; strings.Contains(p, "<td>@ana") || !strings.Contains(p, "<td>@luis") || !strings.Contains(p, "total del proyecto") {
+		t.Fatalf("luis no ve el desglose de ana:\n%s", p)
+	}
+	if !strings.HasPrefix(pages["/org"], "403") {
+		t.Fatalf("/org para luis: %s", pages["/org"][:3])
+	}
+	gatePage := pages["/gate"]
+	if strings.Contains(gatePage, "ghp_") || !strings.Contains(gatePage, "TOKEN=***") || strings.Contains(gatePage, "<b>x</b>") || !strings.Contains(gatePage, "G1") {
+		t.Fatalf("la cola se muestra sin secretos ni HTML, con los gates de release:\n%s", gatePage)
+	}
+	if !strings.Contains(pages["/workstreams"], "W-0001") || !strings.Contains(pages["/presupuesto"], "$50.00") {
+		t.Fatalf("workstreams y presupuesto:\n%s\n%s", pages["/workstreams"], pages["/presupuesto"])
+	}
+
+	// Ana es admin del hub: ve a luis y la organización, con el proyecto sin clon.
+	t.Setenv("COYOTE_USER", "ana")
+	pages = webPages(t, root, "/?view=person&since=all", "/org")
+	if !strings.Contains(pages["/?view=person&since=all"], "@luis") {
+		t.Fatalf("ana, admin, ve el desglose:\n%s", pages["/?view=person&since=all"])
+	}
+	org := pages["/org"]
+	if !strings.HasPrefix(org, "200") || !strings.Contains(org, "Organización acme") || !strings.Contains(org, "sin clon en esta máquina") || !strings.Contains(org, "@luis") {
+		t.Fatalf("vista de la organización:\n%s", org)
+	}
+}
+
+func TestWebNoMuestraSecretos(t *testing.T) {
+	if got := webAction("P-1", "Bash: export K=AKIA"+"Q3VZ7T2M9KX4B8JN"); strings.Contains(got, "Q3VZ") || !strings.Contains(got, "coyote review P-1") {
+		t.Fatalf("una acción con un secreto no se muestra: %s", got)
+	}
+	if got := webAction("P-2", "Bash: make test\n\x1b[31mrojo"); strings.ContainsAny(got, "\n\x1b") {
+		t.Fatalf("una línea visible, sin controles: %q", got)
+	}
 }

@@ -41,3 +41,4 @@
 2026-09-29T06:04Z|@eramirezhdez/claude-code|W-0006|coyote|chore|release|registra la aprobación de G6 en el ledger|-|-|-|ok
 2026-09-29T06:23Z|@eramirezhdez/coyote-sr-solution-architect|W-0007|coyote|doc|plan|razonamiento de v0.7 y ADR-0018 a ADR-0021|-|-|-|ok
 2026-09-29T06:32Z|@eramirezhdez/coyote-architect|W-0007|coyote|feat|hub|hub de la organización leído en un commit con git de plomería|-|-|-|ok
+2026-09-29T06:40Z|@eramirezhdez/coyote-dev|W-0007|coyote|feat|web|web v1 con presupuesto, workstreams, gate, SLOs y la visibilidad de D10|-|-|-|ok

@@ -1,0 +1,30 @@
+{{define "content"}}{{with .Body}}
+<h1>Presupuesto de {{.Month}}</h1>
+<p class="sub">Día {{.DaysElapsed}} de {{.DaysInMonth}} · el mes se cuenta en UTC</p>
+<section class="kpis">
+  <div class="kpi"><b>{{usd .Spent}}</b><span>gastado en el proyecto</span></div>
+  <div class="kpi"><b>{{if gt .Cap 0.0}}{{usd .Cap}}{{else}}—{{end}}</b><span>tope mensual del proyecto</span></div>
+  <div class="kpi"><b>{{usd .Projection}}</b><span>proyección a fin de mes</span></div>
+  <div class="kpi"><b>{{usd .Mine}}</b><span>tu parte</span></div>
+</section>
+{{if gt .Cap 0.0}}
+<div class="meter" role="img" aria-label="gastado contra el tope"><i style="width:{{width .Spent .Cap}}%"></i></div>
+{{end}}
+<p class="{{.StateClass}}">{{.State}}.</p>
+<table><tbody>
+<tr><td>Tope por corrida (router)</td><td>{{if gt .RunCap 0.0}}{{usd .RunCap}}{{else}}—{{end}}</td></tr>
+<tr><td>Tope mensual de la organización (hub)</td><td>{{if gt .OrgCap 0.0}}{{usd .OrgCap}}{{else}}—{{end}}</td></tr>
+{{if .OrgKnown}}<tr><td>Gastado en la organización este mes</td><td>{{usd .OrgSpent}}</td></tr>{{end}}
+</tbody></table>
+<h2>Workstreams abiertos</h2>
+{{if .Workstreams}}
+<table>
+<thead><tr><th>Workstream</th><th>Gastado</th><th>Tope</th><th class="hide-sm">Corridas</th></tr></thead>
+<tbody>
+{{range .Workstreams}}<tr><td>{{.ID}} <span class="muted">{{.Title}}</span>{{if gt .BudgetUSD 0.0}}<div class="meter"><i style="width:{{width .SpentUSD .BudgetUSD}}%"></i></div>{{end}}</td><td>{{usd .SpentUSD}}</td><td>{{if gt .BudgetUSD 0.0}}{{usd .BudgetUSD}}{{else}}—{{end}}</td><td class="hide-sm">{{.Runs}}</td></tr>{{end}}
+</tbody></table>
+{{else}}
+<table><tbody><tr><td class="empty">Ningún workstream abierto gasta ni declara tope.</td></tr></tbody></table>
+{{end}}
+<p class="muted">Los topes salen de coyote/project.yaml (budgets), del router (max_usd_per_run), del hub (budgets) y de cada plan (budget_usd). coyote run no lanza una corrida que pase el tope del mes.</p>
+{{end}}{{end}}

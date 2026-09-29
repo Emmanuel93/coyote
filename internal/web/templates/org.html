@@ -1,0 +1,28 @@
+{{define "content"}}{{with .Body}}
+<h1>Organización {{.Name}}</h1>
+<p class="sub">{{.Month}} · hub {{.Hub}}</p>
+<section class="kpis">
+  <div class="kpi"><b>{{usd .Spent}}</b><span>gastado en la organización</span></div>
+  <div class="kpi"><b>{{if gt .MonthlyUSD 0.0}}{{usd .MonthlyUSD}}{{else}}—{{end}}</b><span>tope mensual (hub)</span></div>
+  <div class="kpi"><b>{{len .Projects}}</b><span>proyectos</span></div>
+</section>
+{{if gt .MonthlyUSD 0.0}}<div class="meter"><i style="width:{{width .Spent .MonthlyUSD}}%"></i></div>{{end}}
+<p class="{{.StateClass}}">{{.State}}.</p>
+<h2>Proyectos</h2>
+<table>
+<thead><tr><th>Proyecto</th><th class="text">Estado</th><th>Eventos</th><th>Gastado</th><th>Tope</th></tr></thead>
+<tbody>
+{{range .Projects}}<tr><td>{{.Name}}</td><td class="text{{if ne .State "ok"}} warn{{end}}">{{.State}}</td><td>{{.Events}}</td><td>{{usd .Spent}}</td><td>{{if gt .MonthlyUSD 0.0}}{{usd .MonthlyUSD}}{{else}}—{{end}}</td></tr>{{end}}
+</tbody></table>
+<h2>Personas</h2>
+{{if .People}}
+<table>
+<thead><tr><th>Persona › proyecto</th><th>Eventos</th><th>$ total</th></tr></thead>
+<tbody>
+{{range .People}}<tr class="parent"><td>{{.Key}}</td><td>{{.Events}}</td><td>{{usd .CostTotal}}</td></tr>
+{{range .Children}}<tr class="child"><td>{{.Key}}</td><td>{{.Events}}</td><td>{{usd .CostTotal}}</td></tr>{{end}}{{end}}
+</tbody></table>
+{{else}}
+<table><tbody><tr><td class="empty">Sin gasto este mes.</td></tr></tbody></table>
+{{end}}
+{{end}}{{end}}

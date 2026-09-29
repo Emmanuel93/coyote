@@ -1,0 +1,36 @@
+{{define "content"}}{{with .Body}}
+<h1>Costos de agentes</h1>
+<p class="sub">{{.PeriodLabel}} · {{.All.Events}} eventos{{if .Mine}} tuyos{{end}}</p>
+<section class="kpis">
+  <div class="kpi"><b>{{usd .All.CostTotal}}</b><span>{{if .Mine}}tu costo{{else}}costo total{{end}}</span></div>
+  {{if .Mine}}<div class="kpi"><b>{{usd .Project.CostTotal}}</b><span>total del proyecto, todas las personas</span></div>{{end}}
+  <div class="kpi"><b>{{usd .All.Cost.In}}</b><span>costo de entrada</span></div>
+  <div class="kpi"><b>{{usd .All.Cost.Out}}</b><span>costo de salida</span></div>
+  <div class="kpi"><b>{{count .All.Tokens.In}}</b><span>tokens de entrada ({{pct .All.CacheShare}} de caché)</span></div>
+  <div class="kpi"><b>{{count .All.Tokens.Out}}</b><span>tokens de salida</span></div>
+</section>
+<nav class="pills" aria-label="Vista">
+{{range .Views}}<a href="?view={{.Key}}&amp;since={{$.Body.Since}}"{{if eq .Key $.Body.View}} class="on"{{end}}>{{.Label}}</a>{{end}}
+</nav>
+<nav class="pills" aria-label="Periodo">
+{{range .Periods}}<a href="?view={{$.Body.View}}&amp;since={{.Key}}"{{if eq .Key $.Body.Since}} class="on"{{end}}>{{.Label}}</a>{{end}}
+</nav>
+{{if .Rows}}
+<div class="scroll"><table>
+<thead><tr><th>{{.Heading}}</th><th class="hide-sm">Eventos</th><th>Entrada</th><th class="hide-sm">Caché</th><th>Salida</th><th class="hide-sm">$ entrada</th><th class="hide-sm">$ salida</th><th>$ total</th></tr></thead>
+<tbody>
+{{range .Rows}}
+<tr class="parent"><td>{{.Key}}{{if ne $.Body.View "model"}}{{with models .Models}}<div class="models">{{.}}</div>{{end}}{{end}}<div class="bar" style="width:{{bar .Totals $.Body.Max}}%"></div></td>
+<td class="hide-sm">{{.Events}}</td><td>{{count .Tokens.In}}</td><td class="hide-sm">{{count .Tokens.Cache}}</td><td>{{count .Tokens.Out}}</td><td class="hide-sm">{{usd .Cost.In}}</td><td class="hide-sm">{{usd .Cost.Out}}</td><td>{{usd .CostTotal}}</td></tr>
+{{range .Children}}
+<tr class="child"><td>{{.Key}}<div class="bar" style="width:{{bar .Totals $.Body.Max}}%"></div></td>
+<td class="hide-sm">{{.Events}}</td><td>{{count .Tokens.In}}</td><td class="hide-sm">{{count .Tokens.Cache}}</td><td>{{count .Tokens.Out}}</td><td class="hide-sm">{{usd .Cost.In}}</td><td class="hide-sm">{{usd .Cost.Out}}</td><td>{{usd .CostTotal}}</td></tr>
+{{end}}
+{{end}}
+</tbody>
+</table></div>
+{{else}}
+<table><tbody><tr><td class="empty">Sin eventos con consumo en este periodo.</td></tr></tbody></table>
+{{end}}
+<p class="muted">Los cierres de workstream resumen otros eventos y no se suman. El costo es la estimación de cada corrida, no la factura.</p>
+{{end}}{{end}}

@@ -1,0 +1,36 @@
+{{define "content"}}{{with .Body}}
+<h1>Gate</h1>
+<p class="sub">Revisa con <code>coyote review &lt;id&gt;</code> y decide en tu terminal con <code>coyote approve</code> o <code>coyote reject</code>: la web no aprueba.</p>
+{{range .Problems}}<p class="notice">{{.}}</p>{{end}}
+<h2>En la cola ({{len .Pending}})</h2>
+{{if .Pending}}
+<div class="scroll"><table>
+<thead><tr><th>ID</th><th class="text">Acción</th><th class="text hide-sm">Pedida por</th><th class="text">Estado</th><th class="hide-sm">Desde</th></tr></thead>
+<tbody>
+{{range .Pending}}<tr><td><code>{{.ID}}</code></td><td class="text"><code>{{.Action}}</code></td><td class="text hide-sm">{{.By}}</td><td class="text">{{.State}}</td><td class="hide-sm">{{day .First}}</td></tr>{{end}}
+</tbody></table></div>
+{{else}}
+<table><tbody><tr><td class="empty">No hay acciones esperando decisión.</td></tr></tbody></table>
+{{end}}
+<h2>Aprobaciones</h2>
+{{if .Grants}}
+<div class="scroll"><table>
+<thead><tr><th>ID</th><th class="text">Acción</th><th class="text hide-sm">Aprobó</th><th class="text">Estado</th><th>Usos</th><th class="hide-sm">Vence</th></tr></thead>
+<tbody>
+{{range .Grants}}<tr><td><code>{{.ID}}</code></td><td class="text"><code>{{.Action}}</code></td><td class="text hide-sm">{{.Approver}}</td><td class="text{{if eq .State "vigente"}} ok{{end}}">{{.State}}</td><td>{{.Left}}</td><td class="hide-sm">{{day .Expires}}</td></tr>{{end}}
+</tbody></table></div>
+{{else}}
+<table><tbody><tr><td class="empty">Ninguna aprobación firmada en esta máquina.</td></tr></tbody></table>
+{{end}}
+<h2>Gates de release</h2>
+{{if .Releases}}
+{{range .Releases}}
+<details>
+<summary>{{.Gate}} · {{.Release}} <span class="tag">{{decision .Decision}}</span> <span class="muted">{{.Date}} · {{.Approver}}</span></summary>
+<ul>{{range .Authorizes}}<li>{{.}}</li>{{end}}</ul>
+</details>
+{{end}}
+{{else}}
+<table><tbody><tr><td class="empty">Sin gates de release registrados.</td></tr></tbody></table>
+{{end}}
+{{end}}{{end}}

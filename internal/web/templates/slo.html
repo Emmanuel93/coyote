@@ -1,0 +1,16 @@
+{{define "content"}}
+<h1>SLOs</h1>
+<p class="sub">Objetivos por servicio y su presupuesto de error; las alertas salen de coyote/slo/&lt;servicio&gt;.yaml con <code>coyote slo rules</code> (ADR-0020).</p>
+{{if .Body}}
+<div class="scroll"><table>
+<thead><tr><th>Servicio · SLO</th><th>Objetivo</th><th class="hide-sm">Periodo</th><th>Presupuesto</th><th class="text">Alertas</th><th class="text">Reglas</th></tr></thead>
+<tbody>
+{{range .Body}}<tr><td>{{.Service}} · {{.Name}}</td><td>{{objective .Objective}}</td><td class="hide-sm">{{.PeriodDays}} días</td><td>{{minutes .BudgetMinutes}}</td>
+<td class="text">{{if .Page}}page{{end}}{{if and .Page .Ticket}} · {{end}}{{if .Ticket}}ticket{{end}}{{if not (or .Page .Ticket)}}<span class="warn">ninguna</span>{{end}}{{with .Runbook}}<div class="models">{{.}}</div>{{end}}</td>
+<td class="text">{{if .Problem}}<span class="bad">{{.Problem}}</span>{{else if .Current}}<span class="ok">vigentes</span>{{else}}<span class="warn">por generar</span>{{end}}</td></tr>{{end}}
+</tbody></table></div>
+<p class="muted">El presupuesto es lo que el servicio puede fallar en el periodo sin romper su objetivo. El consumo en vivo está en Grafana, sobre las reglas que cargan la persona o el pipeline.</p>
+{{else}}
+<table><tbody><tr><td class="empty">Sin SLOs: declara coyote/slo/&lt;servicio&gt;.yaml y genera sus alertas con coyote slo rules.</td></tr></tbody></table>
+{{end}}
+{{end}}
