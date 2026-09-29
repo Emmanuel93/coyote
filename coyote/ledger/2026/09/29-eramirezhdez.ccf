@@ -5,3 +5,5 @@
 2026-09-29T01:08Z|@eramirezhdez/claude-code|W-0005|coyote|doc|release|aprobación de G5 para v0.5.0|-|-|-|ok
 2026-09-29T01:08Z|@eramirezhdez/claude-code|-|coyote|rel|release|v0.5.0 etiquetada en la rama v0.5 y binarios generados|tag:v0.5.0 sha:8454b1a|-|-|ok
 2026-09-29T01:08Z|@eramirezhdez/claude-code|W-0005|coyote|chore|release|registra el release v0.5.0 en el ledger|-|-|-|ok
+2026-09-29T01:08Z|@eramirezhdez/claude-code|-|coyote|apr|release|G5 aprobado: v0.5.0 en su rama, pipeline en ramas, supervised tras medir|-|-|-|ok
+2026-09-29T01:08Z|@eramirezhdez/claude-code|W-0005|coyote|chore|release|registra la aprobación de G5 en el ledger|-|-|-|ok
