@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/Emmanuel93/coyote/internal/fsx"
@@ -21,6 +22,7 @@ const (
 	maxTools      = 64
 	maxUnknown    = 32
 	maxCanaries   = 32
+	maxToolName   = 64
 	maxPulseBytes = 1 << 20
 )
 
@@ -51,11 +53,14 @@ func LoadPulses(root string) Pulses {
 }
 
 // Record anota una llamada de un IDE: la herramienta, si el gate no la
-// conoce y el canario, si la acción lo corre.
+// conoce y el canario, si la acción es la shell del IDE corriéndolo (el gate
+// la niega siempre). Los nombres de herramientas se acortan: el archivo del
+// latido tiene tope y no debe perder el canario.
 func (p *Pulses) Record(a Action, now time.Time) {
 	if a.IDE == "" {
 		return
 	}
+	a.Tool = shortName(a.Tool)
 	if p.IDEs == nil {
 		p.IDEs = map[string]*Pulse{}
 	}
@@ -76,13 +81,21 @@ func (p *Pulses) Record(a Action, now time.Time) {
 		x.Unknown = append(x.Unknown, a.Tool)
 		sort.Strings(x.Unknown)
 	}
-	if code, ok := CanaryOf(a); ok {
+	if code, ok := CanaryRun(a.Command); ok && Classify(a) == KindShell {
 		if x.Canary == nil {
 			x.Canary = map[string]time.Time{}
 		}
 		x.Canary[code] = now.UTC()
 		trimTimes(x.Canary, maxCanaries)
 	}
+}
+
+// shortName acorta un nombre de herramienta a maxToolName caracteres.
+func shortName(s string) string {
+	if r := []rune(s); len(r) > maxToolName {
+		return string(r[:maxToolName]) + "…"
+	}
+	return s
 }
 
 // Unknown informa si el gate no conoce la herramienta: no es de shell, de
@@ -182,39 +195,35 @@ func Measure(p Pulses, reqs []CanaryRequest, ran map[string]time.Time, ide strin
 		return Level{Detail: fmt.Sprintf("el gate recibe llamadas de %s (la última, %s); mide si respeta la negación con coyote doctor --ide %s --canary",
 			ide, x.Last.Local().Format("2006-01-02 15:04"), ide)}
 	}
-	seenBy, seenAt := "", time.Time{}
+	// Solo cuenta el hook del IDE medido: el canario que llega por el hook de
+	// otro IDE no dice nada de este.
+	var seenAt time.Time
+	seen := false
 	if x != nil {
-		if t, ok := x.Canary[req.Code]; ok {
-			seenBy, seenAt = ide, t
-		}
-	}
-	if seenBy == "" {
-		names := make([]string, 0, len(p.IDEs))
-		for n := range p.IDEs {
-			names = append(names, n)
-		}
-		sort.Strings(names)
-		for _, n := range names {
-			if p.IDEs[n] == nil {
-				continue
-			}
-			if t, ok := p.IDEs[n].Canary[req.Code]; ok {
-				seenBy, seenAt = n, t
-				break
-			}
-		}
-	}
-	via := ""
-	if seenBy != "" && seenBy != ide {
-		via = fmt.Sprintf(" (llegó por el hook de %s)", seenBy)
+		seenAt, seen = x.Canary[req.Code]
 	}
 	ranAt, didRun := ran[req.Code]
 	switch {
-	case seenBy != "" && !didRun:
-		return Level{Level: 1, At: seenAt, Detail: "nivel 1: el IDE llamó al gate y respetó la negación del canario" + via}
-	case seenBy != "" && didRun:
-		return Level{Level: 2, At: ranAt, Detail: "nivel 2: el IDE llamó al gate, pero corrió el canario aunque el gate lo negó" + via}
-	case didRun:
+	case seen && !didRun:
+		return Level{Level: 1, At: seenAt, Detail: "nivel 1: el IDE llamó al gate y respetó la negación del canario"}
+	case seen && didRun:
+		return Level{Level: 2, At: ranAt, Detail: "nivel 2: el IDE llamó al gate, pero corrió el canario aunque el gate lo negó"}
+	}
+	var others []string
+	for n, px := range p.IDEs {
+		if px == nil || n == ide {
+			continue
+		}
+		if _, ok := px.Canary[req.Code]; ok {
+			others = append(others, n)
+		}
+	}
+	sort.Strings(others)
+	if len(others) > 0 {
+		return Level{Detail: fmt.Sprintf("el canario %s llegó por el hook de %s, no por el de %s: pide uno nuevo con coyote doctor --ide %s --canary y córrelo desde %s",
+			req.Code, strings.Join(others, " y "), ide, ide, ide)}
+	}
+	if didRun {
 		return Level{Level: 3, At: ranAt, Detail: "nivel 3: el canario corrió y el gate nunca se enteró; el IDE no llama al gate (hooks apagados, carpeta sin confianza o IDE sin hooks)"}
 	}
 	msg := fmt.Sprintf("canario %s pendiente: pide al agente de %s que corra `coyote doctor canary %s` y vuelve a correr coyote doctor --ide %s", req.Code, ide, req.Code, ide)

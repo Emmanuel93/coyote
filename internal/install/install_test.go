@@ -1,12 +1,15 @@
 package install
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Emmanuel93/coyote/internal/agents"
 )
@@ -107,8 +110,11 @@ func TestClaudeCodeInstallMergesAndIsIdempotent(t *testing.T) {
 
 // GateCommandJSON es el comando del hook tal como queda escrito en JSON.
 func GateCommandJSON() string {
-	b, _ := json.Marshal(GateCommand)
-	return string(b)
+	var b strings.Builder
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false)
+	_ = enc.Encode(GateCommand)
+	return strings.TrimSpace(b.String())
 }
 
 func TestCursorInstall(t *testing.T) {
@@ -265,11 +271,12 @@ func TestNewIDEInstalls(t *testing.T) {
 			t.Errorf("%s no llama a gate check %s", ide, want)
 		}
 	}
-	// Un archivo de Copilot con el nombre de coyote que no generó coyote no se pisa.
+	// Un archivo de Copilot con el nombre de coyote que no generó coyote no se
+	// pisa, pero deja a Copilot sin gate: es un conflicto, no un omitido.
 	other := t.TempDir()
-	write(t, other, CopilotFile, `{"version": 1, "hooks": {"preToolUse": [{"type": "command", "bash": "./otro.sh"}]}}`)
+	write(t, other, CopilotFile, `{"version": 1, "hooks": {"preToolUse": [{"type": "command", "bash": "./notify-coyote-gateway.sh"}]}}`)
 	for _, c := range plan(t, other, "copilot") {
-		if c.Path == CopilotFile && c.State != Skipped {
+		if c.Path == CopilotFile && (c.State != Conflict || !c.Blocking() || c.Pending()) {
 			t.Errorf("%s ajeno: %s", CopilotFile, c.State)
 		}
 	}
@@ -292,10 +299,16 @@ func TestLauncherFailsClosed(t *testing.T) {
 		t.Fatal(err)
 	}
 	run := func(cwd, launcher string, env ...string) (string, int) {
-		cmd := exec.Command("sh", "-c", launcher)
+		t.Helper()
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, "sh", "-c", launcher)
 		cmd.Dir = cwd
 		cmd.Env = append([]string{"PATH=/usr/bin:/bin"}, env...)
 		out, err := cmd.CombinedOutput()
+		if ctx.Err() != nil {
+			t.Fatalf("el lanzador no terminó: %s", out)
+		}
 		code := 0
 		if ee, ok := err.(*exec.ExitError); ok {
 			code = ee.ExitCode()
@@ -304,23 +317,80 @@ func TestLauncherFailsClosed(t *testing.T) {
 		}
 		return string(out), code
 	}
+	hook := func(dir, rel, body string, mode os.FileMode) {
+		t.Helper()
+		p := filepath.Join(dir, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		_ = os.RemoveAll(p)
+		if err := os.WriteFile(p, []byte(body), mode); err != nil {
+			t.Fatal(err)
+		}
+	}
+	codex := Launcher(CodexHook, ".codex/hooks.json")
 	// Sin el hook en ninguna carpeta: niega con 2, no deja pasar.
-	if out, code := run(sub, Launcher(CodexHook, "")); code != 2 || !strings.Contains(out, "no encuentro") {
+	if out, code := run(sub, codex); code != 2 || !strings.Contains(out, "no encuentro") {
 		t.Fatalf("sin hook el lanzador debe salir con 2: %d %s", code, out)
 	}
 	// Con el hook en la raíz, lo encuentra desde una subcarpeta.
-	write(t, root, CodexHook, "#!/bin/sh\necho hook-de-coyote\nexit 0\n")
-	if err := os.Chmod(filepath.Join(root, filepath.FromSlash(CodexHook)), 0o755); err != nil {
-		t.Fatal(err)
+	fake := func(exit int) string {
+		return "#!/bin/sh\n# coyote gate check --ide codex\necho hook-de-coyote\nexit " + fmt.Sprint(exit) + "\n"
 	}
-	if out, code := run(sub, Launcher(CodexHook, "")); code != 0 || !strings.Contains(out, "hook-de-coyote") {
+	hook(root, CodexHook, fake(0), 0o755)
+	if out, code := run(sub, codex); code != 0 || !strings.Contains(out, "hook-de-coyote") {
 		t.Fatalf("el lanzador debe encontrar el hook subiendo: %d %s", code, out)
 	}
-	// Gemini da la carpeta del proyecto en una variable.
-	write(t, root, GeminiHook, "#!/bin/sh\necho hook-gemini\nexit 0\n")
-	_ = os.Chmod(filepath.Join(root, filepath.FromSlash(GeminiHook)), 0o755)
-	if out, code := run(t.TempDir(), Launcher(GeminiHook, "GEMINI_PROJECT_DIR"), "GEMINI_PROJECT_DIR="+root); code != 0 || !strings.Contains(out, "hook-gemini") {
+	// Cualquier salida distinta de 0 del hook niega con 2.
+	for _, exit := range []int{1, 2, 126, 127} {
+		hook(root, CodexHook, fake(exit), 0o755)
+		if _, code := run(sub, codex); code != 2 {
+			t.Errorf("el hook salió con %d y el lanzador con %d; se esperaba 2", exit, code)
+		}
+	}
+	// Un hook con CRLF, vacío, sin la marca de coyote, una carpeta o sin
+	// permiso de ejecución: nunca deja pasar sin correr el gate.
+	cases := map[string]func(){
+		"CRLF": func() {
+			hook(root, CodexHook, strings.ReplaceAll("#!/bin/sh\nfor x in 1; do\n  echo gate check --ide codex\ndone\nexit 0\n", "\n", "\r\n"), 0o755)
+		},
+		"vacío":        func() { hook(root, CodexHook, "", 0o755) },
+		"ajeno":        func() { hook(root, CodexHook, "#!/bin/sh\nexit 0\n", 0o755) },
+		"una carpeta":  func() { _ = os.RemoveAll(filepath.Join(root, CodexHook)); _ = os.MkdirAll(filepath.Join(root, CodexHook), 0o755) },
+		"sin permisos": func() { hook(root, CodexHook, fake(3), 0o644) },
+	}
+	for name, setup := range cases {
+		setup()
+		if out, code := run(sub, codex); code != 2 {
+			t.Errorf("hook %s: el lanzador salió con %d (%s); se esperaba 2", name, code, out)
+		}
+	}
+	// Sin permiso de ejecución, el hook igual corre con sh.
+	hook(root, CodexHook, fake(0), 0o644)
+	if out, code := run(sub, codex); code != 0 || !strings.Contains(out, "hook-de-coyote") {
+		t.Errorf("un hook sin permiso de ejecución corre con sh: %d %s", code, out)
+	}
+	// No sube más allá del proyecto: el hook de una carpeta padre no corre.
+	parent := t.TempDir()
+	hook(parent, CodexHook, "#!/bin/sh\n# gate check --ide codex\necho hook-ajeno\nexit 0\n", 0o755)
+	proj := filepath.Join(parent, "proyecto")
+	if err := os.MkdirAll(filepath.Join(proj, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if out, code := run(proj, codex); code != 2 || strings.Contains(out, "hook-ajeno") {
+		t.Errorf("corrió el hook de la carpeta padre: %d %s", code, out)
+	}
+	// Gemini da la carpeta del proyecto en una variable; relativa, no se cuelga.
+	gemini := Launcher(GeminiHook, ".gemini/settings.json", "GEMINI_PROJECT_DIR")
+	hook(root, GeminiHook, "#!/bin/sh\n# gate check --ide gemini\necho hook-gemini\nexit 0\n", 0o755)
+	if out, code := run(t.TempDir(), gemini, "GEMINI_PROJECT_DIR="+root); code != 0 || !strings.Contains(out, "hook-gemini") {
 		t.Fatalf("el lanzador debe usar GEMINI_PROJECT_DIR: %d %s", code, out)
+	}
+	if out, code := run(filepath.Dir(root), gemini, "GEMINI_PROJECT_DIR="+filepath.Base(root)); code != 0 || !strings.Contains(out, "hook-gemini") {
+		t.Errorf("GEMINI_PROJECT_DIR relativo: %d %s", code, out)
+	}
+	if _, code := run(t.TempDir(), gemini, "GEMINI_PROJECT_DIR=no/existe"); code != 2 {
+		t.Errorf("GEMINI_PROJECT_DIR relativo que no existe: %d", code)
 	}
 	// El script de Copilot niega en JSON si coyote no está.
 	dir := t.TempDir()
@@ -333,5 +403,58 @@ func TestLauncherFailsClosed(t *testing.T) {
 	out, err := cmd.CombinedOutput()
 	if ee, ok := err.(*exec.ExitError); !ok || ee.ExitCode() != 2 || !strings.Contains(string(out), `"permissionDecision":"deny"`) {
 		t.Fatalf("sin coyote, el hook de Copilot niega: %v %s", err, out)
+	}
+	// Un coyote que no puede correr (roto o de otra arquitectura) niega con 2.
+	broken := filepath.Join(dir, "coyote")
+	if err := os.WriteFile(broken, []byte("\x7fELF basura"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cmd = exec.Command("sh", script)
+	cmd.Env = []string{"PATH=" + dir + ":/usr/bin:/bin", "HOME=" + dir}
+	if _, err := cmd.CombinedOutput(); err == nil {
+		t.Fatal("con un coyote roto, el hook debe negar")
+	} else if ee, ok := err.(*exec.ExitError); !ok || ee.ExitCode() != 2 {
+		t.Fatalf("con un coyote roto, el hook sale con 2: %v", err)
+	}
+}
+
+func TestHooksDeLaPersonaConNombreParecido(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, ".claude/settings.json", `{"hooks": {"PreToolUse": [{"matcher": "", "hooks": [
+	  {"type": "command", "command": "./scripts/notify-coyote-gateway.sh"},
+	  {"type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/coyote-gate.sh"}]}]}}`)
+	if err := Apply(root, plan(t, root, "claude-code")); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(filepath.Join(root, ".claude", "settings.json"))
+	s := string(data)
+	if !strings.Contains(s, "notify-coyote-gateway.sh") {
+		t.Errorf("se borró un hook de la persona:\n%s", s)
+	}
+	if strings.Contains(s, `"\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/coyote-gate.sh"`) || !strings.Contains(s, GateCommandJSON()) {
+		t.Errorf("el hook anterior de coyote se reemplaza por el lanzador:\n%s", s)
+	}
+}
+
+func TestApplyNoEscribePorUnTemporalPlantado(t *testing.T) {
+	root := t.TempDir()
+	victim := filepath.Join(t.TempDir(), "victima.txt")
+	if err := os.WriteFile(victim, []byte("intacto"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, ".codex"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(victim, filepath.Join(root, ".codex", "hooks.json.coyote-tmp")); err != nil {
+		t.Fatal(err)
+	}
+	if err := Apply(root, plan(t, root, "codex")); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(victim); string(got) != "intacto" {
+		t.Errorf("la instalación escribió por el symlink: %q", got)
+	}
+	if info, err := os.Lstat(filepath.Join(root, ".codex", "hooks.json")); err != nil || !info.Mode().IsRegular() {
+		t.Errorf(".codex/hooks.json es un archivo regular: %v", err)
 	}
 }

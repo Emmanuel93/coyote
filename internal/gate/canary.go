@@ -25,17 +25,22 @@ func Canary(text string) (string, bool) {
 	return m[1], true
 }
 
-// CanaryOf busca el canario en una acción: el comando de una shell o
-// cualquier texto de su entrada.
-func CanaryOf(a Action) (string, bool) {
-	if code, ok := Canary(a.Command); ok {
-		return code, true
-	}
-	var texts []string
-	allStrings(a.Input, &texts)
-	for _, t := range texts {
-		if code, ok := Canary(t); ok {
-			return code, true
+// CanaryRun devuelve el código si el comando de una shell corre el canario
+// como programa (coyote doctor canary <código>, también dentro de bash -c). Un
+// echo, un patrón de búsqueda o un texto que solo lo nombran no cuentan: el
+// nivel se mide con lo que el IDE habría ejecutado.
+func CanaryRun(cmd string) (string, bool) {
+	for _, seg := range view(cmd, false) {
+		prog, at := mainProg(seg)
+		if prog != "coyote" {
+			continue
+		}
+		args := seg[at+1:]
+		for len(args) >= 2 && args[0] == "-C" {
+			args = args[2:]
+		}
+		if len(args) >= 3 && args[0] == "doctor" && args[1] == "canary" && CanaryCode.MatchString(args[2]) {
+			return args[2], true
 		}
 	}
 	return "", false

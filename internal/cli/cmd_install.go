@@ -133,14 +133,23 @@ func cmdInstall(a *app, args []string) error {
 		hookState = "pendiente"
 	}
 	printChanges(a, changes, hookState)
-	pendingN := 0
+	pendingN, conflicts := 0, 0
 	for _, c := range changes {
 		if c.Pending() {
 			pendingN++
 		}
+		if c.Blocking() {
+			conflicts++
+		}
+	}
+	conflictErr := func() error {
+		return fail(1, "%d %s en conflicto: el IDE queda sin gate hasta que lo resuelvas (ver arriba)", conflicts, pluralWord(conflicts, "archivo", "archivos"))
 	}
 	switch {
 	case *check:
+		if conflicts > 0 {
+			return conflictErr()
+		}
 		if pendingN > 0 || hookState != "vigente" {
 			return fail(1, "la configuración de %s no está vigente; corre coyote install --ide %s", *ide, *ide)
 		}
@@ -176,6 +185,9 @@ func cmdInstall(a *app, args []string) error {
 		if _, err := ledger.Open(root).Append(line, person.Slug); err != nil {
 			return err
 		}
+	}
+	if conflicts > 0 {
+		return conflictErr()
 	}
 	fmt.Fprintf(a.stdout, "Listo. Prueba el gate con coyote doctor --ide %s y haz commit de la configuración.\n", *ide)
 	if cfg.Autonomy != "" && cfg.Autonomy != "manual" {
@@ -262,14 +274,21 @@ func (a *app) ideChecks(root string, cfg *project.Config, ide string, add func(n
 			return
 		}
 		n := 0
+		var conflicts []string
 		for _, c := range changes {
 			if c.Pending() {
 				n++
 			}
+			if c.Blocking() {
+				conflicts = append(conflicts, c.Path+": "+c.Detail)
+			}
 		}
-		if n > 0 {
+		switch {
+		case len(conflicts) > 0:
+			add("instalación "+ide, "fail", strings.Join(conflicts, "; "))
+		case n > 0:
 			add("instalación "+ide, "warn", fmt.Sprintf("%d archivos por crear o actualizar; corre coyote install --ide %s", n, target))
-		} else {
+		default:
 			add("instalación "+ide, "ok", "hook, agentes o skills y configuración vigentes")
 		}
 	}

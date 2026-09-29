@@ -184,7 +184,7 @@ func TestCanary(t *testing.T) {
 		if d.Verdict != Block || !strings.Contains(d.Reason, "canario") {
 			t.Errorf("el canario debe bloquearse siempre: %+v → %s %s", a.Input, d.Verdict, d.Reason)
 		}
-		if code, ok := CanaryOf(a); !ok || code != "7f3a9c2b" {
+		if code, ok := CanaryRun(a.Command); Classify(a) == KindShell && (!ok || code != "7f3a9c2b") {
 			t.Errorf("el canario no se reconoce: %+v", a.Input)
 		}
 	}
@@ -289,13 +289,41 @@ func TestPulseAndMeasure(t *testing.T) {
 	if l := Measure(p, LoadCanaries(root), CanariesRan(root), IDEGemini, now.Add(2*time.Minute)); l.Level != 3 {
 		t.Errorf("corrió sin pasar por el gate es nivel 3: %+v", l)
 	}
-	// El canario de Copilot llegó por el hook de Claude Code (VS Code con chat.useClaudeHooks).
+	// El canario de Copilot que llega por el hook de Claude Code no mide a
+	// Copilot: se reporta, sin nivel.
 	if err := AddCanary(root, CanaryRequest{Code: "vsc0de12", IDE: IDECopilot, Created: now}); err != nil {
 		t.Fatal(err)
 	}
 	p.Record(Action{IDE: IDEClaudeCode, Tool: "Bash", Command: "coyote doctor canary vsc0de12", Input: map[string]any{"command": "coyote doctor canary vsc0de12"}}, now)
-	if l := Measure(p, LoadCanaries(root), CanariesRan(root), IDECopilot, now); l.Level != 1 || !strings.Contains(l.Detail, "claude-code") {
-		t.Errorf("el canario que llega por otro hook se reporta: %+v", l)
+	if l := Measure(p, LoadCanaries(root), CanariesRan(root), IDECopilot, now); l.Level != 0 || !strings.Contains(l.Detail, "claude-code") {
+		t.Errorf("el canario que llega por otro hook se reporta sin nivel: %+v", l)
+	}
+	// Nombrar el canario no es correrlo: un patrón de búsqueda, un echo o un
+	// texto no cuentan como la negación del gate.
+	if err := AddCanary(root, CanaryRequest{Code: "f4ke0001", IDE: IDECursor, Created: now}); err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range []Action{
+		{IDE: IDECursor, Tool: "Grep", Input: map[string]any{"pattern": "coyote doctor canary f4ke0001"}},
+		{IDE: IDECursor, Tool: "Shell", Command: "echo coyote doctor canary f4ke0001", Input: map[string]any{"command": "echo coyote doctor canary f4ke0001"}},
+		{IDE: IDECursor, Tool: "Write", Input: map[string]any{"file_path": "x.md", "content": "coyote doctor canary f4ke0001"}},
+	} {
+		p.Record(a, now)
+	}
+	if l := Measure(p, LoadCanaries(root), CanariesRan(root), IDECursor, now); l.Level != 0 {
+		t.Errorf("nombrar el canario no da nivel: %+v", l)
+	}
+	p.Record(Action{IDE: IDECursor, Tool: "Shell", Command: `bash -c "coyote -C . doctor canary f4ke0001"`, Input: map[string]any{"command": "x"}}, now)
+	if l := Measure(p, LoadCanaries(root), CanariesRan(root), IDECursor, now); l.Level != 1 {
+		t.Errorf("el canario dentro de bash -c sí cuenta: %+v", l)
+	}
+	// Un nombre de herramienta enorme no hace crecer el latido.
+	p.Record(Action{IDE: IDECursor, Tool: strings.Repeat("h", 1<<20), Input: map[string]any{}}, now)
+	if err := SavePulses(root, p); err != nil {
+		t.Fatal(err)
+	}
+	if l := Measure(LoadPulses(root), LoadCanaries(root), CanariesRan(root), IDECursor, now); l.Level != 1 {
+		t.Errorf("el latido perdió el canario: %+v", l)
 	}
 	if err := AddCanary(root, CanaryRequest{Code: "NO VALE", IDE: IDECodex}); err == nil {
 		t.Error("un código inválido se guardó")

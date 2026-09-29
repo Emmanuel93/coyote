@@ -11,6 +11,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -25,11 +26,12 @@ var IDEs = []string{"claude-code", "cursor", "codex", "gemini", "copilot", "wind
 
 // Estados de un cambio.
 const (
-	Created = "creado"
-	Updated = "actualizado"
-	Current = "vigente"
-	Removed = "borrado"
-	Skipped = "omitido"
+	Created  = "creado"
+	Updated  = "actualizado"
+	Current  = "vigente"
+	Removed  = "borrado"
+	Skipped  = "omitido"
+	Conflict = "en conflicto" // un archivo ajeno ocupa el lugar del gate: el IDE queda sin gate
 )
 
 // Change es un archivo que install crea, actualiza, borra o deja igual.
@@ -44,6 +46,10 @@ type Change struct {
 // Pending informa si el cambio escribe o borra algo.
 func (c Change) Pending() bool { return c.State == Created || c.State == Updated || c.State == Removed }
 
+// Blocking informa si el cambio deja al IDE sin gate hasta que la persona
+// resuelva el conflicto: install --check y doctor fallan.
+func (c Change) Blocking() bool { return c.State == Conflict }
+
 // Options describe una instalación.
 type Options struct {
 	Root     string
@@ -53,14 +59,22 @@ type Options struct {
 	OwnsMD   bool   // el AGENTS.md actual lo generó coyote (o no existe)
 }
 
-// GateCommand es el comando que el hook de Claude Code ejecuta.
-const GateCommand = `"$CLAUDE_PROJECT_DIR"/.claude/hooks/coyote-gate.sh`
+// Rutas de los hooks de Claude Code y Cursor.
+const (
+	ClaudeHook = ".claude/hooks/coyote-gate.sh"
+	// CursorCommand es el comando del hook de Cursor, relativo a la raíz;
+	// Cursor lo corre con failClosed, así que cualquier falla niega.
+	CursorCommand = ".cursor/hooks/coyote-gate.sh"
+)
 
-// CursorCommand es el comando del hook de Cursor, relativo a la raíz.
-const CursorCommand = ".cursor/hooks/coyote-gate.sh"
+// GateCommand es el comando que corre Claude Code (y Devin CLI, que lee sus
+// hooks): el lanzador, que niega con 2 aunque el script falle.
+var GateCommand = Launcher(ClaudeHook, ".claude/settings.json", "CLAUDE_PROJECT_DIR", "DEVIN_PROJECT_DIR")
 
 // GateScript es el hook que llama a coyote gate check y, si coyote no está,
-// bloquea: un gate que se apaga solo no es gate.
+// bloquea: un gate que se apaga solo no es gate. No usa exec: si coyote no
+// puede correr (un binario roto, una señal), la salida distinta de 0 se
+// vuelve 2, que niega en todos los IDEs.
 func GateScript(ide string) string {
 	deny := `echo "coyote no está instalado o no está en el PATH: el gate humano bloquea esta acción. Instálalo (make install en el repo de coyote) y vuelve a intentar." >&2`
 	switch ide {
@@ -74,7 +88,9 @@ func GateScript(ide string) string {
 # Sin coyote instalado, el IDE no ejecuta herramientas en este proyecto: el gate falla cerrado.
 for c in "$(command -v coyote 2>/dev/null)" "$HOME/go/bin/coyote" /opt/homebrew/bin/coyote /usr/local/bin/coyote; do
   if [ -n "$c" ] && [ -x "$c" ]; then
-    exec "$c" gate check --ide ` + ide + `
+    "$c" gate check --ide ` + ide + `
+    [ $? -eq 0 ] && exit 0
+    exit 2
   fi
 done
 ` + deny + `
@@ -83,17 +99,22 @@ exit 2
 }
 
 // Launcher es el comando que corre el IDE. Busca el hook de coyote desde la
-// carpeta del proyecto (envDir, si el IDE la da) o la actual, subiendo hasta la
-// raíz; si no lo encuentra, niega con salida 2. Codex, Gemini CLI y Windsurf
-// dejan pasar la herramienta cuando el hook falta o sale con otro código.
-func Launcher(rel, envDir string) string {
+// carpeta del proyecto (la primera de envDirs que el IDE defina) o la actual,
+// subiendo hasta la carpeta que tiene el hook, la configuración del IDE
+// (marker) o .git; nunca más arriba. Corre el hook con sh, sin exec, y
+// convierte cualquier salida distinta de 0 en 2: Codex, Gemini CLI, Windsurf
+// y Claude Code solo niegan con 2, y un hook con CRLF, vacío, sin permiso de
+// ejecución o que no es el de coyote dejaría pasar la herramienta.
+func Launcher(hook, marker string, envDirs ...string) string {
 	start := `$PWD`
-	if envDir != "" {
-		start = `${` + envDir + `:-$PWD}`
+	for i := len(envDirs) - 1; i >= 0; i-- {
+		start = `${` + envDirs[i] + `:-` + start + `}`
 	}
-	return `sh -c 'd="` + start + `"; while :; do if [ -x "$d/` + rel + `" ]; then exec "$d/` + rel + `"; fi; ` +
-		`[ "$d" = / ] || [ -z "$d" ] && break; d=$(dirname "$d"); done; ` +
-		`echo "coyote: no encuentro ` + rel + `; el gate bloquea por seguridad" >&2; exit 2'`
+	return `sh -c 'd="` + start + `"; case "$d" in /*) ;; *) d="$PWD/$d";; esac; ` +
+		`while :; do if [ -e "$d/` + hook + `" ] || [ -e "$d/` + marker + `" ] || [ -e "$d/.git" ]; then break; fi; ` +
+		`p=$(dirname "$d"); [ "$p" = "$d" ] && break; d=$p; done; h="$d/` + hook + `"; ` +
+		`if [ -f "$h" ] && grep -qF "gate check --ide" "$h"; then sh "$h"; [ $? -eq 0 ] && exit 0; exit 2; fi; ` +
+		`echo "coyote: no encuentro ` + hook + ` o no es el hook de coyote; el gate bloquea por seguridad" >&2; exit 2'`
 }
 
 // Rutas de los hooks de cada IDE.
@@ -120,7 +141,7 @@ func Plan(o Options) ([]Change, error) {
 	}
 	switch o.IDE {
 	case "claude-code":
-		if err := add(file(o.Root, ".claude/hooks/coyote-gate.sh", []byte(GateScript("claude-code")), 0o755, "hook del gate")); err != nil {
+		if err := add(file(o.Root, ClaudeHook, []byte(GateScript("claude-code")), 0o755, "hook del gate")); err != nil {
 			return nil, err
 		}
 		if err := add(jsonFile(o.Root, ".claude/settings.json", mergeClaude, "gate, atribución apagada y COYOTE_IDE")); err != nil {
@@ -401,17 +422,9 @@ func Apply(root string, changes []Change) error {
 			}
 			continue
 		}
-		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
-			return err
-		}
-		tmp := p + ".coyote-tmp"
-		if err := os.WriteFile(tmp, c.data, c.mode); err != nil {
-			return err
-		}
-		if err := os.Chmod(tmp, c.mode); err != nil {
-			return err
-		}
-		if err := os.Rename(tmp, p); err != nil {
+		// Un temporal con nombre al azar, creado en exclusiva: uno de nombre
+		// fijo se podría plantar antes como symlink.
+		if err := fsx.WriteAtomic(p, c.data, c.mode); err != nil {
 			return err
 		}
 	}
@@ -419,6 +432,10 @@ func Apply(root string, changes []Change) error {
 }
 
 // ---- fusiones ----
+
+// coyoteHookRe reconoce el script del gate por su nombre exacto: un hook de
+// la persona que se llama notify-coyote-gateway.sh no es de coyote.
+var coyoteHookRe = regexp.MustCompile(`(^|[/"'\s])coyote-gate\.sh(["'\s;]|$)`)
 
 func isCoyoteHook(v any) bool {
 	o, ok := v.(*object)
@@ -429,7 +446,7 @@ func isCoyoteHook(v any) bool {
 		cmd, _ := o.get(k)
 		s, _ := cmd.(string)
 		// El hook de v0.1 llamaba a "$c" gate attribution dentro de un for.
-		if strings.Contains(s, "coyote-gate") ||
+		if coyoteHookRe.MatchString(s) ||
 			(strings.Contains(s, "coyote") && (strings.Contains(s, "gate attribution") || strings.Contains(s, "gate check"))) {
 			return true
 		}
@@ -516,7 +533,7 @@ func mergeCodex(data []byte) ([]byte, error) {
 		return nil, err
 	}
 	ours := &object{members: []member{{"matcher", ".*"}, {"hooks", []any{&object{members: []member{
-		{"type", "command"}, {"command", Launcher(CodexHook, "")}, {"timeout", json.Number("30")},
+		{"type", "command"}, {"command", Launcher(CodexHook, ".codex/hooks.json")}, {"timeout", json.Number("30")},
 		{"statusMessage", "gate de coyote"}}}}}}}
 	if err := mergeGroups(hooks, "PreToolUse", ours); err != nil {
 		return nil, err
@@ -534,7 +551,7 @@ func mergeGemini(data []byte) ([]byte, error) {
 		return nil, err
 	}
 	ours := &object{members: []member{{"matcher", ".*"}, {"hooks", []any{&object{members: []member{
-		{"name", "coyote-gate"}, {"type", "command"}, {"command", Launcher(GeminiHook, "GEMINI_PROJECT_DIR")},
+		{"name", "coyote-gate"}, {"type", "command"}, {"command", Launcher(GeminiHook, ".gemini/settings.json", "GEMINI_PROJECT_DIR")},
 		{"timeout", json.Number("30000")}}}}}}}
 	if err := mergeGroups(hooks, "BeforeTool", ours); err != nil {
 		return nil, err
@@ -583,7 +600,7 @@ func mergeWindsurf(data []byte) ([]byte, error) {
 				return nil, fmt.Errorf("hooks.%s no es una lista", ev)
 			}
 		}
-		mergeFlat(hooks, ev, &object{members: []member{{"command", Launcher(WindsurfHook, "")}, {"show_output", false}}})
+		mergeFlat(hooks, ev, &object{members: []member{{"command", Launcher(WindsurfHook, ".windsurf/hooks.json")}, {"show_output", false}}})
 	}
 	return encodeJSON(o), nil
 }
@@ -606,7 +623,8 @@ func copilotFile(root string) (Change, error) {
 	if exists {
 		cur, perr := parseJSON(got)
 		if perr != nil || !copilotOwned(cur) {
-			return Change{Path: CopilotFile, State: Skipped, Detail: "existe y no lo generó coyote"}, nil
+			// Es el archivo del gate: si otro lo ocupa, Copilot queda sin gate.
+			return Change{Path: CopilotFile, State: Conflict, Detail: "existe y no lo generó coyote: Copilot queda sin gate; renómbralo y vuelve a correr coyote install --ide copilot"}, nil
 		}
 	}
 	return file(root, CopilotFile, want, 0o644, "gate en preToolUse (CLI, VS Code y agente de GitHub)")
