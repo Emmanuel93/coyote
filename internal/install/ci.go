@@ -46,6 +46,13 @@ const (
 	GitleaksVersion = "8.30.1"
 	gitleaksURL     = "https://github.com/gitleaks/gitleaks/releases/download/v" + GitleaksVersion + "/gitleaks_" + GitleaksVersion + "_linux_x64.tar.gz"
 	gitleaksSHA256  = "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+	// Las reglas por defecto de esa versión, para una base sin .gitleaks.toml:
+	// se usan sin la lista global de rutas que saltan (lockfiles,
+	// node_modules, imágenes, cualquier ruta con gitleaks.toml…), que un PR
+	// podría usar para esconder un archivo. El resultado también va fijado.
+	gitleaksDefaultURL    = "https://raw.githubusercontent.com/gitleaks/gitleaks/v" + GitleaksVersion + "/config/gitleaks.toml"
+	gitleaksDefaultSHA256 = "e163e53b9e7e8a8511e77271e2b323ed057759542a6d988258afe3a1fa329caf"
+	gitleaksStrictSHA256  = "9e66540bf992931a74bf926200494b6b9ac333b6b7d4e1abe71f2e529422d97a"
 )
 
 // GitleaksScript es el paso que corre gitleaks sobre el PR (ADR-0021):
@@ -77,7 +84,11 @@ mkdir -p gitleaks-base gitshim net-objects
 if git -C "$repo" cat-file -e "$BASE:.gitleaks.toml" 2>/dev/null; then
   git -C "$repo" show "$BASE:.gitleaks.toml" > gitleaks-base/gitleaks.toml
 else
-  printf '[extend]\nuseDefault = true\n' > gitleaks-base/gitleaks.toml
+  curl -sSfL --retry 3 -o gitleaks-default.toml ` + gitleaksDefaultURL + `
+  echo "` + gitleaksDefaultSHA256 + `  gitleaks-default.toml" | sha256sum -c -
+  awk 'BEGIN{skip=0; done=0} /^\[\[rules\]\]/{done=1} !done && /^paths = \[/{skip=1; next} skip && /^\]/{skip=0; next} !skip{print}' \
+    gitleaks-default.toml > gitleaks-base/gitleaks.toml
+  echo "` + gitleaksStrictSHA256 + `  gitleaks-base/gitleaks.toml" | sha256sum -c -
 fi
 if git -C "$repo" cat-file -e "$BASE:.gitleaksignore" 2>/dev/null; then
   git -C "$repo" show "$BASE:.gitleaksignore" > gitleaks-base/.gitleaksignore

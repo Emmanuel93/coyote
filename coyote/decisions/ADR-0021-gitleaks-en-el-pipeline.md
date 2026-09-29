@@ -29,6 +29,7 @@ El escáner de coyote solo reconoce formas de alta confianza (ADR-0016). gitleak
   - gitleaks salta el archivo del repo cuya ruta es igual a la de `--config`: la configuración va por ruta absoluta.
   - Las reglas por defecto saltan cualquier ruta que contenga `gitleaks.toml` y los nombres que terminan en `go.mod`, `go.sum` o `go.work`: esos nombres raros son R3 en `gate pr`.
   - Un falso positivo se exceptúa sin commit (`archivo:regla:línea`): el commit del diff neto cambia en cada corrida.
+- **Tercera revisión.** Sin `.gitleaks.toml` en la base, el paso ya no usa `useDefault`: descarga las reglas por defecto de la misma versión, verificadas por hash, y les quita la lista global de rutas que saltan (lockfiles, `node_modules/`, imágenes, cualquier ruta con `gitleaks.toml`), que un PR podía usar para esconder un archivo. El resultado también va verificado por hash.
 - **Sin falsos verdes.** gitleaks 8.30.1 sale con 0 cuando git falla (una base que no existe, un git que se cae): no revisa nada y dice "no leaks found".
   - El paso verifica antes que los dos commits existan.
   - Corre git por un envoltorio que deja sus errores en el log.
@@ -39,5 +40,5 @@ El escáner de coyote solo reconoce formas de alta confianza (ADR-0016). gitleak
 ## Consecuencias
 - Un secreto con forma conocida por gitleaks llega al reporte del PR aunque el escáner de coyote no lo reconozca.
 - Un falso positivo se dispensa en la configuración de la rama base, que revisan sus dueños.
-- El pipeline descarga un binario de GitHub en cada corrida; el hash evita que cambie sin que se note.
+- El pipeline descarga de GitHub, en cada corrida, el binario y, sin configuración en la base, las reglas por defecto; los hashes evitan que cambien sin que se note.
 - Quedan fuera los archivos binarios o en UTF-16, los mensajes de commit, lo que excluye la configuración de la base y un secreto quitado con un force-push, que igual hay que rotar (docs/specs/ci-v1.md).

@@ -452,3 +452,44 @@ func TestGitleaksDeVerdadConfigPropia(t *testing.T) {
 		}
 	}
 }
+
+// TestGitleaksDeVerdadSinConfig: sin .gitleaks.toml en la base, el paso usa
+// las reglas por defecto fijadas por hash y sin la lista de rutas que saltan:
+// un token en node_modules/ o en un lockfile se reporta.
+func TestGitleaksDeVerdadSinConfig(t *testing.T) {
+	if os.Getenv("COYOTE_GITLEAKS_E2E") != "1" {
+		t.Skip("COYOTE_GITLEAKS_E2E no está en 1")
+	}
+	base := setup(t)
+	productoDemo(t, base)
+	ws := filepath.Join(base, "ws")
+	tmp := filepath.Join(base, "runner")
+	for _, d := range []string{filepath.Join(ws, "repos"), tmp} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	svc := filepath.Join(ws, "repos", "servicios")
+	git(t, base, "clone", "-q", filepath.Join(base, "servicios"), svc)
+	baseSHA := strings.TrimSpace(git(t, svc, "rev-parse", "HEAD"))
+	tok := "ghp_" + strings.Repeat("Vb3Nm5Qw7Er9", 3)
+	for _, f := range []string{"node_modules/x/a.txt", "yarn.lock", "cfg/verification-metadata.xml.d/settings.txt", "src/gitleaks.toml/creds.go"} {
+		write(t, svc, f, "token = \""+tok+"\"\n")
+	}
+	git(t, svc, "add", "-A")
+	git(t, svc, "commit", "-qm", "feat: tokens en rutas que gitleaks salta")
+	headSHA := strings.TrimSpace(git(t, svc, "rev-parse", "HEAD"))
+	write(t, base, "gitleaks.sh", install.GitleaksScript("servicios"))
+	cmd := exec.Command("bash", filepath.Join(base, "gitleaks.sh"))
+	cmd.Env = append(os.Environ(), "RUNNER_TEMP="+tmp, "GITHUB_WORKSPACE="+ws, "BASE="+baseSHA, "HEAD="+headSHA,
+		"GIT_ATTR_SOURCE=4b825dc642cb6eb9a060e54bf8d69288fbee4904")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("el paso de gitleaks falló: %v\n%s", err, out)
+	}
+	got := readFile(t, filepath.Join(tmp, "gitleaks.json"))
+	for _, want := range []string{"node_modules/x/a.txt", "yarn.lock", "cfg/verification-metadata.xml.d/settings.txt", "src/gitleaks.toml/creds.go"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("gitleaks no vio %s:\n%s", want, got)
+		}
+	}
+}
