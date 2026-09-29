@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -300,6 +301,29 @@ func hasFlag(args []word, flags ...string) (string, bool) {
 
 // hasExact reconoce una bandera booleana escrita tal cual: --check=false no
 // cuenta como --check.
+// flagOn dice si una bandera booleana de Go queda prendida: la última
+// aparición manda (--check --check=false la apaga). Con "--" en los
+// argumentos no se decide: coyote vuelve a leer banderas después de un
+// argumento suelto.
+func flagOn(args []word, flags ...string) bool {
+	on := false
+	for _, a := range args {
+		if a.s == "--" {
+			return false
+		}
+		for _, f := range flags {
+			switch {
+			case a.s == f:
+				on = true
+			case strings.HasPrefix(a.s, f+"="):
+				v, err := strconv.ParseBool(strings.TrimPrefix(a.s, f+"="))
+				on = err == nil && v
+			}
+		}
+	}
+	return on
+}
+
 func hasExact(args []word, flags ...string) bool {
 	for _, a := range args {
 		if a.s == "--" {
@@ -507,11 +531,11 @@ func coyoteCheck(args []word) error {
 			return nil
 		}
 	case "generate":
-		if hasExact(rest, "--check", "-check") {
+		if flagOn(rest, "--check", "-check") {
 			return nil
 		}
 	case "install":
-		if hasExact(rest, "--check", "-check", "--dry-run", "-dry-run") {
+		if flagOn(rest, "--check", "-check") || flagOn(rest, "--dry-run", "-dry-run") {
 			return nil
 		}
 	case "repo":
@@ -532,7 +556,7 @@ func coyoteCheck(args []word) error {
 			return nil
 		}
 	case "slo":
-		if first == "check" || first == "rules" && hasExact(rest, "--check", "-check", "--stdout", "-stdout") {
+		if first == "check" || first == "rules" && (flagOn(rest, "--check", "-check") || flagOn(rest, "--stdout", "-stdout")) {
 			return nil
 		}
 	}

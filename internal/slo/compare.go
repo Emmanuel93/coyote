@@ -1,6 +1,7 @@
 package slo
 
 import (
+	"bytes"
 	"fmt"
 	"path"
 	"reflect"
@@ -24,11 +25,19 @@ func IsSpecPath(p string) bool {
 	return (dir == Dir+"/" || strings.HasSuffix(dir, "/"+Dir+"/")) && (ext == ".yaml" || ext == ".yml")
 }
 
-func norm(q string) string { return strings.Join(strings.Fields(q), " ") }
-
 // Compare compara el archivo de la base con el del PR, como texto: nada se
 // ejecuta. hadOld y hasNew dicen si el archivo existe en cada lado.
 func Compare(oldText string, hadOld bool, newText string, hasNew bool) []Change {
+	return CompareFile("", oldText, hadOld, newText, hasNew)
+}
+
+// CompareFile es Compare para un archivo con nombre: el servicio tiene que
+// llamarse como el archivo.
+func CompareFile(p, oldText string, hadOld bool, newText string, hasNew bool) []Change {
+	name := ""
+	if p != "" {
+		name = strings.TrimSuffix(strings.TrimSuffix(path.Base(p), ".yaml"), ".yml")
+	}
 	var out []Change
 	r3 := func(format string, a ...any) { out = append(out, Change{"R3", fmt.Sprintf(format, a...)}) }
 	r2 := func(format string, a ...any) { out = append(out, Change{"R2", fmt.Sprintf(format, a...)}) }
@@ -47,20 +56,25 @@ func Compare(oldText string, hadOld bool, newText string, hasNew bool) []Change 
 		r3("el archivo de SLOs del PR no valida (%s)", shortErr(err))
 		return out
 	}
+	if name != "" && head.Service != name {
+		r3("el servicio %s no coincide con el archivo %s.yaml: sus reglas chocarían con las del servicio que sí se llama así", head.Service, name)
+	}
 	if !hadOld {
 		r2("agrega los SLOs de %s", head.Service)
 		return out
 	}
-	base, err := Parse([]byte(oldText))
+	// Una base que ya no valida (por ejemplo, después de subir coyote) se
+	// compara igual: arreglarla no puede esconder una relajación.
+	base, err := Decode([]byte(oldText))
 	if err != nil {
-		r2("corrige un archivo de SLOs que no validaba en la base")
+		r3("la base no se puede leer y no hay con qué comparar el SLO")
 		return out
 	}
 	if base.Service != head.Service {
 		r3("cambia el servicio %s por %s: los SLOs y alertas de %s dejan de existir", base.Service, head.Service, base.Service)
 	}
 	if base.Period != head.Period {
-		r2("cambia el periodo de %s de %s a %s", head.Service, base.Period, head.Period)
+		r3("cambia el periodo de %s de %s a %s: cambian los umbrales de todas sus alertas", head.Service, base.Period, head.Period)
 	}
 	if !reflect.DeepEqual(nonNil(base.Labels), nonNil(head.Labels)) {
 		r3("cambia las etiquetas de todas las reglas de %s: pueden cambiar a dónde van sus alertas", head.Service)
@@ -82,7 +96,10 @@ func Compare(oldText string, hadOld bool, newText string, hasNew bool) []Change 
 		case now.Objective > old.Objective:
 			r2("sube el objetivo de %s de %s %% a %s %%", old.Name, num(old.Objective), num(now.Objective))
 		}
-		if norm(old.SLI.Errors) != norm(now.SLI.Errors) || norm(old.SLI.Total) != norm(now.SLI.Total) || norm(old.SLI.ErrorRatio) != norm(now.SLI.ErrorRatio) {
+		// Cualquier cambio de texto cuenta: un espacio dentro de un literal o
+		// un salto de línea que cierra un comentario cambian lo que se mide.
+		if strings.TrimSpace(old.SLI.Errors) != strings.TrimSpace(now.SLI.Errors) || strings.TrimSpace(old.SLI.Total) != strings.TrimSpace(now.SLI.Total) ||
+			strings.TrimSpace(old.SLI.ErrorRatio) != strings.TrimSpace(now.SLI.ErrorRatio) {
 			r3("cambia qué cuenta como error o como total en %s", old.Name)
 		}
 		oa, na := old.Alerts, now.Alerts
@@ -121,35 +138,42 @@ func nonNil(m map[string]string) map[string]string {
 }
 
 func shortErr(err error) string {
-	s := err.Error()
+	s := strings.Join(strings.Fields(err.Error()), " ")
 	if r := []rune(s); len(r) > 160 {
 		return string(r[:160]) + "…"
 	}
 	return s
 }
 
-// IsRulesPath dice si una ruta es un archivo de reglas generadas.
+// InRulesDir dice si una ruta está dentro de una carpeta de reglas generadas
+// (coyote/slo/prometheus/), en cualquier nivel.
+func InRulesDir(p string) bool {
+	return strings.HasPrefix(p, RulesDir+"/") || strings.Contains(p, "/"+RulesDir+"/")
+}
+
+// IsRulesPath dice si una ruta es el archivo de reglas generadas de un
+// servicio: <servicio>.yaml directo en coyote/slo/prometheus/.
 func IsRulesPath(p string) bool {
 	dir, file := path.Split(p)
 	return (dir == RulesDir+"/" || strings.HasSuffix(dir, "/"+RulesDir+"/")) && path.Ext(file) == ".yaml"
 }
 
-// Pair devuelve, para una ruta de SLOs o de reglas generadas, las dos rutas
-// del servicio: su archivo de SLOs y sus reglas.
-func Pair(p string) (spec, rules string) {
+// Pair devuelve, para una ruta de SLOs o de reglas generadas, las rutas
+// posibles del archivo de SLOs (.yaml y .yml) y la de sus reglas.
+func Pair(p string) (specs []string, rules string) {
 	dir, file := path.Split(p)
 	name := strings.TrimSuffix(strings.TrimSuffix(file, ".yaml"), ".yml")
 	if IsRulesPath(p) {
 		base := strings.TrimSuffix(dir, "prometheus/")
-		return base + name + ".yaml", p
+		return []string{base + name + ".yaml", base + name + ".yml"}, p
 	}
-	return p, dir + "prometheus/" + name + ".yaml"
+	return []string{p}, dir + "prometheus/" + name + ".yaml"
 }
 
 // CheckGenerated revisa, en un mismo commit, que las reglas generadas de un
-// servicio salgan de su archivo de SLOs. Unas reglas editadas a mano pueden
-// apagar una alerta sin tocar el SLO que se revisa.
-func CheckGenerated(specText string, hasSpec bool, rulesText string, hasRules bool) (Change, bool) {
+// servicio salgan de su archivo de SLOs, byte por byte. Unas reglas editadas
+// a mano pueden apagar una alerta sin tocar el SLO que se revisa.
+func CheckGenerated(specText string, hasSpec bool, rules []byte, hasRules bool) (Change, bool) {
 	switch {
 	case !hasSpec && !hasRules:
 		return Change{}, false
@@ -158,13 +182,16 @@ func CheckGenerated(specText string, hasSpec bool, rulesText string, hasRules bo
 	}
 	s, err := Parse([]byte(specText))
 	if err != nil {
+		if hasRules {
+			return Change{"R3", "las reglas generadas no se pueden comprobar: su archivo de SLOs no valida"}, true
+		}
 		return Change{}, false // Compare ya lo marca cuando el archivo cambia
 	}
 	if !hasRules {
 		return Change{"R3", fmt.Sprintf("faltan las reglas generadas de %s: sus alertas no se cargan; corre coyote slo rules", s.Service)}, true
 	}
 	want, err := Rules(s)
-	if err != nil || string(want) != rulesText {
+	if err != nil || !bytes.Equal(want, rules) {
 		return Change{"R3", fmt.Sprintf("las reglas de %s no salen de su archivo de SLOs: se editaron a mano o no se regeneraron (coyote slo rules)", s.Service)}, true
 	}
 	return Change{}, false

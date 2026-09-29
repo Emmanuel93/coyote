@@ -20,8 +20,12 @@ type File struct {
 	Err  error
 }
 
-// maxFiles acota cuántos archivos de SLOs se leen de un proyecto.
-const maxFiles = 200
+// maxFiles acota cuántos archivos de SLOs se leen de un proyecto y maxSpec
+// lo que pesa cada uno.
+const (
+	maxFiles = 200
+	maxSpec  = 256 << 10
+)
 
 // LoadAll lee coyote/slo/*.yaml. Sin la carpeta, no hay SLOs. Un symlink o
 // un archivo que no es regular no se lee.
@@ -44,7 +48,7 @@ func LoadAll(root string) ([]File, error) {
 		}
 		rel := Dir + "/" + name
 		f := File{Path: rel}
-		data, err := fsx.ReadFile(root, rel, MaxFile)
+		data, err := fsx.ReadFile(root, rel, maxSpec)
 		if err != nil {
 			f.Err = err
 		} else if spec, err := Parse(data); err != nil {
@@ -115,10 +119,12 @@ func Check(root string, files []File) []Problem {
 	if err == nil {
 		for _, e := range entries {
 			name := e.Name()
-			if e.IsDir() || !strings.HasSuffix(name, ".yaml") {
-				continue
-			}
-			if svc := strings.TrimSuffix(name, ".yaml"); !services[svc] {
+			switch {
+			case e.IsDir() || !strings.HasSuffix(name, ".yaml"):
+				// Un cargador que recorre la carpeta cargaría también esto,
+				// sin que salga de ningún SLO.
+				out = append(out, Problem{RulesDir + "/" + name, "en la carpeta de reglas generadas solo va <servicio>.yaml; esto no sale de ningún SLO"})
+			case !services[strings.TrimSuffix(name, ".yaml")]:
 				out = append(out, Problem{RulesDir + "/" + name, "reglas generadas sin su archivo de SLOs; bórralas o restaura " + Dir + "/" + name})
 			}
 		}

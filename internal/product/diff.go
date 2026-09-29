@@ -275,6 +275,21 @@ func (m *Map) sideFor(dir string, c Change) (diffSide, string, string) {
 		c.Repo, dashIf(sha), c.Diff)
 }
 
+// BlobAt lee los bytes de un archivo en una revisión, sin decodificar, hasta
+// max bytes.
+func BlobAt(dir, rev, p string, max int) ([]byte, bool) {
+	if rev == "" || strings.HasPrefix(rev, "-") || !safeGitPath(p) {
+		return nil, false
+	}
+	cmd := gitRead(dir, "cat-file", "blob", rev+":"+p)
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	if cmd.Run() != nil || out.Len() > max {
+		return nil, false
+	}
+	return out.Bytes(), true
+}
+
 // fileText lee un archivo del repo en una revisión, o del árbol de trabajo.
 func fileText(dir, rev, p string) (string, bool) {
 	if rev == "" {

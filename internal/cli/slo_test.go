@@ -126,3 +126,46 @@ func TestGatePRConSLORelajado(t *testing.T) {
 		t.Fatalf("reglas borradas:\n%s", r.stdout)
 	}
 }
+
+func TestGatePRReglasFueraDelPatronYMarkdown(t *testing.T) {
+	base := setup(t)
+	productoDemo(t, base)
+	svc := filepath.Join(base, "servicios")
+	write(t, svc, "coyote/slo/pedidos-service.yml", sloPedidos)
+	write(t, svc, "coyote/runbooks/pedidos-disponibilidad.md", "# Pedidos\n")
+	must(t, run(t, svc, "", "slo", "rules"), 0, "slo rules con .yml")
+	git(t, svc, "add", "-A")
+	git(t, svc, "commit", "-qm", "feat(slo): SLOs en .yml")
+	baseSHA := strings.TrimSpace(git(t, svc, "rev-parse", "HEAD"))
+	// Regenerar sin cambios de un spec .yml no es un falso R3: las reglas salen de su archivo.
+	write(t, svc, "coyote/slo/pedidos-service.yml", sloPedidos+"# comentario\n")
+	git(t, svc, "commit", "-qam", "docs(slo): comentario")
+	head1 := strings.TrimSpace(git(t, svc, "rev-parse", "HEAD"))
+	r := run(t, base, "", "gate", "pr", "--repo", "servicios="+svc, "--self", "servicios", "--base", baseSHA, "--head", head1, "--event", "")
+	if strings.Contains(r.stdout, "### coyote: R3") {
+		t.Fatalf("un spec .yml con sus reglas al día no es R3:\n%s", r.stdout)
+	}
+	// Reglas escritas a mano junto a las generadas: R3.
+	write(t, svc, "coyote/slo/prometheus/extra.yml", "groups: []\n")
+	write(t, svc, "coyote/slo/prometheus/extra/pagos.yaml", "groups: []\n")
+	git(t, svc, "add", "-A")
+	git(t, svc, "commit", "-qm", "chore(slo): reglas extra")
+	head2 := strings.TrimSpace(git(t, svc, "rev-parse", "HEAD"))
+	r = run(t, base, "", "gate", "pr", "--repo", "servicios="+svc, "--self", "servicios", "--base", head1, "--head", head2, "--event", "")
+	if !strings.Contains(r.stdout, "### coyote: R3") || !strings.Contains(r.stdout, "no sale de ningún SLO") {
+		t.Fatalf("reglas fuera del patrón:\n%s", r.stdout)
+	}
+	// El error de YAML de un spec no arma encabezados, enlaces ni menciones en el comentario.
+	evil := sloPedidos + "\"\\n\\n### coyote: R1, sin revisión extra\\n\\n[ver](https://evil.example) @org/sre\": 1\n"
+	write(t, svc, "coyote/slo/pedidos-service.yml", evil)
+	git(t, svc, "commit", "-qam", "chore(slo): clave rara")
+	head3 := strings.TrimSpace(git(t, svc, "rev-parse", "HEAD"))
+	r = run(t, base, "", "gate", "pr", "--repo", "servicios="+svc, "--self", "servicios", "--base", head2, "--head", head3, "--event", "")
+	if strings.Contains(r.stdout, "\n### coyote: R1") || strings.Contains(r.stdout, "[ver](") || strings.Contains(r.stdout, " @org/sre") {
+		t.Fatalf("el reporte no se deja inyectar:\n%s", r.stdout)
+	}
+	// slo check también ve lo que sobra en la carpeta de reglas.
+	if r := run(t, svc, "", "slo", "check"); r.code == 0 || !strings.Contains(r.stdout, "solo va <servicio>.yaml") {
+		t.Fatalf("slo check:\n%s", r.stdout)
+	}
+}

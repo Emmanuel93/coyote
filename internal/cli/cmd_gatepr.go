@@ -225,7 +225,11 @@ func gateReport(res ci.GateResult, in ci.GateInput, p *prRun, policy string, pla
 		fmt.Fprintf(&b, "### coyote: %s, espera la aprobación de un dueño\n\n", res.Risk)
 	}
 	if len(res.Why) > 0 {
-		fmt.Fprintf(&b, "**Riesgo %s.** %s.\n\n", res.Risk, strings.Join(res.Why, " · "))
+		why := make([]string, len(res.Why))
+		for i, w := range res.Why {
+			why[i] = mdText(w)
+		}
+		fmt.Fprintf(&b, "**Riesgo %s.** %s.\n\n", res.Risk, strings.Join(why, " · "))
 	} else {
 		b.WriteString("**Riesgo R1.** Ninguna ruta de riesgo y el cambio no llega a otros repos del producto.\n\n")
 	}
@@ -236,7 +240,7 @@ func gateReport(res ci.GateResult, in ci.GateInput, p *prRun, policy string, pla
 				fmt.Fprintf(&b, "| … | | %d archivos más |\n", len(in.Files)-ciMaxRows)
 				break
 			}
-			fmt.Fprintf(&b, "| `%s` | %s | %s |\n", codeCell(f.Path), f.Risk, mdCell(f.Why))
+			fmt.Fprintf(&b, "| `%s` | %s | %s |\n", codeCell(f.Path), f.Risk, mdText(f.Why))
 		}
 		b.WriteString("\n")
 	}
@@ -368,35 +372,47 @@ func baseRules(dir, base, name string) func(string) (secrets.Rules, string) {
 	}
 }
 
-// sloRisks compara cada archivo de SLOs que toca el PR con el de la base.
+// sloRisks compara cada archivo de SLOs que toca el PR con el de la base y
+// revisa que las reglas generadas del commit del PR salgan de su SLO.
 func sloRisks(dir, base, head string, changed []string) []ci.FileRisk {
 	var out []ci.FileRisk
 	checked := map[string]bool{}
 	for _, f := range changed {
-		if slo.IsSpecPath(f) {
+		switch {
+		case slo.IsSpecPath(f):
 			oldText, hadOld := product.FileAt(dir, base, f)
 			newText, hasNew := product.FileAt(dir, head, f)
-			for _, c := range slo.Compare(oldText, hadOld, newText, hasNew) {
+			for _, c := range slo.CompareFile(f, oldText, hadOld, newText, hasNew) {
 				out = append(out, ci.FileRisk{Path: f, Risk: c.Risk, Why: c.Why})
 			}
-		} else if !slo.IsRulesPath(f) {
+		case slo.IsRulesPath(f):
+		case slo.InRulesDir(f):
+			// Otro archivo en la carpeta de reglas: un cargador que recorre la
+			// carpeta lo cargaría sin que salga de ningún SLO.
+			out = append(out, ci.FileRisk{Path: f, Risk: ci.R3, Why: "archivo en la carpeta de reglas generadas que no sale de ningún SLO"})
+			continue
+		default:
 			continue
 		}
-		// Las reglas que se cargan tienen que salir del SLO que se revisa, en
-		// el commit del PR.
-		spec, rules := slo.Pair(f)
-		if checked[spec] {
+		specs, rules := slo.Pair(f)
+		if checked[rules] {
 			continue
 		}
-		checked[spec] = true
-		specText, hasSpec := product.FileAt(dir, head, spec)
-		rulesText, hasRules := product.FileAt(dir, head, rules)
-		if c, bad := slo.CheckGenerated(specText, hasSpec, rulesText, hasRules); bad {
-			path := rules
-			if !hasRules {
-				path = spec
+		checked[rules] = true
+		specPath, specText, hasSpec := "", "", false
+		for _, sp := range specs {
+			if text, ok := product.FileAt(dir, head, sp); ok {
+				specPath, specText, hasSpec = sp, text, true
+				break
 			}
-			out = append(out, ci.FileRisk{Path: path, Risk: c.Risk, Why: c.Why})
+		}
+		raw, hasRules := product.BlobAt(dir, head, rules, 16<<20)
+		if c, bad := slo.CheckGenerated(specText, hasSpec, raw, hasRules); bad {
+			p := rules
+			if !hasRules && specPath != "" {
+				p = specPath
+			}
+			out = append(out, ci.FileRisk{Path: p, Risk: c.Risk, Why: c.Why})
 		}
 	}
 	return out

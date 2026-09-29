@@ -262,3 +262,97 @@ tests:
 		}
 	}
 }
+
+func TestConsultasQueNoMidenLoQueDicen(t *testing.T) {
+	base := `sum(rate(http_server_request_duration_seconds_count{job="pagos-api",http_response_status_code=~"5.."}[{{.window}}]))`
+	bad := map[string]string{
+		"comentario":              "'" + base + " # errores'",
+		"arroba":                  `sum(rate(m{job="a"}[{{.window}}] @ 0))`,
+		"offset":                  `sum(rate(m{job="a"}[{{.window}}] offset 1h))`,
+		"rango compuesto":         `sum(rate(m{job="a"}[1h30m])) + sum(rate(m{job="a"}[{{.window}}]))`,
+		"rango en segundos":       `sum(rate(m{job="a"}[300])) + sum(rate(m{job="a"}[{{.window}}]))`,
+		"ventana en un literal":   `sum(rate(m{job="{{.window}}"}[5m]))`,
+		"sin nombre":              `sum(rate({job="a"}[{{.window}}]))`,
+		"__name__ entre comillas": `sum(rate({"__name__"=~"a|b", job="a"}[{{.window}}]))`,
+		"__name__ distinto":       `sum(rate(m{__name__!~"b", job="a"}[{{.window}}]))`,
+		"otro marcador":           `sum(rate(m{job="a"}[{{.window}}])) * {{.x}}`,
+	}
+	for name, q := range bad {
+		text := strings.Replace(pagos, base, q, 1)
+		if _, err := Parse([]byte(text)); err == nil {
+			t.Errorf("%s: %q debió fallar", name, q)
+		}
+	}
+	ok := []string{
+		`sum(rate(m{job="a", path=~"/api/(pagos|cobros)"}[{{.window}}]))`,
+		`sum by (route) (rate(m{job="a"}[{{.window}}]))`,
+		`sum(rate(m_bucket{job="a",le="0.5"}[{{.window}}:1m]))`,
+		`(sum(rate(a_total{job="x"}[{{.window}}])) or vector(0)) + (sum(rate(b_total{job="x"}[{{.window}}])) or vector(0))`,
+	}
+	for _, q := range ok {
+		if _, err := Parse([]byte(strings.Replace(pagos, base, q, 1))); err != nil {
+			t.Errorf("%q es válida: %v", q, err)
+		}
+	}
+}
+
+func TestTextoQueNoEsPlantilla(t *testing.T) {
+	for name, text := range map[string]string{
+		"description": strings.Replace(pagos, "description: Respuestas sin error 5xx", "description: \"{{ range 1000000000000 }}{{ end }}\"", 1),
+		"anotación":   strings.Replace(pagos, "    alerts:\n", "    alerts:\n      annotations: { dashboard: \"x {{ $labels.job }}\" }\n", 1),
+		"etiqueta":    strings.Replace(pagos, "team: pagos", "team: \"{{ .x }}\"", 1),
+		"runbook":     strings.Replace(pagos, "coyote/runbooks/pagos-api-disponibilidad.md", "coyote/runbooks/{{x}}.md", 1),
+		"page con 80": strings.Replace(pagos, "objective: 99.9", "objective: 80", 1),
+		"dos docs":    pagos + "---\nversion: 1\n",
+		"alias":       strings.Replace(pagos, "labels: { team: pagos }", "labels: &l { team: pagos }", 1),
+	} {
+		if _, err := Parse([]byte(text)); err == nil {
+			t.Errorf("%s: debió fallar", name)
+		}
+	}
+	// Con la page apagada, un objetivo bajo vale.
+	low := strings.Replace(strings.Replace(pagos, "objective: 99.9", "objective: 80", 1), "page: { labels: { severity: page } }", "page: { disable: true }", 1)
+	if _, err := Parse([]byte(low)); err != nil {
+		t.Fatalf("objetivo bajo sin page: %v", err)
+	}
+}
+
+func TestComparacionesQueNoSeEsconden(t *testing.T) {
+	risk := func(changes []Change) string {
+		r := ""
+		for _, c := range changes {
+			if c.Risk > r {
+				r = c.Risk
+			}
+		}
+		return r
+	}
+	// Una base que ya no valida (con __name__=~) se compara igual.
+	oldBase := strings.Replace(pagos, `http_server_request_duration_seconds_count{job="pagos-api",http_response_status_code=~"5.."}`, `{__name__=~"a|b", job="pagos-api"}`, 1)
+	if _, err := Parse([]byte(oldBase)); err == nil {
+		t.Fatal("la base de la prueba no debe validar")
+	}
+	relaxed := strings.Replace(pagos, "objective: 99.9", "objective: 50", 1)
+	if got := risk(CompareFile("coyote/slo/pagos-api.yaml", oldBase, true, relaxed, true)); got != "R3" {
+		t.Fatalf("relajar sobre una base inválida es R3: %s", got)
+	}
+	// El servicio tiene que llamarse como el archivo.
+	if got := risk(CompareFile("coyote/slo/pagos-extra.yaml", "", false, pagos, true)); got != "R3" {
+		t.Fatalf("servicio distinto del archivo: %s", got)
+	}
+	// Cambiar el periodo cambia los umbrales: R3.
+	if got := risk(Compare(pagos, true, strings.Replace(pagos, "labels: { team: pagos }", "labels: { team: pagos }\nperiod: 28d", 1), true)); got != "R3" {
+		t.Fatalf("periodo: %s", got)
+	}
+	// Unas reglas que no se pueden comprobar porque el SLO no valida: R3.
+	if c, bad := CheckGenerated(oldBase, true, []byte("groups: []\n"), true); !bad || c.Risk != "R3" {
+		t.Fatalf("reglas con SLO inválido: %+v %v", c, bad)
+	}
+	spec, rules := Pair("svc/coyote/slo/prometheus/pagos.yaml")
+	if len(spec) != 2 || spec[1] != "svc/coyote/slo/pagos.yml" || rules != "svc/coyote/slo/prometheus/pagos.yaml" {
+		t.Fatalf("pareja: %v %s", spec, rules)
+	}
+	if !InRulesDir("coyote/slo/prometheus/extra/x.yml") || IsRulesPath("coyote/slo/prometheus/extra/x.yaml") || IsRulesPath("coyote/slo/prometheus/x.yml") {
+		t.Fatal("solo <servicio>.yaml directo es un archivo de reglas")
+	}
+}

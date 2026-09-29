@@ -87,7 +87,9 @@ func TestInfraGate(t *testing.T) {
 	}
 	// Cargar o borrar reglas de alertas, o silenciarlas, tiene efectos (ADR-0020); revisarlas no.
 	for _, c := range []string{"mimirtool rules sync coyote/slo/prometheus/pagos.yaml", "mimirtool --address=http://localhost:9009 --id=anonymous rules load r.yaml",
-		"cortextool rules delete ns grupo", "mimirtool alertmanager load am.yaml", "amtool silence add alertname=PagosApi", "amtool --alertmanager.url=http://am silence expire 1234", "amtool alert add x"} {
+		"cortextool rules delete ns grupo", "mimirtool alertmanager load am.yaml", "amtool silence add alertname=PagosApi", "amtool --alertmanager.url=http://am silence expire 1234", "amtool alert add x",
+		"mimirtool rules --user=1 sync --address=https://mimir.prod.example r.yaml", "mimirtool alertmanager --address=https://am load am.yaml",
+		"amtool silence --alertmanager.url=https://am.prod.example add x", "amtool silence update --duration=720h 1234", `sh -c "mimirtool rules --user=1 sync r.yaml"`, "mimirtool @args.txt"} {
 		if !InfraEffect(c) {
 			t.Errorf("%q tiene efectos", c)
 		}

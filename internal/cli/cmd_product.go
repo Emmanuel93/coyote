@@ -960,6 +960,12 @@ func mdCell(s string) string {
 	return strings.NewReplacer("|", "\\|", "\n", " ", "\r", " ", "`", "'", "[", "\\[", "]", "\\]", "<", "&lt;", ">", "&gt;").Replace(s)
 }
 
+// mdText es mdCell para texto libre en un comentario de GitHub: tampoco
+// menciona a nadie (@persona o @org/equipo).
+func mdText(s string) string {
+	return strings.ReplaceAll(mdCell(s), "@", "@\u200b")
+}
+
 // mdCode deja un texto apto para un bloque de código dentro de una celda:
 // ahí no se arman enlaces, pero un acento grave lo cerraría.
 func mdCode(s string) string {

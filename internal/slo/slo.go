@@ -8,14 +8,15 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"io"
 	"math"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
-	"go.yaml.in/yaml/v3"
+	"github.com/Emmanuel93/coyote/internal/yamlx"
 )
 
 // Rutas del proyecto.
@@ -71,11 +72,17 @@ type Alert struct {
 }
 
 var (
-	nameRe      = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`)
-	labelRe     = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]{0,99}$`)
-	alertRe     = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,99}$`)
-	hardRangeRe = regexp.MustCompile(`\[\s*\d+(ms|s|m|h|d|w|y)\s*[\]:]`)
-	multiNameRe = regexp.MustCompile(`__name__\s*=~`)
+	nameRe  = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$`)
+	labelRe = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]{0,99}$`)
+	alertRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,99}$`)
+)
+
+// Topes de un archivo de SLOs: más que cualquier servicio real, y lo bastante
+// chicos para que las reglas generadas pesen menos de 2 MiB.
+const (
+	maxSLOs  = 40
+	maxQuery = 2000
+	maxText  = 500
 )
 
 // reserved son las etiquetas que pone coyote.
@@ -84,19 +91,28 @@ var reserved = map[string]bool{"slo_id": true, "slo_service": true, "slo_name": 
 // Parse lee y valida un archivo de SLOs. Una clave desconocida es un error:
 // un "objetivo:" mal escrito dejaría un SLO sin objetivo.
 func Parse(data []byte) (*Spec, error) {
+	s, err := Decode(data)
+	if err != nil {
+		return nil, err
+	}
+	return s, s.Validate()
+}
+
+// Decode lee el archivo sin validar su contenido: un solo documento, sin
+// anclas ni alias y sin claves desconocidas. gate pr lo usa para comparar con
+// una base que ya no valida.
+func Decode(data []byte) (*Spec, error) {
+	if len(bytes.TrimSpace(data)) == 0 {
+		return nil, errors.New("archivo vacío")
+	}
 	var s Spec
-	dec := yaml.NewDecoder(bytes.NewReader(data))
-	dec.KnownFields(true)
-	if err := dec.Decode(&s); err != nil {
-		if errors.Is(err, io.EOF) {
-			return nil, errors.New("archivo vacío")
-		}
+	if err := yamlx.Strict(data, &s); err != nil {
 		return nil, err
 	}
 	if s.Period == "" {
 		s.Period = "30d"
 	}
-	return &s, s.Validate()
+	return &s, nil
 }
 
 // Days devuelve el periodo en días.
@@ -122,8 +138,11 @@ func (s *Spec) Validate() error {
 		add("period %q: usa 30d o 28d", s.Period)
 	}
 	checkLabels("labels", s.Labels, add)
-	if len(s.SLOs) == 0 {
+	switch {
+	case len(s.SLOs) == 0:
 		add("slos: declara al menos un SLO")
+	case len(s.SLOs) > maxSLOs:
+		add("slos: hasta %d por archivo; divide el servicio", maxSLOs)
 	}
 	names := map[string]bool{}
 	for i, o := range s.SLOs {
@@ -144,12 +163,25 @@ func (s *Spec) Validate() error {
 			add("%s: objective %v con más de cuatro decimales", where, o.Objective)
 		}
 		checkSLI(where, o.SLI, add)
+		checkText(where+": description", o.Description, add)
 		a := o.Alerts
 		if a.Name != "" && !alertRe.MatchString(a.Name) {
 			add("%s: alerts.name %q inválido: letras, números y guion bajo", where, a.Name)
 		}
 		if !a.Page.Disable && strings.TrimSpace(a.Runbook) == "" {
 			add("%s: la alerta page necesita alerts.runbook: quien la recibe de madrugada sigue un runbook", where)
+		}
+		checkText(where+": alerts.runbook", a.Runbook, add)
+		if !a.Page.Disable && o.Objective >= 50 && o.Objective < 100 {
+			// Con un objetivo bajo, el umbral de consumo de la page pasa de
+			// 100 % de errores: la alerta no puede disparar.
+			possible := false
+			for _, b := range pageBurns {
+				possible = possible || b.Factor(s.Days())*ErrorBudget(o) < 1
+			}
+			if !possible {
+				add("%s: con objetivo %v la alerta page no puede disparar (su umbral pasa del 100 %% de errores); apágala o sube el objetivo", where, o.Objective)
+			}
 		}
 		if r := strings.TrimSpace(a.Runbook); r != "" && (strings.HasPrefix(r, "/") || strings.Contains(r, "..") || strings.ContainsAny(r, "\x00\n")) {
 			if !strings.HasPrefix(r, "https://") {
@@ -160,10 +192,11 @@ func (s *Spec) Validate() error {
 		checkLabels(where+": alerts.page.labels", a.Page.Labels, add)
 		checkLabels(where+": alerts.ticket.labels", a.Ticket.Labels, add)
 		for _, m := range []map[string]string{a.Annotations, a.Page.Annotations, a.Ticket.Annotations} {
-			for k := range m {
+			for k, v := range m {
 				if !labelRe.MatchString(k) {
 					add("%s: anotación %q inválida", where, k)
 				}
+				checkText(where+": anotación "+k, v, add)
 			}
 		}
 	}
@@ -192,11 +225,27 @@ func checkLabels(where string, m map[string]string, add func(string, ...any)) {
 		case strings.ContainsAny(v, "\x00\n"):
 			add("%s: el valor de %s lleva un salto de línea", where, k)
 		}
+		checkText(where+": "+k, v, add)
+	}
+}
+
+// checkText revisa el texto que va a una etiqueta o anotación de una alerta.
+// Prometheus lo ejecuta como plantilla: un {{ en el archivo podría romper la
+// carga de las reglas o colgar la alerta justo cuando dispara.
+func checkText(where, v string, add func(string, ...any)) {
+	switch {
+	case strings.Contains(v, "{{") || strings.Contains(v, "}}"):
+		add("%s: sin {{ ni }}: Prometheus ejecuta ese texto como plantilla", where)
+	case !utf8.ValidString(v):
+		add("%s: el texto no es UTF-8 válido", where)
+	case len(v) > maxText:
+		add("%s: más de %d caracteres", where, maxText)
 	}
 }
 
 // checkSLI revisa la forma de las consultas: coyote no valida PromQL
-// completo, pero sí que la ventana sea la suya y que la consulta cierre.
+// completo, pero sí que la ventana sea la suya, que cada selector nombre una
+// métrica y que la consulta cierre.
 func checkSLI(where string, s SLI, add func(string, ...any)) {
 	var qs map[string]string
 	switch {
@@ -218,25 +267,133 @@ func checkSLI(where string, s SLI, add func(string, ...any)) {
 	sort.Strings(keys)
 	for _, k := range keys {
 		q := qs[k]
-		if !strings.Contains(q, Window) {
-			add("%s: sli.%s no usa %s: la ventana la pone coyote en cada regla", where, k, Window)
-		}
-		if hardRangeRe.MatchString(q) {
-			add("%s: sli.%s tiene una ventana fija; usa %s", where, k, Window)
-		}
-		if strings.Contains(strings.ReplaceAll(q, Window, ""), "{{") {
-			add("%s: sli.%s: el único marcador es %s", where, k, Window)
-		}
-		if multiNameRe.MatchString(q) {
-			add("%s: sli.%s elige varias métricas con __name__=~: rate() falla cuando comparten etiquetas y el SLO nunca se calcula; suma cada métrica con (sum(rate(m[%s])) or vector(0))", where, k, Window)
-		}
-		if strings.ContainsAny(q, "\x00") || len(q) > 4000 {
-			add("%s: sli.%s es demasiado larga o tiene bytes nulos", where, k)
+		switch {
+		case !utf8.ValidString(q) || strings.ContainsRune(q, 0) || len(q) > maxQuery:
+			add("%s: sli.%s es demasiado larga, tiene bytes nulos o no es UTF-8 válido", where, k)
+			continue
+		case strings.Contains(q, sentinel):
+			add("%s: sli.%s no puede contener %s", where, k, sentinel)
+			continue
 		}
 		if err := balanced(q); err != nil {
 			add("%s: sli.%s: %v", where, k, err)
+			continue
+		}
+		for _, msg := range scanQuery(q) {
+			add("%s: sli.%s %s", where, k, msg)
 		}
 	}
+}
+
+// sentinel reemplaza a {{.window}} mientras se revisa una consulta.
+const sentinel = "__COYOTE_WINDOW__"
+
+// scanQuery recorre la consulta fuera de las comillas y devuelve lo que la
+// haría fallar o medir otra cosa: ventanas que no son la de coyote,
+// comentarios que se tragan el paréntesis que agrega coyote, selectores sin
+// nombre de métrica o con __name__ (rate() quita el nombre y, si dos
+// métricas comparten etiquetas, la regla falla en cada evaluación) y
+// modificadores offset o @ que corren la ventana.
+func scanQuery(q string) []string {
+	var out []string
+	add := func(msg string) {
+		for _, m := range out {
+			if m == msg {
+				return
+			}
+		}
+		out = append(out, msg)
+	}
+	q = strings.ReplaceAll(q, Window, sentinel)
+	if !strings.Contains(q, sentinel) {
+		add("no usa " + Window + ": la ventana la pone coyote en cada regla")
+	}
+	if strings.Contains(q, "{{") || strings.Contains(q, "}}") {
+		add("tiene otro marcador; el único es " + Window)
+	}
+	rs := []rune(q)
+	var quote rune
+	escaped := false
+	windows := 0
+	for i := 0; i < len(rs); i++ {
+		r := rs[i]
+		if quote != 0 {
+			switch {
+			case escaped:
+				escaped = false
+			case r == '\\' && quote != '`':
+				escaped = true
+			case r == quote:
+				quote = 0
+			}
+			continue
+		}
+		switch {
+		case r == '"' || r == '\'' || r == '`':
+			quote = r
+		case r == '#':
+			add("tiene un comentario (#): se tragaría el paréntesis que agrega coyote")
+		case r == '@':
+			add("usa el modificador @: la ventana es la de coyote")
+		case r == '[':
+			end := i + 1
+			for end < len(rs) && rs[end] != ']' {
+				end++
+			}
+			inner := strings.TrimSpace(string(rs[i+1 : min(end, len(rs))]))
+			base, _, _ := strings.Cut(inner, ":")
+			if strings.TrimSpace(base) != sentinel {
+				add("tiene una ventana fija [" + inner + "]; usa " + Window)
+			} else {
+				windows++
+			}
+			i = end
+		case r == '{':
+			j := i - 1
+			for j >= 0 && unicode.IsSpace(rs[j]) {
+				j--
+			}
+			if j < 0 || !(unicode.IsLetter(rs[j]) || unicode.IsDigit(rs[j]) || rs[j] == '_' || rs[j] == ':') {
+				add("tiene un selector sin nombre de métrica: {…} elige varias métricas y rate() falla si comparten etiquetas; suma cada métrica con (sum(rate(m[" + Window + "])) or vector(0))")
+			}
+			end := i + 1
+			var inQuote rune
+			for end < len(rs) {
+				c := rs[end]
+				if inQuote != 0 {
+					if c == '\\' {
+						end += 2
+						continue
+					}
+					if c == inQuote {
+						inQuote = 0
+					}
+				} else if c == '"' || c == '\'' || c == '`' {
+					inQuote = c
+				} else if c == '}' {
+					break
+				}
+				end++
+			}
+			if strings.Contains(string(rs[i:min(end+1, len(rs))]), "__name__") {
+				add("elige métricas con __name__: rate() falla cuando comparten etiquetas; suma cada métrica con (sum(rate(m[" + Window + "])) or vector(0))")
+			}
+			i = end
+		case unicode.IsLetter(r) || r == '_':
+			j := i
+			for j < len(rs) && (unicode.IsLetter(rs[j]) || unicode.IsDigit(rs[j]) || rs[j] == '_' || rs[j] == ':') {
+				j++
+			}
+			if string(rs[i:j]) == "offset" {
+				add("usa offset: la ventana es la de coyote")
+			}
+			i = j - 1
+		}
+	}
+	if windows == 0 && strings.Contains(q, sentinel) {
+		add("usa " + Window + " fuera de una ventana [..]")
+	}
+	return out
 }
 
 // balanced revisa paréntesis, corchetes, llaves y comillas, sin contar lo

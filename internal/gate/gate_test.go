@@ -63,6 +63,8 @@ func TestReadOnlyShell(t *testing.T) {
 		"xargs rm < lista", "rg --pre ./x foo", "cat <(ls)", "coyote commit -m 'x'", "coyote ask x --record",
 		"coyote standards lint --scripts", "coyote install --ide cursor", "coyote install --check=false --ide cursor",
 		"coyote slo rules", "coyote slo rules pagos", "coyote hub init ../hub",
+		"coyote slo rules --check --check=false", "coyote slo rules --stdout=false", "coyote slo rules --check -- x --check=false",
+		"coyote generate agents --check --check=false", "coyote install --dry-run --dry-run=false --ide cursor",
 		"go test -run X ./...", "go run .", "ls\nrm -rf x", "ls # comentario", "git worktree add x",
 		"git config --list", "git config -l", "git config --get-regexp .", "git config --get-urlmatch http https://x",
 		"git config --get http.https://x.extraheader", "git remote -v", "git remote get-url origin", "go vet ./...", "go env",

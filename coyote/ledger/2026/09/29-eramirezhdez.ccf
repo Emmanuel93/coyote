@@ -48,3 +48,4 @@
 2026-09-29T07:06Z|@eramirezhdez/coyote-sre|W-0007|coyote|fix|slo|gate pr exige que las reglas generadas salgan de su SLO|-|-|-|ok
 2026-09-29T07:40Z|@eramirezhdez/coyote-architect|W-0007|coyote|fix|hub|refs sin ambigüedad, sin GIT_* heredadas y YAML sin alias|-|-|-|ok
 2026-09-29T07:44Z|@eramirezhdez/coyote-dev|W-0007|coyote|fix|web|la organización es de los admins del hub y mirar no escribe|-|-|-|ok
+2026-09-29T07:50Z|@eramirezhdez/coyote-sre|W-0007|coyote|fix|slo|consultas, plantillas y reglas generadas que no esconden una relajación|-|-|-|ok

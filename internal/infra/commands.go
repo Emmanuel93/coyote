@@ -28,9 +28,13 @@ var effectRes = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)\baws\b(?:\s+\S+)*?\s+s3\s+(?:rm|mv|cp|sync|rb|mb)\b`),
 	regexp.MustCompile(`(?i)\baz\b.*\s(?:create|delete|update|set|start|stop|restart|deallocate|deploy|assign)\b`),
 	regexp.MustCompile(`(?i)\bgsutil\b.*\s(?:rm|mv|cp|rsync|mb|rb|iam|acl)\b`),
-	// Cargar reglas o configuración de alertas, o silenciarlas (ADR-0020).
-	regexp.MustCompile(`(?i)\b(?:mimirtool|cortextool)` + sub + `(?:rules\s+(?:load|sync|delete)|alertmanager\s+(?:load|delete))\b`),
-	regexp.MustCompile(`(?i)\bamtool` + sub + `(?:silence\s+(?:add|expire|import)|alert\s+add)\b`),
+	// Cargar reglas o configuración de alertas, o silenciarlas (ADR-0020). El
+	// verbo cuenta en cualquier lugar después del programa: kingpin acepta
+	// banderas entre el grupo y el subcomando, y @archivo trae argumentos que
+	// no se ven.
+	regexp.MustCompile(`(?i)\b(?:mimirtool|cortextool)` + sub + `(?:load|sync|delete)\b`),
+	regexp.MustCompile(`(?i)\bamtool` + sub + `(?:add|expire|import|update)\b`),
+	regexp.MustCompile(`(?i)\b(?:mimirtool|cortextool|amtool)` + sub + `@\S`),
 }
 
 // ApplyCommand dice si un comando aplica o destruye infraestructura como

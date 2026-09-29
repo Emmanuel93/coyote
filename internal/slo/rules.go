@@ -187,7 +187,9 @@ func sliExpr(q SLI, w string) string {
 	if q.ErrorRatio != "" {
 		return "(" + fill(q.ErrorRatio) + ")"
 	}
-	return "(" + fill(q.Errors) + ")\n/\n(" + fill(q.Total) + ")"
+	// Sin tráfico no hay muestra: 0/0 sería NaN y envenenaría el promedio del
+	// periodo durante todo el periodo.
+	return "(" + fill(q.Errors) + ")\n/\n((" + fill(q.Total) + ") > 0)"
 }
 
 func alertExpr(sel, budget string, days int, burns []burn) string {
