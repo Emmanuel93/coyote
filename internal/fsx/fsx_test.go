@@ -90,3 +90,39 @@ func TestReadCappedNoLeeDispositivos(t *testing.T) {
 		t.Errorf("un symlink a un archivo regular se lee: %q %v", data, err)
 	}
 }
+
+func TestText(t *testing.T) {
+	le := []byte{0xFF, 0xFE, 'h', 0, 'o', 0, 'l', 0, 'a', 0}
+	be := []byte{0xFE, 0xFF, 0, 'h', 0, 'o', 0, 'l', 0, 'a'}
+	bom := append([]byte{0xEF, 0xBB, 0xBF}, "hola"...)
+	for name, in := range map[string][]byte{"UTF-16LE": le, "UTF-16BE": be, "UTF-8 con BOM": bom, "UTF-8": []byte("hola")} {
+		if s, ok := Text(in); !ok || s != "hola" {
+			t.Errorf("%s: %q %v", name, s, ok)
+		}
+	}
+	if _, ok := Text([]byte{'a', 0, 'b'}); ok {
+		t.Error("un binario sin BOM no es texto")
+	}
+}
+
+func TestReadFileYRegular(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "a.txt"), []byte("hola"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(root, "a.txt"), filepath.Join(root, "b.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if data, err := ReadFile(root, "a.txt", 10); err != nil || string(data) != "hola" {
+		t.Errorf("ReadFile: %q %v", data, err)
+	}
+	if _, err := ReadFile(root, "b.txt", 10); err == nil {
+		t.Error("ReadFile no sigue symlinks")
+	}
+	if _, err := ReadFile(root, "a.txt", 2); err == nil {
+		t.Error("ReadFile respeta el tope")
+	}
+	if !Regular(root, "a.txt") || Regular(root, "b.txt") || Regular(root, "no.txt") {
+		t.Error("Regular")
+	}
+}

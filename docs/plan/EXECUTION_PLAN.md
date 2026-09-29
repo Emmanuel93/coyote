@@ -426,11 +426,11 @@ G5 autorizó (P-0005), con el ejercicio en ramas:
 | ID | Tarea | Razonamiento | Aceptación | Estado |
 | --- | --- | --- | --- | --- |
 | T39 | Plan y ADR-0015, ADR-0016, ADR-0017 | Tres frentes de seguridad; se razonan antes del código | Esta sección, los ADRs y W-0006 | Hecho |
-| T40 | IDEs con nivel medido | Sin adaptador, A1 es una promesa en ese IDE | Codex, Gemini CLI, Copilot, Windsurf/Devin Desktop y Devin CLI: entrada, herramientas, negación e instalación sin pisar tu configuración; `doctor --ide` con canario; matriz en la spec | Pendiente |
-| T41 | Secretos y credenciales | Un agente no debe leer ni publicar un secreto | Archivos de secretos y comandos que imprimen credenciales, bloqueados siempre; `secrets list`; escáner en `commit`, lint (R18), `gate pr` y escrituras del agente; pruebas adversariales | Pendiente |
-| T42 | Infraestructura como código | Ver qué hace un cambio de infraestructura antes de aplicarlo | `infra.yaml` v1, `infra check` y R13, `extract` para Terraform, `infra plan` y `gate pr --plan`; gate de comandos de infraestructura por ambiente | Pendiente |
-| T43 | Piloto en solo lectura | Evidencia sobre tus repos antes de G6 | `infra.yaml` propuesto para `fintech-infraestructure`, con su `infra check`; inventario de archivos de secretos de los repos (nombres y conteos); el canario en tus IDEs, que corres tú | Pendiente |
-| T44 | Verificación y G6 | Evidencia antes de activar el gate en otros IDEs y en la infraestructura | Pruebas, revisión adversarial y `docs/releases/v0.6.0.md` | Pendiente |
+| T40 | IDEs con nivel medido | Sin adaptador, A1 es una promesa en ese IDE | Codex, Gemini CLI, Copilot, Windsurf/Devin Desktop y Devin CLI: entrada, herramientas, negación e instalación sin pisar tu configuración; `doctor --ide` con canario; matriz en la spec | Hecho |
+| T41 | Secretos y credenciales | Un agente no debe leer ni publicar un secreto | Archivos de secretos y comandos que imprimen credenciales, bloqueados siempre; `secrets list`; escáner en `commit`, lint (R18), `gate pr` y escrituras del agente; pruebas adversariales | Hecho |
+| T42 | Infraestructura como código | Ver qué hace un cambio de infraestructura antes de aplicarlo | `infra.yaml` v1, `infra check` y R13, `extract` para Terraform, `infra plan` y `gate pr --plan`; gate de comandos de infraestructura por ambiente | Hecho |
+| T43 | Piloto en solo lectura | Evidencia sobre tus repos antes de G6 | `infra.yaml` propuesto para `fintech-infraestructure`, con su `infra check`; inventario de archivos de secretos de los repos (nombres y conteos); el canario en tus IDEs, que corres tú | Hecho |
+| T44 | Verificación y G6 | Evidencia antes de activar el gate en otros IDEs y en la infraestructura | Pruebas, revisión adversarial y `docs/releases/v0.6.0.md` | Hecho: tres pasadas adversariales, todo lo encontrado corregido con prueba; G6 pendiente |
 
 G6 autorizaría:
 
