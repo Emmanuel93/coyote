@@ -189,11 +189,12 @@ func webPages(t *testing.T, root string, paths ...string) map[string]string {
 	t.Helper()
 	old := webServe
 	defer func() { webServe = old }()
+	fixWebKey(t)
 	pages := map[string]string{}
 	webServe = func(srv *http.Server, ln net.Listener) error {
 		defer ln.Close()
 		for _, p := range paths {
-			req := httptest.NewRequest(http.MethodGet, p, nil)
+			req := httptest.NewRequest(http.MethodGet, "/s/"+webTestKey+p, nil)
 			req.Host = "127.0.0.1"
 			rec := httptest.NewRecorder()
 			srv.Handler.ServeHTTP(rec, req)

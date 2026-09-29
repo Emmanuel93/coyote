@@ -18,7 +18,7 @@ func server() *Server {
 		return usage.Event{Repo: repo, Line: ccf.Line{TS: now.AddDate(0, 0, -daysAgo), Actor: actor, Repo: repo, Type: "run", Scope: "-",
 			What: what, Status: "ok", Refs: []string{"model:" + model}, Tokens: &ccf.Tokens{In: in, Out: out}, Cost: &ccf.Cost{In: cin, Out: cout}}}
 	}
-	return &Server{Title: "tienda", Sources: []string{"tienda"}, Viewer: "@ana", Admin: true, Admins: []string{"@ana"}, Now: func() time.Time { return now }, Load: func() ([]usage.Event, error) {
+	return &Server{Title: "tienda", Sources: []string{"tienda"}, Viewer: "@ana", Admin: true, Admins: []string{"@ana"}, Key: testKey, Now: func() time.Time { return now }, Load: func() ([]usage.Event, error) {
 		return []usage.Event{
 			mk("tienda", "@ana/coyote-dev", "sonnet-5", "<script>alert(1)</script>", 12000, 1100, 0.009, 0.011, 1),
 			mk("pagos", "@luis", "opus-5.5", "x", 2000, 300, 0.008, 0.006, 2),
@@ -28,7 +28,16 @@ func server() *Server {
 	}}
 }
 
+// testKey es la clave de sesión de las pruebas; get la pone en la ruta.
+const testKey = "clave-de-prueba"
+
 func get(t *testing.T, h http.Handler, host, target string) *httptest.ResponseRecorder {
+	t.Helper()
+	return getRaw(t, h, host, "/s/"+testKey+target)
+}
+
+// getRaw pide la ruta tal cual, sin la clave.
+func getRaw(t *testing.T, h http.Handler, host, target string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodGet, target, nil)
 	req.Host = host
@@ -185,7 +194,7 @@ func TestVistasDeOperacion(t *testing.T) {
 		}
 	}
 	// Sin fuentes, cada sección dice cómo llenarla.
-	empty := &Server{Title: "x", Viewer: "@ana", Load: func() ([]usage.Event, error) { return nil, nil }}
+	empty := &Server{Title: "x", Viewer: "@ana", Key: testKey, Load: func() ([]usage.Event, error) { return nil, nil }}
 	for _, path := range []string{"/presupuesto", "/workstreams", "/gate", "/slo"} {
 		if w := get(t, empty.Handler(), "127.0.0.1", path); w.Code != 200 {
 			t.Fatalf("%s vacío: %d %s", path, w.Code, w.Body)
@@ -244,5 +253,54 @@ func TestGastoDeOtrosYFechasFuturas(t *testing.T) {
 	s.Admin = true
 	if work := get(t, s.Handler(), "127.0.0.1", "/workstreams").Body.String(); !strings.Contains(work, "$4.00") {
 		t.Fatal("un admin ve el gasto de todos los planes")
+	}
+}
+
+func TestClaveDeSesion(t *testing.T) {
+	h := server().Handler()
+	for _, target := range []string{"/", "/presupuesto", "/api/usage", "/s/", "/s//", "/s/otra/", "/s/" + testKey[:len(testKey)-1] + "/",
+		"/s/" + testKey + "x/", "/S/" + testKey + "/", "/x/s/" + testKey + "/", "/s/" + testKey + "%2Fx/"} {
+		w := getRaw(t, h, "127.0.0.1:7410", target)
+		if w.Code != http.StatusNotFound {
+			t.Errorf("%s sin la clave correcta: %d, se esperaba 404", target, w.Code)
+		}
+		if strings.Contains(w.Body.String(), testKey) || strings.Contains(w.Body.String(), "clave") {
+			t.Errorf("%s: la respuesta no debe dar pistas de la clave: %q", target, w.Body)
+		}
+	}
+	w := getRaw(t, h, "127.0.0.1:7410", "/s/"+testKey)
+	if w.Code != http.StatusMovedPermanently || w.Header().Get("Location") != "/s/"+testKey+"/" {
+		t.Fatalf("sin barra final debe redirigir a la raíz de la sesión: %d %q", w.Code, w.Header().Get("Location"))
+	}
+	w = get(t, h, "127.0.0.1:7410", "/")
+	if w.Code != 200 {
+		t.Fatalf("con la clave: %d", w.Code)
+	}
+	for _, want := range []string{`href="/s/` + testKey + `/presupuesto"`, `href="/s/` + testKey + `/"`, `href="?view=`} {
+		if !strings.Contains(w.Body.String(), want) {
+			t.Errorf("los enlaces deben llevar la clave; falta %s", want)
+		}
+	}
+	if w.Header().Get("Referrer-Policy") != "no-referrer" || w.Header().Get("Cache-Control") != "no-store" {
+		t.Error("la clave no debe salir por Referer ni quedar en caché")
+	}
+	if w := get(t, h, "127.0.0.1:7410", "/api/usage"); w.Code != 200 {
+		t.Fatalf("la API también cuelga de la clave: %d", w.Code)
+	}
+	if w := get(t, h, "evil.example.com", "/"); w.Code != http.StatusForbidden {
+		t.Fatalf("un Host ajeno se rechaza aunque traiga la clave: %d", w.Code)
+	}
+	s := server()
+	s.Key = ""
+	if w := getRaw(t, s.Handler(), "127.0.0.1:7410", "/s//"); w.Code != http.StatusNotFound {
+		t.Fatalf("sin clave configurada no se sirve nada: %d", w.Code)
+	}
+	a, err := NewKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := NewKey()
+	if len(a) != 43 || a == b || strings.ContainsAny(a, "+/=") {
+		t.Fatalf("clave inesperada: %q %q", a, b)
 	}
 }

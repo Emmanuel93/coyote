@@ -37,7 +37,7 @@ coyote log                          # eventos con tokens y costo
 coyote get context --scope pedidos  # lo que un agente necesita saber, acotado
 coyote ask "cuándo se confirma un pedido"
 coyote push                         # revisa autoría y estándar, y publica a ritmo humano
-coyote web                          # costos, presupuesto, workstreams, gate y SLOs en http://127.0.0.1:7410
+coyote web                          # costos, presupuesto, workstreams, gate y SLOs; imprime la URL con la clave de la sesión
 ```
 
 `coyote init` nunca sobrescribe: en un repo existente solo agrega lo que falta.

@@ -733,17 +733,22 @@ func TestWeb(t *testing.T) {
 	must(t, run(t, root, "", "web", "--addr", "0.0.0.0:7410"), 2, "web fuera de loopback")
 	old := webServe
 	defer func() { webServe = old }()
+	fixWebKey(t)
 	var body string
 	webServe = func(srv *http.Server, ln net.Listener) error {
 		defer ln.Close()
-		req := httptest.NewRequest(http.MethodGet, "/?since=all", nil)
+		req := httptest.NewRequest(http.MethodGet, "/s/"+webTestKey+"/?since=all", nil)
 		req.Host = "127.0.0.1"
 		rec := httptest.NewRecorder()
 		srv.Handler.ServeHTTP(rec, req)
 		body = rec.Body.String()
 		return nil
 	}
-	must(t, run(t, root, "", "web", "--addr", "127.0.0.1:0"), 0, "web")
+	r := run(t, root, "", "web", "--addr", "127.0.0.1:0")
+	must(t, r, 0, "web")
+	if !strings.Contains(r.stdout, "/s/"+webTestKey+"/ ") || !strings.Contains(r.stdout, "No la compartas") {
+		t.Errorf("coyote web debe imprimir la URL con la clave y el aviso:\n%s", r.stdout)
+	}
 	for _, want := range []string{"$0.03", "sonnet-5", "@ana", "12k"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("falta %q en la página:\n%s", want, body)
@@ -803,4 +808,15 @@ func TestReferenciasConEspaciosRaros(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(outside, "index.json")); err != nil {
 		t.Fatal("se borró un archivo fuera del proyecto")
 	}
+}
+
+// webTestKey es la clave fija de coyote web en las pruebas.
+const webTestKey = "clave-fija"
+
+// fixWebKey fija la clave de coyote web mientras dura la prueba.
+func fixWebKey(t *testing.T) {
+	t.Helper()
+	old := newWebKey
+	newWebKey = func() (string, error) { return webTestKey, nil }
+	t.Cleanup(func() { newWebKey = old })
 }

@@ -69,3 +69,4 @@
 2026-09-29T10:00Z|@eramirezhdez/coyote-scribe|W-0007|coyote|doc|readme|el README vuelve a caber en 150 líneas|-|-|-|ok
 2026-09-29T16:57Z|@eramirezhdez/coyote-scribe|W-0007|coyote|doc|release|v0.7.0 aprobada en G7 (P-0007) y ADR-0018 a ADR-0021 aceptados|-|-|-|ok
 2026-09-29T17:23Z|@eramirezhdez/coyote-sr-solution-architect|W-0008|coyote|doc|plan|plan razonado de v1.0 y ADR-0022 a ADR-0027|-|-|-|ok
+2026-09-29T17:27Z|@eramirezhdez/coyote-devsecops|W-0008|coyote|feat|web|clave por sesión en la ruta de cada enlace; sin ella, 404…|-|-|-|ok

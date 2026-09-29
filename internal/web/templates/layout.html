@@ -56,7 +56,7 @@ footer{color:var(--muted);font-size:12px;margin-top:22px;border-top:1px solid va
 <body>
 <main>
 <header><b>coyote · {{.Title}}</b><span>{{.Viewer}}{{if .Admin}} · admin{{end}}{{with .Hub}} · hub {{.}}{{end}}</span></header>
-<nav class="tabs" aria-label="Secciones">{{range .Nav}}<a href="{{.Path}}"{{if .On}} class="on" aria-current="page"{{end}}>{{.Label}}</a>{{end}}</nav>
+<nav class="tabs" aria-label="Secciones">{{range .Nav}}<a href="{{.Href}}"{{if .On}} class="on" aria-current="page"{{end}}>{{.Label}}</a>{{end}}</nav>
 {{range .Notices}}<p class="notice">{{.}}</p>{{end}}
 {{block "content" .}}{{end}}
 <footer>

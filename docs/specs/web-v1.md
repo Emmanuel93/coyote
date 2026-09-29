@@ -1,6 +1,6 @@
 # Web v1
 
-Estado: nuevo en v0.7.0 (la web v0 llegó en v0.2.0) · Implementación: `internal/web`, `coyote web` · Decisión: ADR-0019
+Estado: nuevo en v0.7.0 (la web v0 llegó en v0.2.0); clave por sesión desde v1.0 · Implementación: `internal/web`, `coyote web` · Decisiones: ADR-0019, ADR-0022
 
 `coyote web` sirve la operación del proyecto en el navegador: costos, presupuesto, workstreams, gate, SLOs y, para admins, la organización. Todo se lee en cada petición del ledger, de los planes, de la cola del gate y del hub; la web no guarda nada ni agrega comandos.
 
@@ -31,6 +31,11 @@ Estado: nuevo en v0.7.0 (la web v0 llegó en v0.2.0) · Implementación: `intern
 ## Superficie
 
 - Escucha solo en loopback; `localhost` se traduce a 127.0.0.1.
+- **Clave por sesión (ADR-0022).** Cada corrida genera una clave de 256 bits y la imprime solo en la terminal, dentro de la URL: `http://127.0.0.1:7410/s/<clave>/`.
+  - Todas las rutas cuelgan de ese prefijo, también `api/usage`.
+  - Una ruta sin la clave correcta responde 404, sin decir por qué. La clave se compara en tiempo constante.
+  - La clave no se escribe en disco ni en el ledger, y no está en los argumentos del proceso. Cambia en cada arranque, así que un marcador no sirve de una corrida a otra.
+  - Va en la ruta y no en una cookie: las cookies de 127.0.0.1 viajan a cualquier puerto de la máquina (RFC 6265, §8.5).
 - Rechaza un `Host` que no sea loopback (DNS rebinding) y las peticiones en forma absoluta.
 - Solo GET y HEAD. No hay formularios: aprobar, rechazar y revocar se hacen en la terminal, donde coyote verifica que decide una persona.
 - Mirar no escribe: la cola se lee sin borrar las propuestas vencidas y la clave de firmas no se crea si no existe.
@@ -38,4 +43,4 @@ Estado: nuevo en v0.7.0 (la web v0 llegó en v0.2.0) · Implementación: `intern
 - Sin JavaScript. La CSP es `default-src 'none'` con estilos en línea; `frame-ancestors 'none'`, `no-referrer` y `no-store`.
 - Todo texto del ledger, de los planes o de la cola se escapa. Además, ninguna respuesta lleva controles, separadores de línea Unicode ni caracteres de formato invisibles (los que reordenan un texto): se escriben como su código (`\u202e`).
 - Una acción de la cola se muestra en una línea visible y corta; si parece llevar un secreto, se oculta y se revisa con `coyote review <id>`. El marcador de dispensa de secretos no aplica aquí, tampoco anidado.
-- Cualquier usuario de la misma máquina puede pedir la página por loopback: en una máquina compartida, `coyote web` muestra a los demás usuarios lo que ve quien la corre. Queda para v1.0 una clave por sesión en la URL.
+- Quien tenga la URL con la clave ve lo que ve quien corre `coyote web` hasta que se cierre. Quien tenga los permisos de esa persona, o de root, en la misma máquina puede leer el proceso: eso queda fuera del alcance.

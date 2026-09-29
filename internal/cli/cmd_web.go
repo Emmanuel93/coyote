@@ -32,6 +32,9 @@ import (
 // webServe arranca el servidor; las pruebas lo reemplazan.
 var webServe = func(srv *http.Server, ln net.Listener) error { return srv.Serve(ln) }
 
+// newWebKey da la clave de la corrida (ADR-0022); las pruebas la fijan.
+var newWebKey = web.NewKey
+
 func cmdWeb(a *app, args []string) error {
 	fs := a.flags("web", "[--addr 127.0.0.1:7410]")
 	addr := fs.String("addr", "127.0.0.1:7410", "dirección de escucha; solo loopback")
@@ -52,6 +55,9 @@ func cmdWeb(a *app, args []string) error {
 	if err != nil {
 		return err
 	}
+	if s.Key, err = newWebKey(); err != nil {
+		return fmt.Errorf("coyote web: no se pudo generar la clave de la sesión: %v", err)
+	}
 	ln, err := net.Listen("tcp", *addr)
 	if err != nil {
 		return err
@@ -65,8 +71,9 @@ func cmdWeb(a *app, args []string) error {
 	case s.Admin:
 		role = "eres admin del proyecto: ves el gasto de todas sus personas"
 	}
-	fmt.Fprintf(a.stdout, "coyote web en http://%s · %d fuentes (%v) · %s %s · solo esta máquina · Ctrl+C para salir\n",
-		ln.Addr(), len(names), names, s.Viewer, role)
+	fmt.Fprintf(a.stdout, "coyote web en http://%s%s/ · %d fuentes (%v) · %s %s · solo esta máquina · Ctrl+C para salir\n",
+		ln.Addr(), s.Base(), len(names), names, s.Viewer, role)
+	fmt.Fprintln(a.stdout, "La URL lleva la clave de esta corrida: quien la tenga ve lo que ves tú. No la compartas; cambia al volver a arrancar.")
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 	go func() {

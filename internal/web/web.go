@@ -2,12 +2,16 @@
 // presupuesto, workstreams, gate, SLOs y, para admins, la organización.
 // Todo se lee en cada petición del ledger, de los planes y de la cola que ya
 // existen. Solo lectura, solo en loopback, con verificación de Host contra DNS
-// rebinding y sin JavaScript. Decidir (aprobar, rechazar, revocar) se hace en
-// la terminal.
+// rebinding y sin JavaScript. Cada corrida tiene su clave en la ruta
+// (ADR-0022): sin ella, otro usuario de la máquina no ve nada. Decidir
+// (aprobar, rechazar, revocar) se hace en la terminal.
 package web
 
 import (
+	"crypto/rand"
+	"crypto/subtle"
 	"embed"
+	"encoding/base64"
 	"fmt"
 	"html/template"
 	"net"
@@ -43,6 +47,9 @@ type Server struct {
 	Hub string
 	// Notices son avisos para todas las páginas (un hub que no se pudo leer).
 	Notices []string
+	// Key es la clave de esta corrida (NewKey). Todas las rutas cuelgan de
+	// /s/<Key>/; sin clave, el servidor no sirve nada.
+	Key string
 
 	Load   func() ([]usage.Event, error)
 	Budget func() (Budget, error)
@@ -276,7 +283,50 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/gate", s.gate)
 	mux.HandleFunc("/slo", s.slo)
 	mux.HandleFunc("/org", s.org)
-	return protect(mux)
+	return protect(s.withKey(mux))
+}
+
+// keyPrefix es el comienzo de toda ruta: /s/<clave>/.
+const keyPrefix = "/s/"
+
+// NewKey devuelve una clave de 256 bits en base64url, para una sola corrida.
+func NewKey() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(b), nil
+}
+
+// Base es el prefijo de las rutas de esta corrida, sin la barra final.
+func (s *Server) Base() string { return keyPrefix + s.Key }
+
+// withKey sirve solo lo que llega bajo /s/<clave>/ y le quita ese prefijo a
+// la ruta. Cualquier otra ruta, o una clave distinta, es 404 sin explicación;
+// la clave se compara en tiempo constante (ADR-0022).
+func (s *Server) withKey(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rest, ok := strings.CutPrefix(r.URL.Path, keyPrefix)
+		if !ok || s.Key == "" {
+			http.NotFound(w, r)
+			return
+		}
+		key, tail, slash := strings.Cut(rest, "/")
+		if subtle.ConstantTimeCompare([]byte(key), []byte(s.Key)) != 1 {
+			http.NotFound(w, r)
+			return
+		}
+		if !slash {
+			http.Redirect(w, r, s.Base()+"/", http.StatusMovedPermanently)
+			return
+		}
+		r2 := new(http.Request)
+		*r2 = *r
+		u := *r.URL
+		u.Path, u.RawPath = "/"+tail, ""
+		r2.URL = &u
+		next.ServeHTTP(w, r2)
+	})
 }
 
 func protect(next http.Handler) http.Handler {
@@ -325,6 +375,7 @@ func (s *safeResponse) Write(p []byte) (int, error) { return s.out.Write(p) }
 type navItem struct {
 	Path, Label string
 	On          bool
+	Href        string // Path con el prefijo de la clave
 }
 
 // pageData es lo que comparten todas las páginas.
@@ -345,13 +396,14 @@ func (s *Server) now() time.Time {
 }
 
 func (s *Server) page(section string, body any) pageData {
-	items := []navItem{{"/", "Costos", false}, {"/presupuesto", "Presupuesto", false}, {"/workstreams", "Workstreams", false},
-		{"/gate", "Gate", false}, {"/slo", "SLOs", false}}
+	items := []navItem{{Path: "/", Label: "Costos"}, {Path: "/presupuesto", Label: "Presupuesto"}, {Path: "/workstreams", Label: "Workstreams"},
+		{Path: "/gate", Label: "Gate"}, {Path: "/slo", Label: "SLOs"}}
 	if s.OrgAdmin && s.Org != nil {
-		items = append(items, navItem{"/org", "Organización", false})
+		items = append(items, navItem{Path: "/org", Label: "Organización"})
 	}
 	for i := range items {
 		items[i].On = items[i].Path == section
+		items[i].Href = s.Base() + items[i].Path
 	}
 	return pageData{Title: s.Title, Section: section, Viewer: s.Viewer, Hub: s.Hub, Admin: s.Admin, Admins: s.Admins,
 		Sources: strings.Join(s.Sources, ", "), Nav: items, Notices: s.Notices, Body: body}

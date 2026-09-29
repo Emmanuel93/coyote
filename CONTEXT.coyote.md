@@ -19,7 +19,7 @@ risk|tokens|el estimador local de tokens puede desviarse del real; los eventos r
 dec|ws|el motor saca el estado del ledger; el modo decide dónde se detiene y el gate aplica igual|ADR-0014
 inv|index|el índice se reconstruye desde git; .coyote/ es caché y nunca se versiona|ADR-0007
 inv|sync|push y pull usan el git del sistema; coyote nunca guarda credenciales de git|ADR-0008
-inv|web|coyote web escucha solo en loopback, valida Host y es de solo lectura|internal/web/web.go
+inv|web|coyote web escucha en loopback, valida Host, es de solo lectura y pide la clave de la corrida|ADR-0022
 inv|gate|toda acción con efectos de un agente pasa por coyote gate check; leer es libre, lo demás se aprueba|ADR-0009
 inv|gate|un agente nunca aprueba, edita el gate ni lee credenciales; el gate falla cerrado|docs/specs/gate-v1.md
 inv|approvals|una aprobación vale en la máquina que la firmó, por 24 h y usos contados en el ledger|docs/specs/gate-v1.md
@@ -45,4 +45,3 @@ dec|web|cada persona ve su gasto y los totales; el desglose, los admins; la orga
 dec|slo|las alertas salen de coyote/slo/<servicio>.yaml; relajar un SLO es R3 y un agente nunca las carga|ADR-0020
 dec|ci|gitleaks es opcional en el pipeline, fijado por hash y con la configuración de la rama base|ADR-0021
 inv|output|la salida de coyote en terminal y web escapa controles y caracteres invisibles|internal/safetext/safetext.go
-gap|web|otro usuario de la misma máquina puede pedir la web por loopback; la clave por sesión es de v1.0|docs/specs/web-v1.md
