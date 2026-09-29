@@ -18,8 +18,10 @@ import (
 	"github.com/Emmanuel93/coyote/internal/fsx"
 )
 
-// IDEs que coyote install sabe configurar en esta versión.
-var IDEs = []string{"claude-code", "cursor"}
+// IDEs que coyote install sabe configurar en esta versión. Devin CLI lee el
+// hook de Claude Code y Junie solo acepta hooks de usuario: no tienen
+// instalación propia (docs/specs/install-v1.md).
+var IDEs = []string{"claude-code", "cursor", "codex", "gemini", "copilot", "windsurf"}
 
 // Estados de un cambio.
 const (
@@ -61,8 +63,11 @@ const CursorCommand = ".cursor/hooks/coyote-gate.sh"
 // bloquea: un gate que se apaga solo no es gate.
 func GateScript(ide string) string {
 	deny := `echo "coyote no está instalado o no está en el PATH: el gate humano bloquea esta acción. Instálalo (make install en el repo de coyote) y vuelve a intentar." >&2`
-	if ide == "cursor" {
+	switch ide {
+	case "cursor":
 		deny = `echo '{"permission":"deny","user_message":"coyote no está instalado: el gate humano bloquea esta acción","agent_message":"coyote no está instalado: el gate humano bloquea esta acción"}'` + "\n" + deny
+	case "copilot":
+		deny = `echo '{"permissionDecision":"deny","permissionDecisionReason":"coyote no está instalado: el gate humano bloquea esta acción"}'` + "\n" + deny
 	}
 	return `#!/bin/sh
 # Generado por coyote install: gate humano de coyote (ADR-0009). No lo edites; corre coyote install.
@@ -76,6 +81,32 @@ done
 exit 2
 `
 }
+
+// Launcher es el comando que corre el IDE. Busca el hook de coyote desde la
+// carpeta del proyecto (envDir, si el IDE la da) o la actual, subiendo hasta la
+// raíz; si no lo encuentra, niega con salida 2. Codex, Gemini CLI y Windsurf
+// dejan pasar la herramienta cuando el hook falta o sale con otro código.
+func Launcher(rel, envDir string) string {
+	start := `$PWD`
+	if envDir != "" {
+		start = `${` + envDir + `:-$PWD}`
+	}
+	return `sh -c 'd="` + start + `"; while :; do if [ -x "$d/` + rel + `" ]; then exec "$d/` + rel + `"; fi; ` +
+		`[ "$d" = / ] || [ -z "$d" ] && break; d=$(dirname "$d"); done; ` +
+		`echo "coyote: no encuentro ` + rel + `; el gate bloquea por seguridad" >&2; exit 2'`
+}
+
+// Rutas de los hooks de cada IDE.
+const (
+	CodexHook    = ".codex/hooks/coyote-gate.sh"
+	GeminiHook   = ".gemini/hooks/coyote-gate.sh"
+	CopilotHook  = ".github/hooks/coyote-gate.sh"
+	CopilotFile  = ".github/hooks/coyote.json"
+	WindsurfHook = ".windsurf/hooks/coyote-gate.sh"
+)
+
+// windsurfEvents son los hooks previos de Cascade que pasan por el gate.
+var windsurfEvents = []string{"pre_run_command", "pre_write_code", "pre_read_code", "pre_mcp_tool_use"}
 
 // Plan calcula lo que install haría, sin escribir nada.
 func Plan(o Options) ([]Change, error) {
@@ -131,6 +162,50 @@ func Plan(o Options) ([]Change, error) {
 			return nil, err
 		}
 		out = append(out, cs...)
+	case "codex":
+		if err := add(file(o.Root, CodexHook, []byte(GateScript("codex")), 0o755, "hook del gate")); err != nil {
+			return nil, err
+		}
+		if err := add(jsonFile(o.Root, ".codex/hooks.json", mergeCodex, "gate en PreToolUse: shell, apply_patch y MCP")); err != nil {
+			return nil, err
+		}
+		cs, err := skillsDir(o.Root, ".agents/skills", o.Set)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, cs...)
+	case "gemini":
+		if err := add(file(o.Root, GeminiHook, []byte(GateScript("gemini")), 0o755, "hook del gate")); err != nil {
+			return nil, err
+		}
+		if err := add(jsonFile(o.Root, ".gemini/settings.json", mergeGemini, "gate en BeforeTool y AGENTS.md como contexto")); err != nil {
+			return nil, err
+		}
+		cs, err := skillsDir(o.Root, ".agents/skills", o.Set)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, cs...)
+	case "copilot":
+		if err := add(file(o.Root, CopilotHook, []byte(GateScript("copilot")), 0o755, "hook del gate")); err != nil {
+			return nil, err
+		}
+		c, err := copilotFile(o.Root)
+		if err := add(c, err); err != nil {
+			return nil, err
+		}
+		cs, err := skillsDir(o.Root, ".agents/skills", o.Set)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, cs...)
+	case "windsurf":
+		if err := add(file(o.Root, WindsurfHook, []byte(GateScript("windsurf")), 0o755, "hook del gate")); err != nil {
+			return nil, err
+		}
+		if err := add(jsonFile(o.Root, ".windsurf/hooks.json", mergeWindsurf, "gate en comandos, escrituras, lecturas y MCP")); err != nil {
+			return nil, err
+		}
 	default:
 		return nil, fmt.Errorf("IDE desconocido %q (usa %s o all)", o.IDE, strings.Join(IDEs, ", "))
 	}
@@ -350,40 +425,26 @@ func isCoyoteHook(v any) bool {
 	if !ok {
 		return false
 	}
-	cmd, _ := o.get("command")
-	s, _ := cmd.(string)
-	// El hook de v0.1 llamaba a "$c" gate attribution dentro de un for.
-	return strings.Contains(s, "coyote-gate") ||
-		(strings.Contains(s, "coyote") && (strings.Contains(s, "gate attribution") || strings.Contains(s, "gate check")))
+	for _, k := range []string{"command", "bash"} {
+		cmd, _ := o.get(k)
+		s, _ := cmd.(string)
+		// El hook de v0.1 llamaba a "$c" gate attribution dentro de un for.
+		if strings.Contains(s, "coyote-gate") ||
+			(strings.Contains(s, "coyote") && (strings.Contains(s, "gate attribution") || strings.Contains(s, "gate check"))) {
+			return true
+		}
+	}
+	return false
 }
 
-func mergeClaude(data []byte) ([]byte, error) {
-	o, err := parseJSON(data)
-	if err != nil {
-		return nil, err
-	}
-	attr, err := o.child("attribution")
-	if err != nil {
-		return nil, err
-	}
-	attr.set("commit", "")
-	attr.set("pr", "")
-	o.set("includeCoAuthoredBy", false)
-	env, err := o.child("env")
-	if err != nil {
-		return nil, err
-	}
-	env.set("COYOTE_IDE", "claude-code")
-	hooks, err := o.child("hooks")
-	if err != nil {
-		return nil, err
-	}
-	ours := &object{members: []member{{"matcher", ""}, {"hooks", []any{&object{members: []member{
-		{"type", "command"}, {"command", GateCommand}, {"timeout", json.Number("30")}}}}}}}
-	pre, _ := hooks.get("PreToolUse")
+// mergeGroups pone el hook de coyote en un evento con grupos por matcher
+// (Claude Code, Codex, Gemini CLI): quita los hooks de coyote que hubiera,
+// conserva los demás y deja el de coyote donde estaba el anterior.
+func mergeGroups(hooks *object, event string, ours *object) error {
+	pre, _ := hooks.get(event)
 	list, ok := pre.([]any)
 	if pre != nil && !ok {
-		return nil, fmt.Errorf("hooks.PreToolUse no es una lista")
+		return fmt.Errorf("hooks.%s no es una lista", event)
 	}
 	var kept []any
 	at := -1
@@ -419,7 +480,182 @@ func mergeClaude(data []byte) ([]byte, error) {
 		at = len(kept)
 	}
 	kept = append(kept[:at], append([]any{ours}, kept[at:]...)...)
-	hooks.set("PreToolUse", kept)
+	hooks.set(event, kept)
+	return nil
+}
+
+// mergeFlat pone el hook de coyote en un evento con una lista simple de
+// hooks (Cursor, Windsurf).
+func mergeFlat(hooks *object, event string, ours *object) {
+	cur, _ := hooks.get(event)
+	arr, _ := cur.([]any)
+	var rest []any
+	at := -1
+	for _, h := range arr {
+		if isCoyoteHook(h) {
+			if at < 0 {
+				at = len(rest)
+			}
+			continue
+		}
+		rest = append(rest, h)
+	}
+	if at < 0 {
+		at = len(rest)
+	}
+	hooks.set(event, append(rest[:at], append([]any{ours}, rest[at:]...)...))
+}
+
+func mergeCodex(data []byte) ([]byte, error) {
+	o, err := parseJSON(data)
+	if err != nil {
+		return nil, err
+	}
+	hooks, err := o.child("hooks")
+	if err != nil {
+		return nil, err
+	}
+	ours := &object{members: []member{{"matcher", ".*"}, {"hooks", []any{&object{members: []member{
+		{"type", "command"}, {"command", Launcher(CodexHook, "")}, {"timeout", json.Number("30")},
+		{"statusMessage", "gate de coyote"}}}}}}}
+	if err := mergeGroups(hooks, "PreToolUse", ours); err != nil {
+		return nil, err
+	}
+	return encodeJSON(o), nil
+}
+
+func mergeGemini(data []byte) ([]byte, error) {
+	o, err := parseJSON(data)
+	if err != nil {
+		return nil, err
+	}
+	hooks, err := o.child("hooks")
+	if err != nil {
+		return nil, err
+	}
+	ours := &object{members: []member{{"matcher", ".*"}, {"hooks", []any{&object{members: []member{
+		{"name", "coyote-gate"}, {"type", "command"}, {"command", Launcher(GeminiHook, "GEMINI_PROJECT_DIR")},
+		{"timeout", json.Number("30000")}}}}}}}
+	if err := mergeGroups(hooks, "BeforeTool", ours); err != nil {
+		return nil, err
+	}
+	// Gemini CLI lee GEMINI.md; con context.fileName también lee AGENTS.md.
+	ctx, err := o.child("context")
+	if err != nil {
+		return nil, err
+	}
+	cur, _ := ctx.get("fileName")
+	switch v := cur.(type) {
+	case nil:
+		ctx.set("fileName", []any{"AGENTS.md", "GEMINI.md"})
+	case string:
+		if v != "AGENTS.md" {
+			ctx.set("fileName", []any{"AGENTS.md", v})
+		}
+	case []any:
+		has := false
+		for _, x := range v {
+			if x == "AGENTS.md" {
+				has = true
+			}
+		}
+		if !has {
+			ctx.set("fileName", append([]any{"AGENTS.md"}, v...))
+		}
+	default:
+		return nil, fmt.Errorf("context.fileName no es un texto ni una lista")
+	}
+	return encodeJSON(o), nil
+}
+
+func mergeWindsurf(data []byte) ([]byte, error) {
+	o, err := parseJSON(data)
+	if err != nil {
+		return nil, err
+	}
+	hooks, err := o.child("hooks")
+	if err != nil {
+		return nil, err
+	}
+	for _, ev := range windsurfEvents {
+		if cur, ok := hooks.get(ev); ok {
+			if _, isList := cur.([]any); !isList {
+				return nil, fmt.Errorf("hooks.%s no es una lista", ev)
+			}
+		}
+		mergeFlat(hooks, ev, &object{members: []member{{"command", Launcher(WindsurfHook, "")}, {"show_output", false}}})
+	}
+	return encodeJSON(o), nil
+}
+
+// copilotFile es el archivo de hooks de coyote para Copilot: lo leen la CLI,
+// VS Code y el agente de GitHub. Es un archivo propio de coyote en
+// .github/hooks/; uno con ese nombre que no generó coyote no se pisa.
+func copilotFile(root string) (Change, error) {
+	want := encodeJSON(&object{members: []member{{"version", json.Number("1")}, {"hooks", &object{members: []member{
+		{"preToolUse", []any{&object{members: []member{
+			{"type", "command"},
+			{"bash", Launcher(CopilotHook, "")},
+			{"powershell", "Write-Error 'coyote: el gate humano no corre en Windows; la acción se bloquea'; exit 2"},
+			{"timeoutSec", json.Number("30")},
+		}}}}}}}}})
+	got, exists, err := read(root, CopilotFile)
+	if err != nil {
+		return Change{}, err
+	}
+	if exists {
+		cur, perr := parseJSON(got)
+		if perr != nil || !copilotOwned(cur) {
+			return Change{Path: CopilotFile, State: Skipped, Detail: "existe y no lo generó coyote"}, nil
+		}
+	}
+	return file(root, CopilotFile, want, 0o644, "gate en preToolUse (CLI, VS Code y agente de GitHub)")
+}
+
+// copilotOwned informa si el archivo de hooks de Copilot es de coyote.
+func copilotOwned(o *object) bool {
+	hooks, _ := o.get("hooks")
+	h, ok := hooks.(*object)
+	if !ok {
+		return false
+	}
+	for _, m := range h.members {
+		arr, _ := m.Value.([]any)
+		for _, x := range arr {
+			if isCoyoteHook(x) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func mergeClaude(data []byte) ([]byte, error) {
+	o, err := parseJSON(data)
+	if err != nil {
+		return nil, err
+	}
+	attr, err := o.child("attribution")
+	if err != nil {
+		return nil, err
+	}
+	attr.set("commit", "")
+	attr.set("pr", "")
+	o.set("includeCoAuthoredBy", false)
+	env, err := o.child("env")
+	if err != nil {
+		return nil, err
+	}
+	env.set("COYOTE_IDE", "claude-code")
+	hooks, err := o.child("hooks")
+	if err != nil {
+		return nil, err
+	}
+	ours := &object{members: []member{{"matcher", ""}, {"hooks", []any{&object{members: []member{
+		{"type", "command"}, {"command", GateCommand}, {"timeout", json.Number("30")}}}}}}}
+	if err := mergeGroups(hooks, "PreToolUse", ours); err != nil {
+		return nil, err
+	}
 	return encodeJSON(o), nil
 }
 

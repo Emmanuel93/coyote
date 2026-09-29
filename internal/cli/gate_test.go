@@ -18,8 +18,9 @@ func gateProject(t *testing.T) (string, string) {
 	for _, k := range agentEnv {
 		t.Setenv(k, "")
 	}
-	t.Setenv("CLAUDE_PROJECT_DIR", "")
-	t.Setenv("CURSOR_PROJECT_DIR", "")
+	for _, k := range []string{"CLAUDE_PROJECT_DIR", "CURSOR_PROJECT_DIR", "GEMINI_PROJECT_DIR", "DEVIN_PROJECT_DIR"} {
+		t.Setenv(k, "")
+	}
 	t.Setenv("COYOTE_STATE_DIR", filepath.Join(base, "state"))
 	root := filepath.Join(base, "tienda")
 	must(t, run(t, base, "", "init", "tienda", "--type", "backend", "--purpose", "API de pedidos de la tienda demo"), 0, "init")

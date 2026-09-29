@@ -20,7 +20,7 @@ import (
 	"github.com/Emmanuel93/coyote/internal/userdir"
 )
 
-const gateUsage = "check [--ide claude-code|cursor|codex|copilot] < hook.json | attribution < hook.json | pr --repo nombre=ruta... [--policy warn|fail]"
+const gateUsage = "check [--ide IDE] < hook.json | attribution < hook.json | pr --repo nombre=ruta... [--policy warn|fail]"
 
 func cmdGate(a *app, args []string) error {
 	if len(args) == 0 {
@@ -72,10 +72,15 @@ func attributionBlock(data []byte) (string, error) {
 // gateCheck es el hook previo de los IDEs. Cualquier error bloquea: un gate
 // que se cae no puede dejar pasar acciones (falla cerrado).
 func gateCheck(a *app, args []string) (err error) {
-	fs := a.flags("gate check", "[--ide claude-code|cursor|codex|copilot] < hook.json")
-	ide := fs.String("ide", "", "IDE que llama al hook (por defecto se deduce de la entrada)")
+	fs := a.flags("gate check", "[--ide "+strings.Join(gate.IDEs, "|")+"] < hook.json")
+	ide := fs.String("ide", "", "IDE para el que se instaló el hook (por defecto se deduce de la entrada)")
 	if _, perr := parseArgs(fs, args); perr != nil {
 		return perr
+	}
+	if *ide != "" && !gate.KnownIDE(*ide) {
+		// Un hook con un IDE desconocido igual se evalúa: el formato de la
+		// entrada dice cuál es.
+		*ide = ""
 	}
 	deny := func(ide, msg string) error {
 		return &exitError{code: gate.Respond(ide, false, msg, a.stdout, a.stderr)}
@@ -97,6 +102,9 @@ func gateCheck(a *app, args []string) (err error) {
 		return deny(act.IDE, "coyote: "+perr.Error()+"; el gate bloquea por seguridad")
 	}
 	g, gerr := a.newGateRun(act)
+	if gerr == nil {
+		defer g.pulse()
+	}
 	if gerr != nil {
 		if gateRoot(a, act) != "" {
 			// El proyecto existe pero no se puede leer: nada pasa hasta que la persona lo corrija.
@@ -166,7 +174,8 @@ func (a *app) newGateRun(act gate.Action) (*gateRun, error) {
 // gateRoot busca el proyecto del hook: el que abrió el IDE, luego las raíces
 // que reporta el IDE y la carpeta de la acción.
 func gateRoot(a *app, act gate.Action) string {
-	cands := []string{os.Getenv("CLAUDE_PROJECT_DIR"), os.Getenv("CURSOR_PROJECT_DIR")}
+	cands := []string{os.Getenv("CLAUDE_PROJECT_DIR"), os.Getenv("CURSOR_PROJECT_DIR"), os.Getenv("GEMINI_PROJECT_DIR"),
+		os.Getenv("DEVIN_PROJECT_DIR")}
 	cands = append(cands, act.Roots...)
 	cands = append(cands, act.Cwd)
 	if wd, err := a.workdir(); err == nil {
@@ -241,6 +250,19 @@ func (g *gateRun) decide() (string, bool) {
 	return fmt.Sprintf("coyote: acción no aprobada (%s). Quedó en la cola como %s. Pide a la persona que la revise con `coyote review %s` "+
 		"y la apruebe con `coyote approve %s` en su terminal; después repite exactamente la misma llamada. "+
 		"Si el paso tiene más cambios, propónlos también: se aprueban juntos con `coyote approve --all`.", d.Object, p.ID, p.ID, p.ID), false
+}
+
+// pulse anota la llamada en el latido del IDE, con el que coyote doctor mide
+// su nivel (ADR-0015). Corre después de decidir y sin afectar la decisión.
+func (g *gateRun) pulse() {
+	unlock, err := approval.Lock(g.root)
+	if err != nil {
+		return
+	}
+	defer unlock()
+	p := gate.LoadPulses(g.root)
+	p.Record(g.act, g.a.now())
+	_ = gate.SavePulses(g.root, p)
 }
 
 func (g *gateRun) store() (*approval.Store, error) {

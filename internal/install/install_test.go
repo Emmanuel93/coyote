@@ -176,3 +176,162 @@ func TestGateScriptFailsClosed(t *testing.T) {
 		t.Fatalf("el hook debe llamar a coyote gate check: %v %s", err, out)
 	}
 }
+
+func TestNewIDEInstalls(t *testing.T) {
+	root := t.TempDir()
+	// Configuración propia de la persona en cada IDE: se conserva.
+	write(t, root, ".codex/hooks.json", `{"hooks": {"PreToolUse": [{"matcher": "^Bash$", "hooks": [{"type": "command", "command": "./mio.sh"}]}], "Stop": [{"hooks": [{"type": "command", "command": "./fin.sh"}]}]}}`)
+	write(t, root, ".gemini/settings.json", `{"theme": "Dracula", "context": {"fileName": "GEMINI.md"}, "hooks": {"AfterTool": [{"matcher": ".*", "hooks": [{"type": "command", "command": "./log.sh"}]}]}}`)
+	write(t, root, ".windsurf/hooks.json", `{"hooks": {"post_write_code": [{"command": "./fmt.sh"}], "pre_run_command": [{"command": "./mio.sh", "show_output": true}]}}`)
+	for _, ide := range []string{"codex", "gemini", "copilot", "windsurf"} {
+		if err := Apply(root, plan(t, root, ide)); err != nil {
+			t.Fatalf("%s: %v", ide, err)
+		}
+		if p := pending(plan(t, root, ide)); len(p) != 0 {
+			t.Errorf("%s: la segunda instalación no debe cambiar nada: %v", ide, p)
+		}
+	}
+	read := func(rel string) string {
+		t.Helper()
+		b, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+	codex := read(".codex/hooks.json")
+	for _, want := range []string{`"./mio.sh"`, `"./fin.sh"`, `"PreToolUse"`, CodexHook, `"matcher": ".*"`} {
+		if !strings.Contains(codex, want) {
+			t.Errorf(".codex/hooks.json sin %s:\n%s", want, codex)
+		}
+	}
+	gemini := read(".gemini/settings.json")
+	for _, want := range []string{`"Dracula"`, `"./log.sh"`, `"BeforeTool"`, GeminiHook, `GEMINI_PROJECT_DIR:-`, `"AGENTS.md"`, `"GEMINI.md"`} {
+		if !strings.Contains(gemini, want) {
+			t.Errorf(".gemini/settings.json sin %s:\n%s", want, gemini)
+		}
+	}
+	var gs struct {
+		Context struct {
+			FileName []string `json:"fileName"`
+		} `json:"context"`
+	}
+	if err := json.Unmarshal([]byte(gemini), &gs); err != nil || strings.Join(gs.Context.FileName, ",") != "AGENTS.md,GEMINI.md" {
+		t.Errorf("context.fileName debe leer AGENTS.md y conservar GEMINI.md: %v %v", gs.Context.FileName, err)
+	}
+	copilot := read(CopilotFile)
+	for _, want := range []string{`"version": 1`, `"preToolUse"`, CopilotHook, `"timeoutSec": 30`, `"powershell"`} {
+		if !strings.Contains(copilot, want) {
+			t.Errorf("%s sin %s:\n%s", CopilotFile, want, copilot)
+		}
+	}
+	wind := read(".windsurf/hooks.json")
+	for _, want := range append([]string{`"./fmt.sh"`, `"./mio.sh"`, WindsurfHook}, windsurfEvents...) {
+		if !strings.Contains(wind, want) {
+			t.Errorf(".windsurf/hooks.json sin %s:\n%s", want, wind)
+		}
+	}
+	var ws struct {
+		Hooks map[string][]struct {
+			Command string `json:"command"`
+		} `json:"hooks"`
+	}
+	if err := json.Unmarshal([]byte(wind), &ws); err != nil {
+		t.Fatal(err)
+	}
+	for _, ev := range windsurfEvents {
+		n := 0
+		for _, h := range ws.Hooks[ev] {
+			if strings.Contains(h.Command, WindsurfHook) {
+				n++
+			}
+		}
+		if n != 1 {
+			t.Errorf("%s: %d hooks de coyote, se esperaba uno", ev, n)
+		}
+	}
+	for _, rel := range []string{CodexHook, GeminiHook, CopilotHook, WindsurfHook, ".agents/skills/coyote-review/SKILL.md"} {
+		info, err := os.Stat(filepath.Join(root, filepath.FromSlash(rel)))
+		if err != nil {
+			t.Errorf("falta %s", rel)
+			continue
+		}
+		if strings.HasSuffix(rel, ".sh") && info.Mode()&0o100 == 0 {
+			t.Errorf("%s sin permiso de ejecución", rel)
+		}
+	}
+	for ide, want := range map[string]string{CodexHook: "--ide codex", GeminiHook: "--ide gemini", CopilotHook: "--ide copilot", WindsurfHook: "--ide windsurf"} {
+		if !strings.Contains(read(ide), want) {
+			t.Errorf("%s no llama a gate check %s", ide, want)
+		}
+	}
+	// Un archivo de Copilot con el nombre de coyote que no generó coyote no se pisa.
+	other := t.TempDir()
+	write(t, other, CopilotFile, `{"version": 1, "hooks": {"preToolUse": [{"type": "command", "bash": "./otro.sh"}]}}`)
+	for _, c := range plan(t, other, "copilot") {
+		if c.Path == CopilotFile && c.State != Skipped {
+			t.Errorf("%s ajeno: %s", CopilotFile, c.State)
+		}
+	}
+	// Un context.fileName con otra forma no se pisa.
+	bad := t.TempDir()
+	write(t, bad, ".gemini/settings.json", `{"context": {"fileName": 3}}`)
+	set, _ := agents.Load("")
+	if _, err := Plan(Options{Root: bad, IDE: "gemini", Set: set}); err == nil {
+		t.Error("un context.fileName inválido se pisó")
+	}
+}
+
+func TestLauncherFailsClosed(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sin sh")
+	}
+	root := t.TempDir()
+	sub := filepath.Join(root, "a", "b")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	run := func(cwd, launcher string, env ...string) (string, int) {
+		cmd := exec.Command("sh", "-c", launcher)
+		cmd.Dir = cwd
+		cmd.Env = append([]string{"PATH=/usr/bin:/bin"}, env...)
+		out, err := cmd.CombinedOutput()
+		code := 0
+		if ee, ok := err.(*exec.ExitError); ok {
+			code = ee.ExitCode()
+		} else if err != nil {
+			t.Fatal(err)
+		}
+		return string(out), code
+	}
+	// Sin el hook en ninguna carpeta: niega con 2, no deja pasar.
+	if out, code := run(sub, Launcher(CodexHook, "")); code != 2 || !strings.Contains(out, "no encuentro") {
+		t.Fatalf("sin hook el lanzador debe salir con 2: %d %s", code, out)
+	}
+	// Con el hook en la raíz, lo encuentra desde una subcarpeta.
+	write(t, root, CodexHook, "#!/bin/sh\necho hook-de-coyote\nexit 0\n")
+	if err := os.Chmod(filepath.Join(root, filepath.FromSlash(CodexHook)), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if out, code := run(sub, Launcher(CodexHook, "")); code != 0 || !strings.Contains(out, "hook-de-coyote") {
+		t.Fatalf("el lanzador debe encontrar el hook subiendo: %d %s", code, out)
+	}
+	// Gemini da la carpeta del proyecto en una variable.
+	write(t, root, GeminiHook, "#!/bin/sh\necho hook-gemini\nexit 0\n")
+	_ = os.Chmod(filepath.Join(root, filepath.FromSlash(GeminiHook)), 0o755)
+	if out, code := run(t.TempDir(), Launcher(GeminiHook, "GEMINI_PROJECT_DIR"), "GEMINI_PROJECT_DIR="+root); code != 0 || !strings.Contains(out, "hook-gemini") {
+		t.Fatalf("el lanzador debe usar GEMINI_PROJECT_DIR: %d %s", code, out)
+	}
+	// El script de Copilot niega en JSON si coyote no está.
+	dir := t.TempDir()
+	script := filepath.Join(dir, "gate.sh")
+	if err := os.WriteFile(script, []byte(GateScript("copilot")), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("sh", script)
+	cmd.Env = []string{"PATH=" + dir, "HOME=" + dir}
+	out, err := cmd.CombinedOutput()
+	if ee, ok := err.(*exec.ExitError); !ok || ee.ExitCode() != 2 || !strings.Contains(string(out), `"permissionDecision":"deny"`) {
+		t.Fatalf("sin coyote, el hook de Copilot niega: %v %s", err, out)
+	}
+}

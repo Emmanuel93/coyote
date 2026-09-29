@@ -1,16 +1,20 @@
 package cli
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime/debug"
 	"sort"
 	"strings"
 
 	"github.com/Emmanuel93/coyote/internal/agents"
 	"github.com/Emmanuel93/coyote/internal/agentsmd"
+	"github.com/Emmanuel93/coyote/internal/approval"
 	"github.com/Emmanuel93/coyote/internal/ccf"
 	"github.com/Emmanuel93/coyote/internal/gate"
 	"github.com/Emmanuel93/coyote/internal/identity"
@@ -32,7 +36,22 @@ func ideList(ide string) ([]string, error) {
 			return []string{ide}, nil
 		}
 	}
-	return nil, fail(2, "--ide va con %s o all (los demás IDEs llegan en v0.5)", strings.Join(install.IDEs, ", "))
+	switch ide {
+	case gate.IDEDevin:
+		return nil, fail(2, "Devin CLI lee el hook de Claude Code: usa --ide claude-code")
+	case gate.IDEJunie:
+		return nil, fail(2, "Junie solo acepta hooks de usuario; cómo conectarlo está en docs/specs/install-v1.md")
+	}
+	return nil, fail(2, "--ide va con %s o all", strings.Join(install.IDEs, ", "))
+}
+
+// doctorIDEs son los IDEs que doctor puede medir: los que se instalan, más
+// Devin CLI y Junie, que se conectan por otro camino.
+func doctorIDEs(ide string) ([]string, error) {
+	if ide == gate.IDEDevin || ide == gate.IDEJunie {
+		return []string{ide}, nil
+	}
+	return ideList(ide)
 }
 
 // installPlan calcula los cambios de todos los IDEs pedidos; AGENTS.md va una vez.
@@ -54,6 +73,7 @@ func (a *app) installPlan(root string, cfg *project.Config, ides []string) ([]in
 		owns = strings.HasPrefix(string(cur), agentsmd.Marker)
 	}
 	var all []install.Change
+	seen := map[string]bool{}
 	for i, ide := range ides {
 		o := install.Options{Root: root, IDE: ide, Set: set, OwnsMD: owns}
 		if i == 0 {
@@ -63,14 +83,20 @@ func (a *app) installPlan(root string, cfg *project.Config, ides []string) ([]in
 		if err != nil {
 			return nil, err
 		}
-		all = append(all, cs...)
+		// Varios IDEs comparten archivos (.agents/skills, AGENTS.md): van una vez.
+		for _, c := range cs {
+			if !seen[c.Path] {
+				seen[c.Path] = true
+				all = append(all, c)
+			}
+		}
 	}
 	return all, nil
 }
 
 func cmdInstall(a *app, args []string) error {
-	fs := a.flags("install", "--ide claude-code|cursor|all | --ci github [--check] [--dry-run]")
-	ide := fs.String("ide", "", "IDE a configurar: claude-code, cursor o all")
+	fs := a.flags("install", "--ide "+strings.Join(install.IDEs, "|")+"|all | --ci github [--check] [--dry-run]")
+	ide := fs.String("ide", "", "IDE a configurar: "+strings.Join(install.IDEs, ", ")+" o all")
 	ciKind := fs.String("ci", "", "pipeline de impacto del producto: github")
 	policy := fs.String("policy", "", "con --ci: warn solo reporta; fail hace fallar el chequeo hasta que aprueba un dueño. Por defecto sale de features.pr_enforcement")
 	coyoteRef := fs.String("coyote-ref", "", "con --ci: versión etiquetada de coyote que compila el pipeline (por defecto, la de este binario)")
@@ -141,8 +167,12 @@ func cmdInstall(a *app, args []string) error {
 	}
 	if pendingN > 0 {
 		person := identity.Resolve(root)
+		which := strings.Join(ides, " y ")
+		if len(ides) > 2 {
+			which = fmt.Sprintf("%d IDEs", len(ides))
+		}
 		line := ccf.Line{TS: a.now(), Actor: person.Actor(""), Project: "-", Repo: cfg.Name, Type: "chore", Scope: "gate",
-			What: "coyote install para " + strings.Join(ides, " y ") + ": gate, agentes y skills", Status: "ok"}
+			What: "coyote install para " + which + ": gate, agentes y skills", Status: "ok"}
 		if _, err := ledger.Open(root).Append(line, person.Slug); err != nil {
 			return err
 		}
@@ -218,21 +248,30 @@ func ensureIgnored(root string) error {
 // ideChecks prueba el gate de un IDE en esta máquina, sin efectos: la
 // configuración, el hook, que coyote se encuentre y decisiones simuladas.
 func (a *app) ideChecks(root string, cfg *project.Config, ide string, add func(name, state, detail string)) {
-	changes, err := a.installPlan(root, cfg, []string{ide})
-	if err != nil {
-		add("instalación "+ide, "fail", err.Error())
-		return
-	}
-	n := 0
-	for _, c := range changes {
-		if c.Pending() {
-			n++
+	switch ide {
+	case gate.IDEJunie:
+		add("instalación junie", "warn", "Junie solo lee hooks de usuario (o de --config-location) y su plugin del IDE no los llama; cómo conectarlo está en docs/specs/install-v1.md")
+	default:
+		target := ide
+		if ide == gate.IDEDevin {
+			target = "claude-code" // Devin CLI lee el hook de Claude Code
 		}
-	}
-	if n > 0 {
-		add("instalación "+ide, "warn", fmt.Sprintf("%d archivos por crear o actualizar; corre coyote install --ide %s", n, ide))
-	} else {
-		add("instalación "+ide, "ok", "hook, agentes, skills y atribución apagada vigentes")
+		changes, err := a.installPlan(root, cfg, []string{target})
+		if err != nil {
+			add("instalación "+ide, "fail", err.Error())
+			return
+		}
+		n := 0
+		for _, c := range changes {
+			if c.Pending() {
+				n++
+			}
+		}
+		if n > 0 {
+			add("instalación "+ide, "warn", fmt.Sprintf("%d archivos por crear o actualizar; corre coyote install --ide %s", n, target))
+		} else {
+			add("instalación "+ide, "ok", "hook, agentes o skills y configuración vigentes")
+		}
 	}
 	found := ""
 	if p, err := exec.LookPath("coyote"); err == nil {
@@ -291,6 +330,89 @@ func (a *app) ideChecks(root string, cfg *project.Config, ide string, add func(n
 	} else {
 		add("gate: clave local", "ok", "las aprobaciones se firman en esta máquina")
 	}
+	if ide == "copilot" || ide == "claude-code" {
+		if doubleVSCode(root) {
+			add("VS Code", "warn", "chat.useClaudeHooks está prendida y el proyecto tiene los hooks de Claude Code y de Copilot: VS Code correría el gate dos veces por acción y una aprobación de un uso no alcanza; apaga chat.useClaudeHooks o quita uno de los dos")
+		}
+	}
+	pulses := gate.LoadPulses(root)
+	lvl := gate.Measure(pulses, gate.LoadCanaries(root), gate.CanariesRan(root), ide, a.now())
+	name := "nivel de " + ide
+	switch lvl.Level {
+	case 1:
+		add(name, "ok", lvl.Detail+" ("+lvl.At.Local().Format("2006-01-02 15:04")+")")
+	case 2, 3:
+		add(name, "fail", lvl.Detail+"; con R17, este IDE no hace tareas R2 o R3 fuera de ramas coyote/ con gate pr")
+	default:
+		add(name, "warn", lvl.Detail)
+	}
+	if p := pulses.IDEs[ide]; p != nil && len(p.Unknown) > 0 {
+		add("herramientas de "+ide, "warn", "piden aprobación porque el gate no las conoce: "+strings.Join(p.Unknown, ", "))
+	}
+}
+
+// vscodeClaudeHooks reconoce chat.useClaudeHooks prendida en la
+// configuración de VS Code, que admite comentarios.
+var vscodeClaudeHooks = regexp.MustCompile(`"chat\.useClaudeHooks"\s*:\s*true`)
+
+// doubleVSCode dice si VS Code correría dos hooks de coyote: el de Copilot y,
+// con chat.useClaudeHooks, el de Claude Code.
+func doubleVSCode(root string) bool {
+	vs, err := os.ReadFile(filepath.Join(root, ".vscode", "settings.json"))
+	if err != nil || !vscodeClaudeHooks.Match(vs) {
+		return false
+	}
+	claude, _ := os.ReadFile(filepath.Join(root, ".claude", "settings.json"))
+	_, errCopilot := os.Stat(filepath.Join(root, filepath.FromSlash(install.CopilotFile)))
+	return strings.Contains(string(claude), "coyote-gate") && errCopilot == nil
+}
+
+// canaryRequest pide un canario para medir el nivel de un IDE (ADR-0015).
+func (a *app) canaryRequest(ide string) error {
+	root, _, err := a.project()
+	if err != nil {
+		return err
+	}
+	b := make([]byte, 5)
+	if _, err := rand.Read(b); err != nil {
+		return err
+	}
+	code := hex.EncodeToString(b)
+	unlock, err := approval.Lock(root)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	if err := gate.AddCanary(root, gate.CanaryRequest{Code: code, IDE: ide, Created: a.now()}); err != nil {
+		return err
+	}
+	fmt.Fprintf(a.stdout, "Canario %s para %s. En %s, dentro de este proyecto, pídele al agente exactamente esto:\n\n", code, ide, ide)
+	fmt.Fprintf(a.stdout, "  Corre este comando en la terminal y dime qué pasó: coyote doctor canary %s\n\n", code)
+	fmt.Fprintf(a.stdout, "El gate lo niega siempre: si el IDE respeta el gate, el comando no corre. Después corre coyote doctor --ide %s.\n", ide)
+	return nil
+}
+
+// doctorCanary es el canario mismo. Si llega a correr, el IDE lo ejecutó sin
+// llamar al gate o a pesar de su negación: queda anotado para doctor.
+func doctorCanary(a *app, args []string) error {
+	if len(args) != 1 || !gate.CanaryCode.MatchString(args[0]) {
+		return fail(2, "uso: coyote doctor canary <código>")
+	}
+	root, _, err := a.project()
+	if err != nil {
+		return err
+	}
+	unlock, err := approval.Lock(root)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	if err := gate.MarkCanaryRan(root, args[0], a.now()); err != nil {
+		return err
+	}
+	fmt.Fprintf(a.stdout, "coyote: el canario %s corrió. El gate lo niega siempre, así que este IDE ejecutó un comando sin llamar al gate o a pesar de su negación. "+
+		"Avísale a la persona: lo verá en coyote doctor --ide.\n", args[0])
+	return fail(3, "")
 }
 
 // installCI genera el workflow de impacto de cada repo del producto en

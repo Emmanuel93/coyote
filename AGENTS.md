@@ -54,6 +54,8 @@ CLI en Go para contexto versionado, gates humanos, estándar por capas y costo t
 - [inv] ws: autonomous corre solo en una rama ws/, con tope de plan y la aprobación del plan exacto por su hash (docs/specs/workstream-v1.md)
 - [inv] ci: gate pr toma los dueños del CODEOWNERS de la rama base y nunca cuenta al autor del PR (docs/specs/ci-v1.md)
 - [gap] ws: retomar una sesión con --resume y --agent en headless no se probó contra Claude Code real (docs/specs/workstream-v1.md)
+- [inv] install: Codex, Gemini CLI y Windsurf dejan pasar la herramienta si el hook falta: el lanzador niega con salida 2 (docs/specs/install-v1.md)
+- [dec] gate: nivel de IDE medido con un canario que el gate siempre niega; nivel 2 o 3 cae en R17 (ADR-0015)
 
 ## Reglas obligatorias (MUST)
 

@@ -14,7 +14,8 @@ var ideNames = map[string]bool{"claude-code": true, "cursor": true, "codex": tru
 	"windsurf": true, "devin": true, "gemini": true, "junie": true, "zed": true}
 
 // sessionIDE dice si coyote corre dentro de una sesión de agente y de qué IDE:
-// COYOTE_IDE la pone coyote install; CLAUDECODE la pone Claude Code.
+// COYOTE_IDE la pone coyote install; CLAUDECODE, Claude Code; GEMINI_CLI,
+// Gemini CLI; CODEX_SANDBOX, Codex dentro de su sandbox.
 func sessionIDE() string {
 	if v := strings.TrimSpace(os.Getenv("COYOTE_IDE")); v != "" {
 		return identity.Sanitize(v)
@@ -24,6 +25,12 @@ func sessionIDE() string {
 	}
 	if os.Getenv("CURSOR_AGENT") != "" {
 		return "cursor"
+	}
+	if os.Getenv("GEMINI_CLI") != "" {
+		return "gemini"
+	}
+	if os.Getenv("CODEX_SANDBOX") != "" || os.Getenv("CODEX_SANDBOX_NETWORK_DISABLED") != "" {
+		return "codex"
 	}
 	return ""
 }

@@ -485,7 +485,13 @@ func coyoteCheck(args []word) error {
 		first = rest[0].s
 	}
 	switch sub {
-	case "status", "log", "get", "doctor", "version", "help", "approvals", "review", "index", "propose", "-h", "--help", "-v", "--version":
+	case "status", "log", "get", "version", "help", "approvals", "review", "index", "propose", "-h", "--help", "-v", "--version":
+		return nil
+	case "doctor":
+		// doctor lee; pedir un canario o correrlo escriben en .coyote/gate/.
+		if first == "canary" || hasExact(rest, "--canary", "-canary") {
+			return fmt.Errorf("coyote doctor con el canario escribe el estado del gate")
+		}
 		return nil
 	case "ask":
 		return denyFlags("--record", "-record")(rest)

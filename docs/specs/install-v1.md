@@ -1,6 +1,6 @@
 # Instalación v1 — agentes, skills y configuración por IDE
 
-Estado: nuevo en v0.3.0 · Implementación: `internal/agents`, `internal/install`, `coyote install`, `coyote doctor --ide` · Decisión: ADR-0010
+Estado: nuevo en v0.3.0; en v0.6.0 suma Codex, Gemini CLI, Copilot y Windsurf, y el nivel medido de cada IDE · Implementación: `internal/agents`, `internal/install`, `coyote install`, `coyote doctor --ide` · Decisiones: ADR-0010, ADR-0015
 
 ## Una fuente, varios IDEs
 
@@ -41,6 +41,59 @@ Prompt: misión, cómo trabaja, entregable y límites.
 | Instrucciones | `CLAUDE.md` con `@AGENTS.md`; `AGENTS.md` generado | `AGENTS.md` generado |
 | Commits | hook `commit-msg` | hook `commit-msg` |
 
+Desde v0.6:
+
+| IDE | Hook del gate | Configuración | Skills |
+|-----|---------------|---------------|--------|
+| Codex CLI | `.codex/hooks/coyote-gate.sh` | `.codex/hooks.json`: `PreToolUse` con matcher `.*` (shell, `apply_patch` y MCP) | `.agents/skills/` |
+| Gemini CLI | `.gemini/hooks/coyote-gate.sh` | `.gemini/settings.json`: `BeforeTool` con matcher `.*`, y `context.fileName` con `AGENTS.md` | `.agents/skills/` |
+| Copilot (CLI, VS Code y agente de GitHub) | `.github/hooks/coyote-gate.sh` | `.github/hooks/coyote.json`: `preToolUse`, archivo propio de coyote | `.agents/skills/` |
+| Windsurf (hoy Devin Desktop) | `.windsurf/hooks/coyote-gate.sh` | `.windsurf/hooks.json`: `pre_run_command`, `pre_write_code`, `pre_read_code` y `pre_mcp_tool_use` | — |
+
+- Todos leen el `AGENTS.md` generado y todos quedan con el hook `commit-msg`. Los 14 agentes se instalan solo en Claude Code y Cursor: son los IDEs con subagentes del mismo contrato (ADR-0010).
+- **Lanzador.** Codex, Gemini CLI y Windsurf dejan pasar la herramienta si el hook falta o sale con un código distinto de 2. Por eso el comando que corre el IDE busca el hook desde la carpeta del proyecto (o desde la actual, subiendo hasta la raíz) y, si no lo encuentra, niega con salida 2.
+- **Negación.** Todos niegan con salida 2 y el motivo en stderr. Copilot además recibe `permissionDecision: deny` en JSON; en Copilot cualquier salida distinta de 0 también niega. Dejar pasar nunca aprueba a nombre del IDE: sale 0 sin decisión y el IDE sigue con sus propios permisos.
+- **Windsurf** lee `.windsurf/hooks.json` y, en su versión como Devin Desktop, también `.devin/hooks.json`. coyote escribe solo el primero: si instalara los dos, el gate correría dos veces por acción y una aprobación de un uso no alcanzaría.
+- **Devin CLI** lee los hooks de Claude Code en `.claude/`: se instala con `--ide claude-code`, y el gate lo reconoce por su entrada.
+- **Junie** solo lee hooks de usuario (`~/.junie/config.json`) o de un archivo que se pasa con `--config-location`, y el plugin del IDE todavía no llama hooks. coyote no escribe fuera del proyecto, así que no lo instala. Para conectar la CLI de Junie, la persona agrega a su configuración un `PreToolUse` con el comando `coyote gate check --ide junie`, que el gate solo aplica dentro de un proyecto coyote.
+
+## Nivel medido de un IDE
+
+Un IDE puede tener hooks y aun así no pasar por el gate: carpeta sin confianza (Codex), modo restringido (Windsurf), hooks apagados (Gemini CLI con `/hooks disable-all`, VS Code por política), una función en EAP o una negación que el IDE ignora. El nivel no se declara, se mide en la máquina de cada persona con un canario:
+
+```sh
+coyote doctor --ide codex --canary   # da un código: pide al agente que corra `coyote doctor canary <código>`
+coyote doctor --ide codex            # muestra el nivel medido
+```
+
+| Resultado | Nivel |
+|-----------|-------|
+| El gate recibió el canario y lo negó; el comando no corrió | 1: el IDE pasa por el gate y lo respeta |
+| El gate lo negó, pero el comando corrió de todos modos | 2: el IDE llama al gate, pero ignora la negación |
+| El comando corrió y el gate nunca se enteró | 3: el IDE no llama al gate |
+
+- El gate anota cada llamada en `.coyote/gate/ides.json` (que nunca se versiona): la última por IDE, las herramientas que usa y las que no conoce. Una herramienta que el gate no conoce pide aprobación; `doctor` la lista para sumarla a la tabla.
+- Un canario que llega por el hook de otro IDE se reporta así. Por ejemplo, VS Code con `chat.useClaudeHooks` corre el hook de Claude Code. En ese caso conviene no instalar también el de Copilot, porque el gate correría dos veces por acción.
+- Un IDE de nivel 2 o 3 queda bajo R17: no hace tareas R2 o R3 fuera de ramas `coyote/` con `gate pr`.
+
+## Matriz de IDEs (septiembre de 2026)
+
+| IDE | Hook previo | Instalación | Nivel esperado |
+|-----|-------------|-------------|----------------|
+| Claude Code | `PreToolUse`: todas las herramientas | `--ide claude-code` | 1 |
+| Cursor | `preToolUse`: comandos, ediciones y MCP | `--ide cursor` | 1 |
+| Codex CLI | `PreToolUse`: shell, `apply_patch` y MCP | `--ide codex` | 1 con la carpeta de confianza |
+| Gemini CLI | `BeforeTool`: herramientas propias y MCP | `--ide gemini` | 1 |
+| Copilot CLI | `preToolUse` | `--ide copilot` | 1 |
+| VS Code (Copilot) | `PreToolUse`, en preview | `--ide copilot` | por medir: hay reportes de negaciones que no detienen la herramienta |
+| Windsurf / Devin Desktop | `pre_*` de Cascade | `--ide windsurf` | 1 fuera del modo restringido |
+| Devin CLI | `PreToolUse`, lee el hook de Claude Code | `--ide claude-code` | por medir |
+| Junie | CLI en EAP; el plugin del IDE no llama hooks | a mano | 3 en el IDE |
+| Kiro CLI, Cline | `PreToolUse` | sin adaptador en v0.6 | 3 hasta tener adaptador |
+| Zed | reglas fijas, sin hook | — | 3; los agentes externos por ACP corren sus propios hooks |
+
+Los agentes remotos (el agente de Copilot en GitHub, Devin en la nube) no corren en la máquina de la persona: los cubre `gate pr` en el PR. El agente de Copilot en GitHub lee `.github/hooks/`: sin coyote instalado en su entorno, el hook niega todo (falla cerrado).
+
 ## Fusión sin pisar
 
 - `settings.json` y `hooks.json` se leen conservando el orden de sus claves. coyote cambia solo sus entradas (los hooks cuyo comando es de coyote, incluido el de v0.1) y deja los permisos y hooks de la persona. Si el archivo no es JSON válido, o una clave que coyote necesita no tiene la forma esperada, install falla sin escribir.
@@ -51,13 +104,15 @@ Prompt: misión, cómo trabaja, entregable y límites.
 
 ## Comandos
 
-- `coyote install --ide claude-code|cursor|all`: aplica los cambios. Lo corre una persona en su terminal, no un agente.
+- `coyote install --ide claude-code|cursor|codex|gemini|copilot|windsurf|all`: aplica los cambios. Lo corre una persona en su terminal, no un agente. Los archivos que comparten varios IDEs (`.agents/skills/`, `AGENTS.md`) se escriben una vez.
 - `--dry-run`: muestra los cambios sin escribir.
 - `--check`: sale con 1 si algo no está vigente; sirve en CI y lo puede correr un agente.
-- `coyote doctor --ide <ide>`: además del diagnóstico general, prueba la instalación, que el hook encuentre coyote, la clave local y seis decisiones simuladas del gate (lectura, comando sin aprobación, edición, autoaprobación, escritura en el gate y lectura de credenciales), más el bloqueo de atribución. No deja rastro en el ledger ni en la cola.
+- `coyote doctor --ide <ide>`: además del diagnóstico general, prueba la instalación, que el hook encuentre coyote, la clave local y seis decisiones simuladas del gate (lectura, comando sin aprobación, edición, autoaprobación, escritura en el gate y lectura de credenciales), más el bloqueo de atribución, y muestra el nivel medido del IDE. No deja rastro en el ledger ni en la cola. Acepta también `devin` y `junie`.
+- `coyote doctor --ide <ide> --canary` pide un canario; `coyote doctor canary <código>` es el canario mismo: si llega a correr, lo anota y sale con 3.
 
 ## Límites
 
-- En v0.3 solo Claude Code y Cursor (nivel 1: su hook previo cubre comandos, ediciones y MCP). Windsurf, Copilot, Codex, Gemini CLI, Junie, Zed y Devin llegan en v0.5.
+- Los adaptadores se prueban con las entradas que documenta cada IDE; la verificación real es el canario en la máquina de cada persona.
+- Windows no está soportado: el hook de Copilot para PowerShell niega todo.
 - Cursor no tiene un campo de proyecto para la atribución de sus commits: la cubren el hook `commit-msg` y el gate.
 - `coyote init` sigue creando la configuración de v0.1 (solo el gate de atribución). El gate humano se activa con `coyote install`, por decisión de la persona.

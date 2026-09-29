@@ -38,6 +38,15 @@ var readTools = map[string]bool{
 	"read_file": true, "list_dir": true, "list_directory": true, "codebase_search": true,
 	"grep_search": true, "file_search": true, "search_file_content": true, "web_search": true,
 	"view": true, "update_plan": true, "semanticsearch": true,
+	// Gemini CLI
+	"read_many_files": true, "google_web_search": true, "web_fetch": true, "write_todos": true,
+	// Copilot (CLI y agente de GitHub)
+	"rg": true, "ask_user": true, "update_todo": true,
+	// VS Code
+	"semantic_search": true, "fetch_webpage": true, "get_errors": true, "get_terminal_output": true,
+	"get_changed_files": true, "list_code_usages": true, "think": true, "manage_todo_list": true,
+	// Windsurf (pre_read_code)
+	"read_code": true,
 }
 
 var fileTools = map[string]bool{
@@ -45,6 +54,12 @@ var fileTools = map[string]bool{
 	"edit_file": true, "write_file": true, "replace": true, "apply_patch": true,
 	"search_replace": true, "create_file": true, "delete_file": true, "str_replace_editor": true,
 	"str_replace_based_edit_tool": true,
+	// Copilot
+	"create": true,
+	// VS Code
+	"replace_string_in_file": true, "multi_replace_string_in_file": true, "insert_edit_into_file": true,
+	"edit_notebook_file": true, "create_directory": true,
+	"write_code": true, // Windsurf (pre_write_code)
 }
 
 // mcpRead reconoce herramientas MCP de lectura por el verbo con que empieza su
@@ -59,6 +74,9 @@ func Classify(a Action) Kind {
 	switch {
 	case isShellTool(a.Tool):
 		return KindShell
+	case (t == "str_replace_editor" || t == "str_replace_based_edit_tool") && a.Input["command"] == "view":
+		// El editor de Copilot y de la API también lee: command view.
+		return KindRead
 	case fileTools[t]:
 		return KindFile
 	case readTools[t]:
@@ -104,15 +122,25 @@ func NewPaths(root, home, stateDir string) Paths {
 	if stateDir != "" {
 		p.Sensitive = append(p.Sensitive, filepath.Clean(stateDir))
 	}
+	// Lo que desarma el gate de cualquier IDE: sus hooks y la configuración que
+	// los apaga o aprueba sola.
 	p.Protected = []string{".git", ".coyote", "coyote/approvals", "coyote/ledger", "coyote/project.yaml", ".claude/settings.json",
-		".claude/settings.local.json", ".claude/hooks", ".cursor/hooks.json", ".cursor/hooks"}
+		".claude/settings.local.json", ".claude/hooks", ".cursor/hooks.json", ".cursor/hooks",
+		".codex/hooks.json", ".codex/hooks", ".codex/config.toml", ".gemini/settings.json", ".gemini/hooks",
+		".github/hooks", ".windsurf/hooks.json", ".windsurf/hooks", ".devin/hooks.json", ".devin/hooks.v1.json",
+		".devin/hooks", ".devin/config.json", ".devin/config.local.json", ".junie/config.json", ".kiro/hooks",
+		".clinerules/hooks"}
 	for _, rel := range []string{".claude/settings.json", ".claude/settings.local.json", ".claude/managed-settings.json",
-		".cursor/hooks.json", ".gitconfig", ".config/git/config", ".bashrc", ".bash_profile", ".profile", ".zshrc",
+		".claude.json", ".cursor/hooks.json", ".codex/hooks.json", ".codex/config.toml", ".codex/requirements.toml",
+		".gemini/settings.json", ".copilot/hooks", ".copilot/config.json", ".codeium/windsurf/hooks.json",
+		".codeium/hooks.json", ".config/devin/config.json", ".junie/config.json",
+		"Library/Application Support/Code/User/settings.json", ".config/Code/User/settings.json",
+		".gitconfig", ".config/git/config", ".bashrc", ".bash_profile", ".profile", ".zshrc",
 		".zshenv", ".zprofile"} {
 		p.Global = append(p.Global, filepath.Join(p.Home, rel))
 	}
 	p.Global = append(p.Global, "/etc/claude-code", "/Library/Application Support/ClaudeCode", "/etc/cursor",
-		"/etc/gitconfig")
+		"/etc/gitconfig", "/etc/codex", "/etc/gemini-cli", "/etc/devin", "/Library/Application Support/Devin")
 	return p
 }
 
@@ -176,6 +204,14 @@ func (ps Paths) protected(abs string) (string, bool) {
 				return rel, true
 			}
 		}
+		// Los hooks de un IDE en una subcarpeta también cuentan: Codex carga
+		// las capas .codex/ desde la carpeta donde arranca, y el lanzador busca
+		// el hook subiendo desde ahí.
+		if rel, err := filepath.Rel(r, abs); err == nil && !strings.HasPrefix(rel, "..") {
+			if what, ok := nestedHook(filepath.ToSlash(rel)); ok {
+				return what, true
+			}
+		}
 	}
 	for _, g := range ps.Global {
 		if within(abs, g) || within(abs, resolve(g, "/", ps.Home)) {
@@ -184,6 +220,59 @@ func (ps Paths) protected(abs string) (string, bool) {
 	}
 	if s, ok := ps.sensitive(abs); ok {
 		return s, true
+	}
+	return "", false
+}
+
+// absCwd vuelve absoluta la carpeta de una acción: Gemini CLI la manda
+// relativa a la raíz del proyecto (dir_path).
+func (ps Paths) absCwd(a Action) Action {
+	if a.Cwd != "" && !filepath.IsAbs(a.Cwd) && !strings.HasPrefix(a.Cwd, "~") {
+		a.Cwd = filepath.Join(ps.Root, a.Cwd)
+	}
+	return a
+}
+
+// execFlags reconoce, en una herramienta de lectura, argumentos que hacen
+// que la búsqueda corra programas: el preprocesador de ripgrep (--pre) o sus
+// descompresores (-z). Una herramienta de lectura de otro IDE puede pasar sus
+// argumentos a rg tal cual.
+func execFlags(a Action) string {
+	if !searchTools[strings.ToLower(a.Tool)] {
+		return ""
+	}
+	var texts []string
+	allStrings(a.Input, &texts)
+	for _, t := range texts {
+		for _, f := range strings.Fields(t) {
+			switch {
+			case f == "--pre" || strings.HasPrefix(f, "--pre=") || f == "--pre-glob" || strings.HasPrefix(f, "--pre-glob="),
+				f == "-z" || f == "--search-zip":
+				return "la búsqueda trae argumentos que corren programas (" + f + ")"
+			}
+		}
+	}
+	return ""
+}
+
+// ideDirs son las carpetas de configuración de los IDEs cuyos hooks o
+// configuración desarman el gate si un agente los escribe, a cualquier nivel.
+var ideDirs = map[string]bool{".claude": true, ".cursor": true, ".codex": true, ".gemini": true, ".windsurf": true,
+	".devin": true, ".junie": true, ".kiro": true, ".clinerules": true}
+
+// nestedHook reconoce, en una ruta relativa al proyecto, los hooks o la
+// configuración de un IDE dentro de una subcarpeta (sub/.codex/hooks.json).
+func nestedHook(rel string) (string, bool) {
+	parts := strings.Split(rel, "/")
+	for i := 1; i+1 < len(parts); i++ {
+		dir, next := strings.ToLower(parts[i]), strings.ToLower(parts[i+1])
+		switch {
+		case ideDirs[dir] && (strings.HasPrefix(next, "hooks") || strings.HasPrefix(next, "settings") ||
+			strings.HasPrefix(next, "config") || strings.HasPrefix(next, "managed-settings") || next == "requirements.toml"):
+			return strings.Join(parts[:i+2], "/"), true
+		case dir == ".github" && next == "hooks":
+			return strings.Join(parts[:i+2], "/"), true
+		}
 	}
 	return "", false
 }
@@ -200,7 +289,7 @@ func (ps Paths) Rel(abs string) string {
 }
 
 // pathFields son los campos de entrada que nombran un archivo.
-var pathFields = []string{"file_path", "path", "notebook_path", "target_file", "filePath", "filename", "file"}
+var pathFields = []string{"file_path", "path", "notebook_path", "target_file", "filePath", "filename", "file", "dirPath"}
 
 // targetPaths devuelve los archivos que una herramienta de archivos toca,
 // incluidos los de un parche (apply_patch) y los de MultiEdit.
@@ -211,7 +300,11 @@ func targetPaths(a Action) []string {
 			out = append(out, s)
 		}
 	}
-	for _, k := range []string{"patch", "input", "diff"} {
+	patchFields := []string{"patch", "input", "diff"}
+	if strings.EqualFold(a.Tool, "apply_patch") {
+		patchFields = append(patchFields, "command") // Codex manda el parche en command
+	}
+	for _, k := range patchFields {
 		if s, ok := a.Input[k].(string); ok {
 			for _, m := range patchFileRe.FindAllStringSubmatch(s, -1) {
 				out = append(out, strings.TrimSpace(m[1]))
@@ -264,6 +357,14 @@ var shellProtected = []struct {
 	{regexp.MustCompile(`(?i)managed-settings`), "la configuración administrada del IDE"},
 	{regexp.MustCompile(`(?i)disableallhooks`), "el apagado de hooks"},
 	{regexp.MustCompile(`(?i)\.cursor/hooks`), "los hooks de Cursor"},
+	{regexp.MustCompile(`(?i)\.codex/(hooks|config|requirements)`), "los hooks o la configuración de Codex"},
+	{regexp.MustCompile(`(?i)\.gemini/(settings|hooks)`), "los hooks o la configuración de Gemini CLI"},
+	{regexp.MustCompile(`(?i)\.github/hooks`), "los hooks de Copilot"},
+	{regexp.MustCompile(`(?i)\.copilot/(hooks|config)`), "los hooks o la configuración de Copilot"},
+	{regexp.MustCompile(`(?i)\.(windsurf|devin)/(hooks|config)|\.codeium/(windsurf/)?hooks`), "los hooks de Windsurf o de Devin"},
+	{regexp.MustCompile(`(?i)\.junie/config|\.kiro/hooks|\.clinerules/hooks`), "los hooks de Junie, Kiro o Cline"},
+	{regexp.MustCompile(`(?i)chat\.(use(claude)?hooks|hookfileslocations)`), "los hooks de VS Code"},
+	{regexp.MustCompile(`(?i)(^|[\s/'"=~])\.claude\.json\b`), "la configuración global de Claude Code"},
 	{regexp.MustCompile(`(?i)coyote/approvals`), "los registros de aprobación"},
 	{regexp.MustCompile(`(?i)coyote/project\.yaml`), "la configuración del proyecto (autonomía)"},
 	{regexp.MustCompile(`(?i)(^|[\s/'"=])\.coyote($|[\s/'";|&)])`), "el estado local de coyote"},
@@ -279,6 +380,9 @@ var agentFlag = regexp.MustCompile(`--?agent(?:=|\s+)["']?([A-Za-z0-9._/-]+)`)
 // hardShell revisa un comando antes de pensar en aprobaciones.
 func (ps Paths) hardShell(a Action) *Hard {
 	cmd := strings.NewReplacer("\\\r\n", "", "\\\n", "").Replace(a.Command)
+	if code, ok := Canary(cmd); ok {
+		return hard("%s", canaryReason(code))
+	}
 	// Si el comando se analiza como de solo lectura, coyote solo aparece en
 	// subcomandos de lectura (install --check, por ejemplo).
 	if _, err := analyzeShell(cmd); err != nil && isCoyoteAdmin(cmd) {
@@ -404,7 +508,7 @@ func (ps Paths) readArg(w word, cwd string, recursive bool) (string, bool) {
 // partir de una carpeta que las contenga.
 var searchTools = map[string]bool{"grep": true, "glob": true, "ls": true, "codebase_search": true,
 	"grep_search": true, "file_search": true, "search_file_content": true, "list_dir": true,
-	"list_directory": true, "semanticsearch": true}
+	"list_directory": true, "semanticsearch": true, "rg": true, "semantic_search": true, "read_many_files": true}
 
 // readTool revisa las rutas de una herramienta de lectura.
 func (ps Paths) readTool(a Action) *Hard {
@@ -416,7 +520,7 @@ func (ps Paths) readTool(a Action) *Hard {
 	}
 	if searchTools[strings.ToLower(a.Tool)] {
 		roots := []string{cwd}
-		for _, k := range []string{"path", "directory", "dir", "target_directory", "relative_workspace_path"} {
+		for _, k := range []string{"path", "directory", "dir", "target_directory", "relative_workspace_path", "dir_path", "dirPath"} {
 			if s, ok := a.Input[k].(string); ok && s != "" {
 				roots = append(roots, resolve(s, cwd, ps.Home))
 			}
@@ -473,9 +577,24 @@ func (ps Paths) hardFile(a Action) *Hard {
 		if what, ok := ps.protected(abs); ok {
 			return hard("escribir en %s desarmaría el gate o tocaría credenciales", what)
 		}
+		// La configuración de VS Code se edita, pero no para apagar sus hooks
+		// ni para aprobar herramientas solas.
+		if filepath.Base(abs) == "settings.json" && filepath.Base(filepath.Dir(abs)) == ".vscode" {
+			var texts []string
+			allStrings(a.Input, &texts)
+			for _, x := range texts {
+				if vscodeGateKeys.MatchString(x) {
+					return hard("el cambio a .vscode/settings.json toca los hooks o la aprobación automática de VS Code")
+				}
+			}
+		}
 	}
 	return nil
 }
+
+// vscodeGateKeys son las opciones de VS Code que apagan los hooks o aprueban
+// herramientas sin preguntar.
+var vscodeGateKeys = regexp.MustCompile(`(?i)chat\.(use(claude)?hooks|hookfileslocations|tools\.(global\.)?autoapprove|tools\.[a-z.]*autoapprove)`)
 
 // commandFields son los campos con los que una herramienta desconocida o MCP
 // podría correr un comando.
@@ -484,6 +603,13 @@ var commandFields = []string{"command", "cmd", "script", "shell", "args", "argv"
 // hardOther revisa herramientas desconocidas o MCP: si traen un comando que
 // nombra el gate o credenciales, se bloquean.
 func (ps Paths) hardOther(a Action) *Hard {
+	var all []string
+	allStrings(a.Input, &all)
+	for _, t := range all {
+		if code, ok := Canary(t); ok {
+			return hard("%s", canaryReason(code))
+		}
+	}
 	var texts []string
 	for _, k := range commandFields {
 		allStrings(a.Input[k], &texts)

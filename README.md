@@ -44,8 +44,9 @@ coyote web                          # costos en http://127.0.0.1:7410
 ## Trabajar con agentes
 
 ```sh
-coyote install --ide claude-code    # gate, 14 agentes, skills y atribución apagada (o --ide cursor, all)
-coyote doctor --ide claude-code     # prueba el gate en tu máquina
+coyote install --ide claude-code    # gate, agentes, skills y atribución apagada (o cursor, codex, gemini, copilot, windsurf, all)
+coyote doctor --ide codex --canary  # mide si el IDE pasa por el gate: nivel 1, 2 o 3
+coyote doctor --ide codex           # prueba el gate en tu máquina y muestra el nivel medido
 coyote approvals                    # lo que un agente dejó esperando
 coyote review P-7q3k9d              # el comando o el diff exacto
 coyote approve P-7q3k9d --uses 3    # el agente repite la llamada y pasa
@@ -53,6 +54,8 @@ coyote reject P-7q3k9d --reason "usa go mod tidy"          # el agente recibe el
 ```
 
 Leer, buscar y pedir contexto no piden aprobación. Una aprobación vale para esa acción exacta, en tu máquina, por 24 horas como máximo, y se da desde tu terminal, nunca desde el IDE.
+
+Un IDE puede tener hooks y aun así no pasar por el gate: carpeta sin confianza, modo restringido o hooks apagados. Por eso el nivel de cada IDE se mide con un canario, un comando que el gate niega siempre (docs/specs/install-v1.md).
 
 ## Un producto en varios repos
 
@@ -84,12 +87,12 @@ Cada corrida tiene topes de turnos y de dólares. El router baja de modelo al 80
 
 | Comando | Para qué |
 |---------|----------|
-| `init`, `status`, `doctor [--ide IDE]` | crea o adopta un proyecto, su estado y su diagnóstico |
+| `init`, `status`, `doctor [--ide IDE [--canary]]` | crea o adopta un proyecto, su estado y su diagnóstico, con el nivel medido de cada IDE |
 | `note`, `record`, `log` | contexto (`inv`, `dec`, `gap`, `how`, `term`, `risk`, `todo`), eventos y el ledger con sus totales |
 | `commit -m`, `hooks install` | commits con tu autoría, formato R2 y sin atribución a IA |
 | `standards lint\|show\|diff\|explain`, `attribution check\|scrub` | el estándar por capas y la atribución a IA |
 | `generate agents [--check]` | genera `AGENTS.md` o verifica que esté al día |
-| `install --ide IDE \| --ci github` | el gate, los agentes y las skills en el IDE; o el pipeline de cada repo del producto |
+| `install --ide IDE \| --ci github` | el gate, los agentes y las skills en Claude Code, Cursor, Codex, Gemini CLI, Copilot o Windsurf; o el pipeline de cada repo del producto |
 | `gate check`, `gate pr` | el gate de los hooks del IDE; el de los PR con la revisión de un dueño |
 | `approvals`, `review`, `approve`, `reject`, `revoke`, `propose` | la cola y las decisiones humanas sobre acciones exactas |
 | `get context`, `ask`, `index` | contexto acotado con referencias, sin llamar a ningún modelo |
@@ -118,8 +121,8 @@ coyote/
   router.yaml             modelo por agente, pisos por riesgo y topes (opcional)
   map/, repos/, ci/       en un producto: mapa, documentos propuestos y workflows por repo
   approvals/              aprobaciones humanas, firmadas
-.claude/, .cursor/        generados por coyote install
-.coyote/                  índice, cola del gate y locks; nunca se versiona
+.claude/, .cursor/, …     generados por coyote install, según el IDE (.codex/, .gemini/, .github/hooks/, .windsurf/)
+.coyote/                  índice, cola y latido del gate, y locks; nunca se versiona
 ```
 
 ## Autonomía

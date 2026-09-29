@@ -26,8 +26,9 @@ import (
 var isTerminal = tty.Stdin
 
 // agentEnv son variables que delatan que coyote corre dentro de una sesión de
-// agente: COYOTE_IDE la pone coyote install en la configuración del IDE.
-var agentEnv = []string{"COYOTE_IDE", "CLAUDECODE", "CURSOR_AGENT"}
+// agente: COYOTE_IDE la pone coyote install en la configuración del IDE; las
+// demás, el IDE en los comandos que corre su agente.
+var agentEnv = []string{"COYOTE_IDE", "CLAUDECODE", "CURSOR_AGENT", "GEMINI_CLI", "CODEX_SANDBOX", "CODEX_SANDBOX_NETWORK_DISABLED"}
 
 // human exige que quien aprueba, rechaza o revoca sea una persona en su
 // terminal, fuera de una sesión de agente.

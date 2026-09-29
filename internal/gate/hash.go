@@ -20,6 +20,7 @@ type Normalized struct {
 
 // Normalize calcula el hash y la descripción de una acción.
 func (ps Paths) Normalize(a Action) Normalized {
+	a = ps.absCwd(a)
 	cwd := a.Cwd
 	if cwd == "" {
 		cwd = ps.Root
@@ -41,7 +42,10 @@ func (ps Paths) Normalize(a Action) Normalized {
 		extra := map[string]any{}
 		for k, v := range a.Input {
 			switch k {
-			case "command", "cmd", "description", "timeout", "working_directory", "workdir", "cwd":
+			case "command", "cmd", "description", "timeout", "working_directory", "workdir", "cwd", "dir_path",
+				// Cambian en cada llamada o son texto para personas: no cambian el efecto.
+				"justification", "sessionId", "session_id", "shellId", "shell_id", "initial_wait", "timeout_ms",
+				"yield_time_ms", "max_output_tokens":
 				continue
 			}
 			if !zero(v) {

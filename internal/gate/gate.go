@@ -30,11 +30,18 @@ type Decision struct {
 // Evaluate aplica la política: primero lo que se bloquea siempre, después lo
 // que solo lee y, para el resto, el hash de la acción exacta.
 func (ps Paths) Evaluate(a Action) Decision {
+	a = ps.absCwd(a)
 	d := Decision{Kind: Classify(a)}
 	var h *Hard
 	switch d.Kind {
 	case KindRead:
-		if h = ps.readTool(a); h == nil {
+		h = ps.readTool(a)
+		if h == nil {
+			if why := execFlags(a); why != "" {
+				// Una búsqueda que corre programas deja de ser lectura.
+				d.Kind, d.Reason = KindOther, why
+				break
+			}
 			return d // Allow
 		}
 	case KindShell:
@@ -67,20 +74,24 @@ func (ps Paths) Evaluate(a Action) Decision {
 }
 
 // Respond escribe la respuesta en el formato del IDE y devuelve el código de
-// salida del hook. En todos, 2 bloquea; Cursor además espera JSON.
+// salida del hook. En todos, 2 bloquea. Cursor además espera JSON; Copilot lee
+// permissionDecision y trata cualquier salida distinta de 0 como negación.
+// Dejar pasar nunca aprueba en nombre del IDE: sale 0 sin decisión y el IDE
+// sigue con sus propios permisos.
 func Respond(ide string, allow bool, message string, stdout, stderr io.Writer) int {
-	if ide == IDECursor {
+	switch ide {
+	case IDECursor:
 		out := map[string]string{"permission": "allow"}
 		if !allow {
 			out = map[string]string{"permission": "deny", "user_message": message, "agent_message": message}
 		}
 		b, _ := json.Marshal(out)
 		fmt.Fprintln(stdout, string(b))
-		if allow {
-			return 0
+	case IDECopilot:
+		if !allow {
+			b, _ := json.Marshal(map[string]string{"permissionDecision": "deny", "permissionDecisionReason": message})
+			fmt.Fprintln(stdout, string(b))
 		}
-		fmt.Fprintln(stderr, message)
-		return 2
 	}
 	if allow {
 		return 0

@@ -240,17 +240,27 @@ type doctorCheck struct {
 }
 
 func cmdDoctor(a *app, args []string) error {
-	fs := a.flags("doctor", "[--ide claude-code|cursor|all]")
-	ide := fs.String("ide", "", "prueba además el gate y la instalación de ese IDE")
+	if len(args) > 0 && args[0] == "canary" {
+		return doctorCanary(a, args[1:])
+	}
+	fs := a.flags("doctor", "[--ide IDE|all [--canary]] | canary <código>")
+	ide := fs.String("ide", "", "prueba además el gate, la instalación y el nivel medido de ese IDE")
+	canary := fs.Bool("canary", false, "con --ide: pide un canario para medir si el IDE llama al gate y respeta su negación")
 	if _, err := parseArgs(fs, args); err != nil {
 		return err
 	}
 	var ides []string
 	if *ide != "" {
 		var err error
-		if ides, err = ideList(*ide); err != nil {
+		if ides, err = doctorIDEs(*ide); err != nil {
 			return err
 		}
+	}
+	if *canary {
+		if len(ides) != 1 || *ide == "all" {
+			return fail(2, "--canary va con un solo --ide")
+		}
+		return a.canaryRequest(ides[0])
 	}
 	var checks []doctorCheck
 	add := func(name, state, detail string) { checks = append(checks, doctorCheck{name, state, detail}) }
