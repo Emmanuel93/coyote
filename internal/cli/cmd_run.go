@@ -74,7 +74,7 @@ func cmdRun(a *app, args []string) error {
 			if err != nil {
 				return err
 			}
-			st := workstream.Fold(plan, entries)
+			st := workstream.FoldAt(plan, entries, a.now())
 			if st.Closed {
 				return fail(1, "%s está cerrado (coyote close): para seguir, abre otro workstream", *ws)
 			}
@@ -643,7 +643,7 @@ func cmdClose(a *app, args []string) error {
 	}
 	var steps []workstream.StepState
 	if plan, err := workstream.Load(root, ws); err == nil {
-		steps = workstream.Fold(plan, entries).Steps
+		steps = workstream.FoldAt(plan, entries, a.now()).Steps
 	}
 	block := closeBlock(ws, events, steps, a.now())
 	if *dry {

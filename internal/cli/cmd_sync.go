@@ -168,7 +168,7 @@ func cmdPush(a *app, args []string) error {
 	}
 	gitArgs = append(gitArgs, "--", *remote, "HEAD:refs/heads/"+branch)
 	cmd := exec.Command("git", gitArgs...)
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = a.stdin, a.stdout, a.stderr
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = a.stdin, a.rawOut, a.rawErr
 	if err := cmd.Run(); err != nil {
 		return fail(1, "git push falló; nada cambió en el ledger")
 	}
@@ -226,7 +226,7 @@ func cmdPull(a *app, args []string) error {
 		before, _ = gitx.Run(root, "rev-parse", "HEAD")
 	}
 	cmd := exec.Command("git", "-C", root, "pull", "--ff-only", "--", *remote, gitx.Branch(root))
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = a.stdin, a.stdout, a.stderr
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = a.stdin, a.rawOut, a.rawErr
 	if err := cmd.Run(); err != nil {
 		return fail(1, "git pull --ff-only falló: si divergiste, integra con git y vuelve a correr coyote pull")
 	}

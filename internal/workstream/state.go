@@ -63,6 +63,20 @@ func ref(refs []string, key string) string {
 	return ""
 }
 
+// FoldAt es Fold con los eventos hasta now: uno con fecha futura (un reloj
+// adelantado o una línea editada) todavía no cuenta, igual que en el
+// presupuesto del proyecto.
+func FoldAt(p *Plan, entries []ledger.Entry, now time.Time) *State {
+	limit := now.Add(time.Minute)
+	kept := make([]ledger.Entry, 0, len(entries))
+	for _, e := range entries {
+		if e.Line.TS.Before(limit) {
+			kept = append(kept, e)
+		}
+	}
+	return Fold(p, kept)
+}
+
 // Fold deriva el estado del plan de los eventos del ledger (ya ordenados por
 // tiempo): run con step: marca cómo terminó cada corrida, apr la revisión de
 // la persona y rej su pedido de rehacerlo. Las corridas sin step: del mismo

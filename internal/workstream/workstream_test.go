@@ -417,3 +417,17 @@ func TestLockEnCarrera(t *testing.T) {
 		}
 	}
 }
+
+func TestFoldAtIgnoraEventosFuturos(t *testing.T) {
+	p := mustParse(t, planYAML)
+	now := time.Date(2026, 9, 28, 10, 0, 0, 0, time.UTC)
+	ev := []ledger.Entry{
+		line(now.Add(-time.Hour), "run", "ok", 0.4, "step:S1", "doc:runs/a.md"),
+		line(now.AddDate(73, 0, 0), "run", "ok", 100, "step:S1", "doc:runs/b.md"),
+		line(now.AddDate(73, 0, 0), "apr", "ok", 0, "step:S1", "doc:runs/b.md"),
+	}
+	st := FoldAt(p, ev, now)
+	if st.Spent != 0.4 || st.Steps[0].Status != Review || st.Steps[0].Runs != 1 {
+		t.Fatalf("un evento con fecha futura no cuenta: gasto %v, S1 %s con %d corridas", st.Spent, st.Steps[0].Status, st.Steps[0].Runs)
+	}
+}

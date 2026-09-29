@@ -18,14 +18,15 @@ Estado: nuevo en v0.7.0 (la web v0 llegó en v0.2.0) · Implementación: `intern
 
 ## Visibilidad (D10)
 
-- La persona es la identidad de git de quien corre `coyote web`, como en el ledger: `COYOTE_USER`, `git config coyote.user` o el correo.
+- La persona es la identidad de git de quien corre `coyote web`, como en el ledger: `COYOTE_USER`, `git config coyote.user` o el correo. Es la identidad que declara la máquina, no una autenticación: dos correos que se reducen al mismo identificador (`anaé@…` y `ana@…` dan `@ana`) son la misma persona para coyote.
 - Los admins del proyecto son los de `hub.yaml` y los de `admins:` en `project.yaml`: ven el desglose por persona del proyecto.
 - La organización (`/org` y su gasto en el presupuesto) la ven solo los admins de `hub.yaml`, que salen del commit que rige. Un admin del proyecto recibe 403: `project.yaml` se edita en el proyecto, el hub se revisa en su PR.
 - Una persona que no es admin ve sus eventos con desglose y los totales del proyecto sin desglose, tampoco de modelos.
 - El gasto de un workstream lo ven su dueño (`owner` del plan) y los admins: un plan suele ser de una sola persona.
-- Un evento con fecha futura (un reloj adelantado en otra máquina) no cuenta en ningún periodo.
+- Un evento con fecha futura (un reloj adelantado en otra máquina) no cuenta en ningún periodo, tampoco en el gasto o el estado de un workstream, ni en la web ni en `coyote run --ws`.
 - Un hub que no se puede leer deja un aviso y a nadie como admin del hub: por defecto se muestra menos, no más.
-- Es visibilidad por defecto, no control de acceso: el ledger está en git y quien lee el repo lo lee. Cada página lo dice.
+- Es visibilidad por defecto, no control de acceso: el ledger está en git y quien lee el repo lo lee. Cada página lo dice. Por eso un admin del proyecto que registra en `repos:` otro proyecto de la organización ve el desglose de su ledger: es lo que vería clonándolo.
+- Un repo registrado que resuelve a la carpeta del proyecto, o a otro repo ya leído, no se lee dos veces.
 
 ## Superficie
 
@@ -35,4 +36,6 @@ Estado: nuevo en v0.7.0 (la web v0 llegó en v0.2.0) · Implementación: `intern
 - Mirar no escribe: la cola se lee sin borrar las propuestas vencidas y la clave de firmas no se crea si no existe.
 - Timeouts de lectura, escritura e inactividad, y sin el manejador general de `OPTIONS *`.
 - Sin JavaScript. La CSP es `default-src 'none'` con estilos en línea; `frame-ancestors 'none'`, `no-referrer` y `no-store`.
-- Todo texto del ledger, de los planes o de la cola se escapa. Una acción de la cola se muestra en una línea visible y corta; si parece llevar un secreto, se oculta y se revisa con `coyote review <id>`.
+- Todo texto del ledger, de los planes o de la cola se escapa. Además, ninguna respuesta lleva controles, separadores de línea Unicode ni caracteres de formato invisibles (los que reordenan un texto): se escriben como su código (`\u202e`).
+- Una acción de la cola se muestra en una línea visible y corta; si parece llevar un secreto, se oculta y se revisa con `coyote review <id>`. El marcador de dispensa de secretos no aplica aquí, tampoco anidado.
+- Cualquier usuario de la misma máquina puede pedir la página por loopback: en una máquina compartida, `coyote web` muestra a los demás usuarios lo que ve quien la corre. Queda para v1.0 una clave por sesión en la URL.

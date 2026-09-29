@@ -230,7 +230,7 @@ func cmdCommit(a *app, args []string) error {
 		gitArgs = append(gitArgs, "-a")
 	}
 	cmd := exec.Command("git", gitArgs...)
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = a.stdin, a.stdout, a.stderr
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = a.stdin, a.rawOut, a.rawErr
 	if err := cmd.Run(); err != nil {
 		restore()
 		return fail(1, "git commit falló; el ledger quedó como estaba")

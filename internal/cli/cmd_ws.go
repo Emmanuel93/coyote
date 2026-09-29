@@ -135,7 +135,7 @@ func (a *app) wsState(c *wsCtx) (*workstream.State, error) {
 	if err != nil {
 		return nil, err
 	}
-	return workstream.Fold(c.plan, entries), nil
+	return workstream.FoldAt(c.plan, entries, a.now()), nil
 }
 
 func printPlanFindings(a *app, fs []workstream.Finding) {
@@ -328,7 +328,7 @@ func (a *app) wsList(asJSON bool) error {
 			continue
 		}
 		mode, _ := workstream.Mode(plan.Autonomy, cfg.Autonomy)
-		st := workstream.Fold(plan, entries)
+		st := workstream.FoldAt(plan, entries, a.now())
 		r := row{ID: id, Title: plan.Title, Mode: mode, Steps: len(st.Steps), Spent: round4(st.Spent), Budget: plan.BudgetUSD}
 		for _, s := range st.Steps {
 			if s.Status == workstream.Done {

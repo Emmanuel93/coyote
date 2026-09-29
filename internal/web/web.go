@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/Emmanuel93/coyote/internal/ccf"
+	"github.com/Emmanuel93/coyote/internal/safetext"
 	"github.com/Emmanuel93/coyote/internal/usage"
 )
 
@@ -304,9 +305,22 @@ func protect(next http.Handler) http.Handler {
 			http.Error(w, "solo lectura", http.StatusMethodNotAllowed)
 			return
 		}
-		next.ServeHTTP(w, r)
+		// Ningún dato llega a la página con controles o caracteres de formato
+		// invisibles que reordenen o escondan texto (ver safetext).
+		sw := &safeResponse{ResponseWriter: w}
+		sw.out = safetext.NewWriter(w)
+		next.ServeHTTP(sw, r)
+		_ = sw.out.Flush()
 	})
 }
+
+// safeResponse escapa el cuerpo de cada respuesta con safetext.
+type safeResponse struct {
+	http.ResponseWriter
+	out *safetext.Writer
+}
+
+func (s *safeResponse) Write(p []byte) (int, error) { return s.out.Write(p) }
 
 type navItem struct {
 	Path, Label string

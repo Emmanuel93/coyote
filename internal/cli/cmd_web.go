@@ -88,6 +88,18 @@ func (a *app) webServer(root string, cfg *project.Config) (*web.Server, []string
 	type source struct{ name, root string }
 	sources := []source{{cfg.Name, root}}
 	names := []string{cfg.Name}
+	// Un repo que resuelve a la misma carpeta que el proyecto u otro repo ya
+	// leído contaría sus eventos dos veces.
+	canon := func(p string) string {
+		if abs, err := filepath.Abs(p); err == nil {
+			p = abs
+		}
+		if real, err := filepath.EvalSymlinks(p); err == nil {
+			p = real
+		}
+		return p
+	}
+	seen := map[string]bool{canon(root): true}
 	for _, r := range cfg.Repos {
 		dir := ""
 		if r.Path != "" {
@@ -102,7 +114,11 @@ func (a *app) webServer(root string, cfg *project.Config) (*web.Server, []string
 		if dir == "" {
 			continue
 		}
+		if seen[canon(dir)] {
+			continue
+		}
 		if _, err := os.Stat(filepath.Join(dir, "coyote", "ledger")); err == nil {
+			seen[canon(dir)] = true
 			sources = append(sources, source{r.Name, dir})
 			names = append(names, r.Name)
 		}
@@ -178,7 +194,7 @@ func (a *app) webServer(root string, cfg *project.Config) (*web.Server, []string
 		}
 		return b, nil
 	}
-	s.Work = func() ([]web.Workstream, error) { return workViews(root) }
+	s.Work = func() ([]web.Workstream, error) { return workViews(root, a.now()) }
 	s.Gate = func() (web.Gate, error) { return a.gateView(root) }
 	s.SLOs = func() ([]web.SLO, error) { return sloViews(root) }
 	if h != nil {
@@ -188,7 +204,7 @@ func (a *app) webServer(root string, cfg *project.Config) (*web.Server, []string
 }
 
 // workViews lee los planes y su estado desde el ledger.
-func workViews(root string) ([]web.Workstream, error) {
+func workViews(root string, now time.Time) ([]web.Workstream, error) {
 	ids, err := workstream.All(root)
 	if err != nil {
 		return nil, err
@@ -204,7 +220,7 @@ func workViews(root string) ([]web.Workstream, error) {
 			out = append(out, web.Workstream{ID: id, Problem: err.Error()})
 			continue
 		}
-		st := workstream.Fold(p, entries)
+		st := workstream.FoldAt(p, entries, now)
 		owner, _ := hub.NormalizeHandle(p.Owner)
 		w := web.Workstream{ID: p.ID, Title: p.Title, Mode: p.Autonomy, Gate: p.Gate, Owner: owner, Closed: st.Closed,
 			SpentUSD: st.Spent, BudgetUSD: p.BudgetUSD, Runs: st.Runs}
@@ -219,8 +235,14 @@ func workViews(root string) ([]web.Workstream, error) {
 // webAction resume una acción para la web: una línea visible, corta y sin
 // secretos a la vista; el detalle completo se ve con coyote review.
 func webAction(id, object string) string {
-	// El marcador de dispensa no aplica aquí: solo decide si se muestra.
-	if len(secrets.ScanLine("accion", 1, strings.ReplaceAll(object, secrets.AllowMarker, ""))) > 0 {
+	// El marcador de dispensa no aplica aquí: solo decide si se muestra. Se
+	// quita hasta que no quede, porque quitarlo una vez puede rearmarlo
+	// (coyote:allow-coyote:allow-secretsecret).
+	clean := object
+	for strings.Contains(clean, secrets.AllowMarker) {
+		clean = strings.ReplaceAll(clean, secrets.AllowMarker, "")
+	}
+	if len(secrets.ScanLine("accion", 1, clean)) > 0 {
 		return "(parece llevar un secreto; revísala con coyote review " + id + ")"
 	}
 	return webText(shortText(object, 140))
@@ -262,7 +284,7 @@ func (a *app) gateView(root string) (web.Gate, error) {
 		if p.Status == "rejected" {
 			state = "rechazada: " + shortText(p.RejectReason, 60)
 		}
-		g.Pending = append(g.Pending, web.Pending{ID: p.ID, By: webText(p.RequestedBy), Action: webAction(p.ID, p.Object),
+		g.Pending = append(g.Pending, web.Pending{ID: webText(p.ID), By: webText(p.RequestedBy), Action: webAction(p.ID, p.Object),
 			State: webText(state), First: p.First, Attempts: p.Attempts})
 	}
 	g.Releases = releaseGates(root)
@@ -294,7 +316,7 @@ func (a *app) gateView(root string) (web.Gate, error) {
 		if left < 0 {
 			left = 0
 		}
-		g.Grants = append(g.Grants, web.Grant{ID: st.ID, Action: webAction(st.ID, st.Object), Approver: webText(st.Approver), State: state, Left: left, Expires: exp})
+		g.Grants = append(g.Grants, web.Grant{ID: webText(st.ID), Action: webAction(st.ID, st.Object), Approver: webText(st.Approver), State: state, Left: left, Expires: exp})
 	}
 	sort.SliceStable(g.Grants, func(i, j int) bool { return g.Grants[i].Expires.After(g.Grants[j].Expires) })
 	for name, perr := range problems {

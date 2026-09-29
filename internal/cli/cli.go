@@ -24,8 +24,11 @@ type app struct {
 	stdin  io.Reader
 	stdout io.Writer
 	stderr io.Writer
-	dir    string
-	now    func() time.Time
+	// rawOut y rawErr son la salida sin filtro, solo para programas que
+	// coyote corre a la vista de la persona (git commit, push, pull).
+	rawOut, rawErr io.Writer
+	dir            string
+	now            func() time.Time
 }
 
 type command struct {
@@ -86,7 +89,10 @@ func init() {
 
 // Main ejecuta la CLI y devuelve el código de salida.
 func Main(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
-	a := &app{stdin: stdin, stdout: stdout, stderr: stderr, now: func() time.Time { return time.Now().UTC() }}
+	out, errOut := newSafeWriter(stdout), newSafeWriter(stderr)
+	defer func() { _ = out.Flush(); _ = errOut.Flush() }()
+	a := &app{stdin: stdin, stdout: out, stderr: errOut, rawOut: stdout, rawErr: stderr, now: func() time.Time { return time.Now().UTC() }}
+	stdout, stderr = out, errOut
 	for len(args) > 0 && args[0] == "-C" {
 		if len(args) < 2 {
 			fmt.Fprintln(stderr, "coyote: -C requiere una ruta")
@@ -265,6 +271,7 @@ func (a *app) lint(root string, cfg *project.Config, scripts bool) (*standards.S
 	}
 	ctx.AllowScripts = scripts
 	ctx.Secrets = cfg.Secrets
+	ctx.Type = cfg.Type
 	return st, standards.Lint(ctx, st), nil
 }
 
