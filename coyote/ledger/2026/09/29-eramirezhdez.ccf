@@ -66,3 +66,4 @@
 2026-09-29T09:52Z|@eramirezhdez/coyote-scribe|W-0007|coyote|note|output|inv: la salida de coyote en terminal y web escapa controles y…|doc:CONTEXT.coyote.md|-|-|ok
 2026-09-29T09:52Z|@eramirezhdez/coyote-scribe|W-0007|coyote|note|web|gap: otro usuario de la misma máquina puede pedir la web por…|doc:CONTEXT.coyote.md|-|-|ok
 2026-09-29T10:00Z|@eramirezhdez/coyote-scribe|W-0007|coyote|doc|release|reporte de v0.7.0 para G7, notas de contexto y estado del plan|-|-|-|ok
+2026-09-29T10:00Z|@eramirezhdez/coyote-scribe|W-0007|coyote|doc|readme|el README vuelve a caber en 150 líneas|-|-|-|ok

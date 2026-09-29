@@ -105,8 +105,7 @@ Cada corrida tiene topes de turnos y de dólares. El router baja de modelo al 80
 | `ws check\|status\|run\|continue` | el plan de un workstream con puntos de control |
 | `close <W>` | consumo de un workstream desde el ledger, con sus pasos |
 | `push`, `pull`, `auth` | publica y trae con autoría y ritmo humano; el token de GitHub vive en el llavero |
-| `hub init\|status` | el hub de la organización: su estándar, sus admins, su presupuesto y sus proyectos |
-| `slo check\|rules` | SLOs como código: los valida y genera sus alertas de Prometheus (R19) |
+| `hub init\|status`, `slo check\|rules` | el hub de la organización (estándar, admins, presupuesto y proyectos); SLOs como código, con sus alertas de Prometheus generadas (R19) |
 | `web` | costos (cada persona ve lo suyo y los totales; los admins, todo), presupuesto, workstreams, gate, SLOs y, para los admins del hub, la organización, en `127.0.0.1` |
 
 `coyote help <comando>` muestra las opciones. `-C <ruta>` corre cualquier comando sobre otro directorio.
@@ -126,8 +125,7 @@ coyote/
   router.yaml             modelo por agente, pisos por riesgo y topes (opcional)
   map/, repos/, ci/       en un producto: mapa, documentos propuestos y workflows por repo
   approvals/              aprobaciones humanas, firmadas
-  slo/                    SLOs por servicio y sus reglas de Prometheus generadas (prometheus/)
-  hub.yaml                en un hub: organización, admins, presupuesto y proyectos
+  slo/, hub.yaml          SLOs por servicio y sus reglas generadas; en un hub, admins, presupuesto y proyectos
 .claude/, .cursor/, …     generados por coyote install, según el IDE (.codex/, .gemini/, .github/hooks/, .windsurf/)
 .coyote/                  índice, cola y latido del gate, y locks; nunca se versiona
 ```
