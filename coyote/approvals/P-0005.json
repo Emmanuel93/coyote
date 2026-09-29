@@ -1,0 +1,26 @@
+{
+  "id": "P-0005",
+  "gate": "G5",
+  "release": "v0.5.0",
+  "workstream": "W-0005",
+  "decision": "approved",
+  "approver": "@eramirezhdez",
+  "date": "2026-09-29",
+  "reviewed_commit": "57ef409",
+  "authorizes": [
+    "etiquetar v0.5.0 sobre la rama v0.5 de coyote; main queda en v0.4.0",
+    "aceptar ADR-0013 (revisado) y ADR-0014 y entregar los binarios",
+    "crear en cada repo del producto una rama coyote/pipeline con .github/workflows/coyote.yml, con la bandera pr_enforcement apagada (política warn), con comandos de plomería de git y sin tocar el árbol de trabajo, el índice, la rama actual ni main",
+    "supervised en los workstreams del piloto después de las corridas medidas (T37)",
+    "confirmar D24, D25, D26, D27, D28 y D29, y pasar D10 y D12 a v0.6",
+    "arrancar v0.6 en su propia rama"
+  ],
+  "conditions": [
+    "el ejercicio se hace en ramas: nada se integra a main de coyote ni de los repos del producto",
+    "el push de las ramas y de la etiqueta, el secreto COYOTE_PRODUCT_TOKEN y los PR de ensayo los hace la persona; los PR de ensayo se cierran sin merge",
+    "las corridas reales de coyote run las lanza la persona desde su terminal, dentro de 30 USD al mes y 2 USD por corrida",
+    "los nombres de la organización y de sus repos no entran al código de la herramienta (C1)"
+  ],
+  "response": "aprobar v0.5.0 en su rama; ensayo del pipeline en ramas coyote/pipeline; supervised después de medir",
+  "evidence": "docs/releases/v0.5.0.md"
+}

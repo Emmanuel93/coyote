@@ -1,3 +1,5 @@
 # ts|actor|project|repo|type|scope|what|refs|tokens in/cache/out|cost in+out|status
 2026-09-29T00:01Z|@eramirezhdez/coyote-reviewer|W-0005|coyote|doc|release|tokens del pipeline con los repos en tu cuenta|-|-|-|ok
 2026-09-29T00:12Z|@eramirezhdez/coyote-dev|W-0005|coyote|feat|project|bandera pr_enforcement para exigir el chequeo del PR cuando GitHub lo permita|-|-|-|ok
+2026-09-29T01:07Z|@eramirezhdez|W-0005|coyote|close|-|cierre de W-0005: 0 corridas, $0.00|doc:coyote/workstreams/W-0005-team/close.md|0/0/0|$0+$0|ok
+2026-09-29T01:08Z|@eramirezhdez/claude-code|W-0005|coyote|doc|release|aprobación de G5 para v0.5.0|-|-|-|ok

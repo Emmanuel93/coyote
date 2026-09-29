@@ -1,6 +1,6 @@
 # Plan de ejecución — Coyote
 
-Estado: v0.4.0 aprobada en G4 (P-0004) · v0.5.0 lista para G5 (docs/releases/v0.5.0.md) · actualizado 2026-09-28
+Estado: v0.5.0 aprobada en G5 (P-0005), en la rama `v0.5`; `main` sigue en v0.4.0 · v0.6 en construcción en su rama · actualizado 2026-09-29
 
 Este plan ejecuta la propuesta aprobada ("Plan de construcción — Framework Coyote"). Cada release se razona con la plantilla de cinco partes que usarán los agentes de Coyote (problema, restricciones, opciones, decisión, riesgos) y cierra con un gate humano: nada se etiqueta, se publica ni toca otros proyectos sin autorización explícita.
 
@@ -312,8 +312,8 @@ Siguen el orden de la propuesta. Cada una recibirá su razonamiento completo al 
 | D4 embeddings | Ninguno en v0.2 (BM25 local); locales cuando lleguen | No sacar código a terceros sin autorización || Confirmado en G2 |
 | D6 aprobación R2–R3 | CLI con registro firmado en v0.3; pull request con `coyote gate pr` en CI después | La CLI funciona sin red; el PR agrega revisión de equipo | Confirmado en G3 |
 | D11 IDE del piloto | Claude Code | Es el de nivel 1 con hooks más completos | Confirmado en G3 |
-| D10 visibilidad de costos | Cada persona ve lo suyo, admins todo | Menor exposición por defecto | G5 (llega con el trabajo en equipo) |
-| D12 hub | `kredius`, sin crearlo hasta G5 | Aislamiento | G5 |
+| D10 visibilidad de costos | Cada persona ve lo suyo, admins todo | Menor exposición por defecto | v0.6 (movida en G5) |
+| D12 hub | `kredius`, sin crearlo hasta G5 | Aislamiento | v0.6 (movida en G5) |
 | D13 nombres de archivo | `README.coyote.md` y `CONTEXT.coyote.md` | Coherente con `README.md` y `AGENTS.md` | Confirmado en G1 |
 | D14 alcance de R15 | Commits, PRs, comentarios, docs, releases y autoría del commit | Es lo que pediste | Confirmado en G1 |
 | D15 web | Plantillas Go embebidas, solo lectura y solo en 127.0.0.1 | Un solo binario, sin superficie de red || Confirmado en G2 |
@@ -321,12 +321,12 @@ Siguen el orden de la propuesta. Cada una recibirá su razonamiento completo al 
 | D19 autonomía por defecto | `manual` | Nada con efectos sin aprobación mientras no haya evidencia | Confirmado en G3 |
 | D3 runner de `coyote run` | Claude Code headless en la máquina de la persona (ADR-0012) | Aplica el gate y reporta tokens y costo sin runtime nuevo | Confirmado en G4 |
 | D5 carriles de gasto | Tope mensual por proyecto en `project.yaml` y tope por corrida; la suscripción o la API key son de la persona | Gasto predecible y visible en el ledger | Confirmado en G4 |
-| D24 pipeline de impacto | Workflow en cada repo con token de solo lectura de los otros repos del producto (ADR-0013) | El reporte queda en el PR donde se decide el merge | G5 |
-| D25 autonomía en el piloto | `supervised` en los workstreams del piloto; `autonomous` solo después de medir planes supervisados | Un plan autónomo sin evidencia es gasto y riesgo sin control | G5 |
-| D26 tokens del pipeline | Un solo secreto de lectura (`COYOTE_PRODUCT_TOKEN`) mientras coyote y los repos sean del mismo dueño (hoy, tu cuenta); `COYOTE_TOOL_TOKEN` si pasan a dueños distintos; los equipos de CODEOWNERS se verifican solo con Members: read | Un token fino de GitHub cubre repos de un solo dueño | G5 |
-| D27 revisión sin CODEOWNERS | Sin CODEOWNERS, un cambio R2 o R3 lo aprueba cualquier persona que no abrió el PR, y el reporte pide definir dueños | Los tres repos del piloto no tienen CODEOWNERS | G5 |
-| D28 exigir el chequeo del PR | Bandera `features.pr_enforcement`, apagada mientras GitHub no pueda exigir chequeos en repos privados (plan de pago): `gate pr` avisa; prendida, bloquea hasta que aprueba un dueño | La función depende de algo externo que hoy no está | G5 |
-| D29 ejercicio de G5 | En ramas: nada se integra a `main` de coyote ni de los repos del producto; el pipeline se ensaya con PRs contra `coyote/pipeline` | Lo pediste: probar sin tocar producción | G5 |
+| D24 pipeline de impacto | Workflow en cada repo con token de solo lectura de los otros repos del producto (ADR-0013) | El reporte queda en el PR donde se decide el merge | Confirmado en G5 |
+| D25 autonomía en el piloto | `supervised` en los workstreams del piloto; `autonomous` solo después de medir planes supervisados | Un plan autónomo sin evidencia es gasto y riesgo sin control | Confirmado en G5 |
+| D26 tokens del pipeline | Un solo secreto de lectura (`COYOTE_PRODUCT_TOKEN`) mientras coyote y los repos sean del mismo dueño (hoy, tu cuenta); `COYOTE_TOOL_TOKEN` si pasan a dueños distintos; los equipos de CODEOWNERS se verifican solo con Members: read | Un token fino de GitHub cubre repos de un solo dueño | Confirmado en G5 |
+| D27 revisión sin CODEOWNERS | Sin CODEOWNERS, un cambio R2 o R3 lo aprueba cualquier persona que no abrió el PR, y el reporte pide definir dueños | Los tres repos del piloto no tienen CODEOWNERS | Confirmado en G5 |
+| D28 exigir el chequeo del PR | Bandera `features.pr_enforcement`, apagada mientras GitHub no pueda exigir chequeos en repos privados (plan de pago): `gate pr` avisa; prendida, bloquea hasta que aprueba un dueño | La función depende de algo externo que hoy no está | Confirmado en G5 |
+| D29 ejercicio de G5 | En ramas: nada se integra a `main` de coyote ni de los repos del producto; el pipeline se ensaya con PRs contra `coyote/pipeline` | Lo pediste: probar sin tocar producción | Confirmado en G5 |
 | D23 unidad de trabajo | Producto multi-repo: servicios, app y backoffice juntos, en un proyecto aparte que lee los tres (ADR-0011) | Un cambio en uno afecta a los otros (G3) | Confirmado en G4 |
 | D20 lectura sin aprobación | Lista cerrada de comandos de solo lectura en la herramienta; sin patrones propios del proyecto | Leer no tiene efectos y evita la fatiga | Confirmado en G3 |
 | D21 validez de una aprobación | Solo en la máquina donde se dio (firma con clave local), 24 h como máximo | Un registro copiado o fabricado no sirve | Confirmado en G3 |

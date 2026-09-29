@@ -2,7 +2,7 @@
 
 Coyote es una CLI en Go para trabajar con agentes de IA en proyectos de software sin perder el control: el contexto del proyecto vive versionado junto al código, cada acción queda registrada con su costo, el estándar del equipo se valida solo y ningún entregable sale firmado por una herramienta de IA.
 
-Estado: **v0.4.0** (aprobada en el gate G4); v0.5 en construcción: pipeline de impacto y revisión en cada PR, y motor de workstreams. Funciona sin red; para GitHub usa tus propias credenciales. El orden está en [docs/plan/EXECUTION_PLAN.md](docs/plan/EXECUTION_PLAN.md).
+Estado: **v0.5.0** (aprobada en el gate G5, en la rama `v0.5`): pipeline de impacto y revisión en cada PR, y motor de workstreams. `main` sigue en v0.4.0 hasta que el ejercicio en ramas termine. Funciona sin red; para GitHub usa tus propias credenciales. El orden está en [docs/plan/EXECUTION_PLAN.md](docs/plan/EXECUTION_PLAN.md).
 
 ## Qué resuelve
 
