@@ -43,7 +43,18 @@ func ReadGitleaks(r io.Reader) ([]Leak, int, error) {
 		RuleID    string `json:"RuleID"`
 		Commit    string `json:"Commit"`
 	}
-	if err := json.NewDecoder(r).Decode(&raw); err != nil {
+	dec := json.NewDecoder(r)
+	var first json.RawMessage
+	if err := dec.Decode(&first); err != nil {
+		return nil, 0, fmt.Errorf("el reporte de gitleaks no es un JSON válido: %w", err)
+	}
+	if t := strings.TrimSpace(string(first)); !strings.HasPrefix(t, "[") {
+		return nil, 0, fmt.Errorf("el reporte de gitleaks no es una lista de hallazgos")
+	}
+	if _, err := dec.Token(); err != io.EOF {
+		return nil, 0, fmt.Errorf("el reporte de gitleaks tiene datos de más")
+	}
+	if err := json.Unmarshal(first, &raw); err != nil {
 		return nil, 0, fmt.Errorf("el reporte de gitleaks no es un JSON válido: %w", err)
 	}
 	out := make([]Leak, 0, min(len(raw), maxLeaks))

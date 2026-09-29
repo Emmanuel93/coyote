@@ -28,6 +28,7 @@ type Rule struct {
 var DefaultRules = []Rule{
 	{R3, []string{".github/workflows/**", ".github/actions/**", ".gitlab-ci.yml", "CODEOWNERS", ".github/CODEOWNERS", "docs/CODEOWNERS"}, "el pipeline o quién revisa"},
 	{R3, []string{".gitattributes", "**/.gitattributes", ".gitmodules"}, "cómo git lee los archivos"},
+	{R3, []string{".gitleaks.toml", "**/.gitleaks.toml", ".gitleaksignore", "**/.gitleaksignore"}, "la configuración de gitleaks"},
 	{R3, []string{"**/migrations/**", "**/migration/**", "**/db/changelog/**", "**/flyway/**", "**/*.sql"}, "el esquema de datos"},
 	{R3, []string{"**/auth/**", "**/security/**", "**/crypto/**"}, "autenticación o seguridad"},
 	{R3, []string{"**/*.tf", "**/*.tf.json", "**/*.tfvars", "**/*.tfvars.json", "**/terragrunt.hcl", "**/.terraform.lock.hcl",

@@ -34,6 +34,28 @@ func TestGitHubWorkflow(t *testing.T) {
 	if strings.Contains(wf, "pull_request_review") || strings.Contains(wf, "  pull_request:") || strings.Count(wf, "secrets.") != 5 {
 		t.Errorf("solo pull_request_target, y los secretos solo en los checkouts y en la verificación de equipos:\n%s", wf)
 	}
+	if !strings.Contains(wf, "types: [opened, synchronize, reopened, ready_for_review, edited]") || strings.Contains(wf, "gitleaks") {
+		t.Errorf("cambiar la base vuelve a correr el chequeo; sin la bandera no hay paso de gitleaks:\n%s", wf)
+	}
+	// Con gitleaks: YAML válido, sin atributos del repo y los dos reportes.
+	g := o
+	g.Gitleaks = true
+	wf, err = GitHubWorkflow(g)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := yaml.Unmarshal([]byte(wf), &doc); err != nil {
+		t.Fatalf("YAML inválido con gitleaks: %v\n%s", err, wf)
+	}
+	for _, want := range []string{
+		"GIT_ATTR_SOURCE: " + emptyTree, "--remerge-diff --no-renames $BASE..$HEAD", "commit-tree \"$HEAD^{tree}\" -p \"$mb\"",
+		"--ignore-gitleaks-allow", "--redact", gitleaksSHA256,
+		`--gitleaks "$RUNNER_TEMP/gitleaks.json" --gitleaks-net "$RUNNER_TEMP/gitleaks-net.json"`,
+	} {
+		if !strings.Contains(wf, want) {
+			t.Errorf("falta %q:\n%s", want, wf)
+		}
+	}
 	// Nada sin validar entra al YAML ni al shell.
 	bad := []CIOptions{o, o, o, o, o, o, o}
 	bad[0].Self.Name = "x${{ secrets.X }}"

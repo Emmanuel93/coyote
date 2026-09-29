@@ -286,6 +286,19 @@ func TestGatePRConGitleaks(t *testing.T) {
 		t.Fatalf("el reporte no muestra el valor:\n%s", r.stdout)
 	}
 	must(t, run(t, base, "", "gate", "pr", "--repo", "servicios="+svc, "--self", "servicios", "--base", sha, "--head", sha, "--event", "", "--gitleaks", report, "--policy", "fail"), 1, "fail espera a un dueño")
+	// El diff neto solo suma lo que el escaneo de commits no vio.
+	netReport := filepath.Join(base, "gitleaks-net.json")
+	write(t, base, "gitleaks-net.json", `[{"RuleID":"generic-api-key","StartLine":12,"File":"services/pedidos-service/src/main/resources/application.yml","Commit":"abc"},`+
+		`{"RuleID":"github-pat","StartLine":3,"File":"conf/lavado.txt","Commit":"abc"}]`)
+	r = run(t, base, "", "gate", "pr", "--repo", "servicios="+svc, "--self", "servicios", "--base", sha, "--head", sha, "--event", "", "--gitleaks", report, "--gitleaks-net", netReport)
+	must(t, r, 0, "gate pr con los dos reportes")
+	if !strings.Contains(r.stdout, "2 hallazgos de gitleaks") || !strings.Contains(r.stdout, "conf/lavado.txt") || !strings.Contains(r.stdout, "diff del PR") {
+		t.Errorf("el diff neto suma lo nuevo una sola vez:\n%s", r.stdout)
+	}
+	write(t, base, "gitleaks-net.json", "[] []")
+	if r = run(t, base, "", "gate", "pr", "--repo", "servicios="+svc, "--self", "servicios", "--base", sha, "--head", sha, "--event", "", "--gitleaks", report, "--gitleaks-net", netReport); r.code == 0 {
+		t.Fatalf("un reporte neto inválido falla cerrado:\n%s", r.stdout)
+	}
 	// Sin reporte no hay revisión: falla cerrado.
 	r = run(t, base, "", "gate", "pr", "--repo", "servicios="+svc, "--self", "servicios", "--base", sha, "--head", sha, "--event", "", "--gitleaks", filepath.Join(base, "no-existe.json"))
 	if r.code == 0 || !strings.Contains(r.stderr, "no puedo leer el reporte de gitleaks") {
@@ -333,21 +346,52 @@ func TestGitleaksDeVerdad(t *testing.T) {
 	write(t, svc, ".gitleaksignore", "x:conf/app.txt:github-pat:1\n")
 	git(t, svc, "add", "-A")
 	git(t, svc, "commit", "-qm", "chore: se exenta")
+	// Lavado por rename: se agrega en una ruta que gitleaks ignora y se mueve.
+	write(t, svc, "x/node_modules/p.txt", "token = \""+tok("Rt5Yu7Io9Pa1")+"\"\n")
+	git(t, svc, "add", "-A")
+	git(t, svc, "commit", "-qm", "chore: dependencia")
+	git(t, svc, "mv", "x/node_modules/p.txt", "conf/lavado.txt")
+	git(t, svc, "commit", "-qm", "chore: mueve")
+	// Un .gitattributes del PR que marca el archivo como binario no lo esconde.
+	write(t, svc, ".gitattributes", "*.dat binary\n")
+	write(t, svc, "conf/claves.dat", "token = \""+tok("Qa2Ws4Ed6Rf8")+"\"\n")
+	git(t, svc, "add", "-A")
+	git(t, svc, "commit", "-qm", "chore: datos")
+	// Un secreto que entra al resolver un merge.
+	git(t, svc, "checkout", "-q", "-b", "lado", baseSHA)
+	write(t, svc, "conf/lado.txt", "lado\n")
+	git(t, svc, "add", "-A")
+	git(t, svc, "commit", "-qm", "chore: lado")
+	git(t, svc, "checkout", "-q", "-")
+	git(t, svc, "merge", "-q", "--no-ff", "--no-commit", "lado")
+	write(t, svc, "conf/merge.txt", "token = \""+tok("Mn3Bv5Cx7Zl9")+"\"\n")
+	git(t, svc, "add", "-A")
+	git(t, svc, "commit", "-qm", "merge lado")
 	headSHA := strings.TrimSpace(git(t, svc, "rev-parse", "HEAD"))
 
 	script := filepath.Join(base, "gitleaks.sh")
 	write(t, base, "gitleaks.sh", install.GitleaksScript("servicios"))
 	cmd := exec.Command("bash", script)
-	cmd.Env = append(os.Environ(), "RUNNER_TEMP="+tmp, "GITHUB_WORKSPACE="+ws, "BASE="+baseSHA, "HEAD="+headSHA)
+	cmd.Env = append(os.Environ(), "RUNNER_TEMP="+tmp, "GITHUB_WORKSPACE="+ws, "BASE="+baseSHA, "HEAD="+headSHA, "GIT_ATTR_SOURCE=4b825dc642cb6eb9a060e54bf8d69288fbee4904")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("el paso de gitleaks falló: %v\n%s", err, out)
 	}
-	r := run(t, base, "", "gate", "pr", "--repo", "servicios="+svc, "--self", "servicios", "--base", baseSHA, "--head", headSHA, "--event", "", "--gitleaks", filepath.Join(tmp, "gitleaks.json"))
+	r := run(t, base, "", "gate", "pr", "--repo", "servicios="+svc, "--self", "servicios", "--base", baseSHA, "--head", headSHA, "--event", "",
+		"--gitleaks", filepath.Join(tmp, "gitleaks.json"), "--gitleaks-net", filepath.Join(tmp, "gitleaks-net.json"))
 	must(t, r, 0, "gate pr")
 	section := r.stdout[strings.Index(r.stdout, "**gitleaks.**"):]
 	section = section[:strings.Index(section, "\n\n**")]
-	if !strings.Contains(section, "2 hallazgos en los commits del PR") || !strings.Contains(section, "conf/app.txt") || !strings.Contains(section, "conf/otro.txt") || strings.Contains(section, "fixtures/f.txt") {
-		t.Fatalf("la configuración del PR no lo apaga y la de la base sí cuenta:\n%s", section)
+	for _, want := range []string{"conf/app.txt", "conf/otro.txt", "conf/lavado.txt", "conf/merge.txt", "conf/claves.dat"} {
+		if !strings.Contains(section, want) {
+			t.Errorf("gitleaks no vio %s (config del PR, gitleaks:allow, rename, merge o atributos):\n%s", want, section)
+		}
+	}
+	if strings.Contains(section, "fixtures/f.txt") {
+		t.Errorf("la configuración de la base cuenta:\n%s", section)
+	}
+	// Cambiar la configuración de gitleaks es R3 por su ruta.
+	if !strings.Contains(r.stdout, "la configuración de gitleaks") {
+		t.Errorf("la configuración de gitleaks es R3:\n%s", r.stdout)
 	}
 	if strings.Contains(r.stdout, "aB3dE5") || strings.Contains(readFile(t, filepath.Join(tmp, "gitleaks.json")), "aB3dE5") {
 		t.Fatal("ningún valor en el reporte")

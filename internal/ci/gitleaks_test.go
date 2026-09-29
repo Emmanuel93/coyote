@@ -23,7 +23,7 @@ func TestReporteDeGitleaks(t *testing.T) {
 	if strings.Contains(fmt.Sprintf("%+v", leaks), "VALORVISIBLE") {
 		t.Fatal("el valor nunca se lee")
 	}
-	for _, bad := range []string{"", "{}", `[{"RuleID":"x"}]`, `[{"File":"a"}]`, "no es json"} {
+	for _, bad := range []string{"", "{}", "null", `"[]"`, "[] []", "[]]", "[]x", `[{"RuleID":"x"}]`, `[{"File":"a"}]`, "no es json"} {
 		if _, _, err := ReadGitleaks(strings.NewReader(bad)); err == nil {
 			t.Errorf("%q debió fallar", bad)
 		}

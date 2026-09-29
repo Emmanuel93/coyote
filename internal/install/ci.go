@@ -42,17 +42,23 @@ type CIOptions struct {
 // gitleaks fijado por versión y hash: subirlo es un cambio de coyote con su
 // prueba (ADR-0021). El hash es el del tarball de Linux x64 del release.
 const (
+	emptyTree       = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 	GitleaksVersion = "8.30.1"
 	gitleaksURL     = "https://github.com/gitleaks/gitleaks/releases/download/v" + GitleaksVersion + "/gitleaks_" + GitleaksVersion + "_linux_x64.tar.gz"
 	gitleaksSHA256  = "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
 )
 
-// GitleaksScript es el paso que corre gitleaks sobre los commits del PR. El
-// repo del PR se lee por su carpeta .git: gitleaks busca .gitleaksignore en
-// la carpeta que escanea y en un árbol de trabajo lo leería del propio PR.
-// La configuración y las excepciones salen de la rama base, los
-// gitleaks:allow del PR no cuentan y un error de git hace fallar el paso:
-// gitleaks sale con 0 aunque no haya podido leer los commits.
+// GitleaksScript es el paso que corre gitleaks sobre el PR (ADR-0021):
+//   - dos escaneos: los commits del PR (con --remerge-diff, para ver lo que
+//     entra al resolver un merge) y el diff neto del PR como un commit aparte,
+//     escrito fuera del clon, que ve lo que se integra aunque llegue por un
+//     rename o por un archivo que fue binario en un commit intermedio;
+//   - el repo se lee por su carpeta .git: gitleaks busca .gitleaksignore en
+//     la carpeta que escanea, y en el árbol de trabajo sería el del PR;
+//   - la configuración y las excepciones salen de la rama base, y los
+//     gitleaks:allow del PR no cuentan;
+//   - gitleaks sale con 0 aunque git falle: un envoltorio de git deja el error
+//     en su log y el paso falla ante cualquier error.
 func GitleaksScript(self string) string {
 	return `set -eu
 cd "$RUNNER_TEMP"
@@ -62,17 +68,30 @@ tar -xzf gitleaks.tgz gitleaks
 repo="$GITHUB_WORKSPACE/repos/` + self + `"
 git -C "$repo" cat-file -e "$BASE^{commit}"
 git -C "$repo" cat-file -e "$HEAD^{commit}"
-mkdir -p gitleaks-base
-if ! git -C "$repo" show "$BASE:.gitleaks.toml" > gitleaks-base/gitleaks.toml 2>/dev/null; then
+mkdir -p gitleaks-base gitshim net-objects
+if git -C "$repo" cat-file -e "$BASE:.gitleaks.toml" 2>/dev/null; then
+  git -C "$repo" show "$BASE:.gitleaks.toml" > gitleaks-base/gitleaks.toml
+else
   printf '[extend]\nuseDefault = true\n' > gitleaks-base/gitleaks.toml
 fi
-git -C "$repo" show "$BASE:.gitleaksignore" > gitleaks-base/.gitleaksignore 2>/dev/null || rm -f gitleaks-base/.gitleaksignore
+if git -C "$repo" cat-file -e "$BASE:.gitleaksignore" 2>/dev/null; then
+  git -C "$repo" show "$BASE:.gitleaksignore" > gitleaks-base/.gitleaksignore
+fi
+printf '#!/bin/sh\n"%s" "$@"; rc=$?\n[ "$rc" -eq 0 ] || echo "git terminó con estado $rc" >&2\nexit "$rc"\n' "$(command -v git)" > gitshim/git
+chmod +x gitshim/git
+mb=$(git -C "$repo" merge-base "$BASE" "$HEAD")
+net=$(GIT_OBJECT_DIRECTORY="$RUNNER_TEMP/net-objects" GIT_ALTERNATE_OBJECT_DIRECTORIES="$repo/.git/objects" \
+  git -C "$repo" commit-tree "$HEAD^{tree}" -p "$mb" -m "diff del PR" </dev/null)
+flags="--config gitleaks-base/gitleaks.toml --gitleaks-ignore-path gitleaks-base --ignore-gitleaks-allow --redact --no-banner --no-color --report-format json --exit-code 0"
 status=0
-./gitleaks git "$repo/.git" --log-opts="$BASE..$HEAD" --config gitleaks-base/gitleaks.toml --gitleaks-ignore-path gitleaks-base \
-  --ignore-gitleaks-allow --redact --no-banner --no-color --report-format json --report-path gitleaks.json --exit-code 0 2> gitleaks.log || status=$?
-cat gitleaks.log >&2
-if [ "$status" -ne 0 ] || grep -Eq '^[^ ]+ (ERR|FTL) ' gitleaks.log; then
-  echo "gitleaks no pudo revisar los commits del PR" >&2
+PATH="$RUNNER_TEMP/gitshim:$PATH" ./gitleaks git "$repo/.git" --log-opts="--remerge-diff --no-renames $BASE..$HEAD" $flags \
+  --report-path gitleaks.json 2> gitleaks.log || status=$?
+PATH="$RUNNER_TEMP/gitshim:$PATH" GIT_OBJECT_DIRECTORY="$RUNNER_TEMP/net-objects" GIT_ALTERNATE_OBJECT_DIRECTORIES="$repo/.git/objects" \
+  ./gitleaks git "$repo/.git" --log-opts="--no-renames $mb..$net" $flags --report-path gitleaks-net.json 2>> gitleaks.log || status=$?
+sed 's/\x1b\[[0-9;]*m//g' gitleaks.log > gitleaks.txt
+cat gitleaks.txt >&2
+if [ "$status" -ne 0 ] || grep -Eq '^[^ ]+ (ERR|FTL) ' gitleaks.txt; then
+  echo "gitleaks no pudo revisar el PR" >&2
   exit 1
 fi
 `
@@ -136,7 +155,8 @@ func GitHubWorkflow(o CIOptions) (string, error) {
 	w("name: coyote gate pr")
 	w("on:")
 	w("  pull_request_target:")
-	w("    types: [opened, synchronize, reopened, ready_for_review]")
+	w("    # edited: cambiar la rama base de un PR vuelve a correr el chequeo.")
+	w("    types: [opened, synchronize, reopened, ready_for_review, edited]")
 	w("permissions:")
 	w("  contents: read")
 	w("  pull-requests: write")
@@ -186,10 +206,12 @@ func GitHubWorkflow(o CIOptions) (string, error) {
 	w("          CGO_ENABLED: \"0\"")
 	w("        run: go build -trimpath -o \"$RUNNER_TEMP/coyote\" ./cmd/coyote")
 	if o.Gitleaks {
-		w("      - name: gitleaks %s en los commits del PR, con la configuración de la rama base", GitleaksVersion)
+		w("      - name: gitleaks %s en el PR, con la configuración de la rama base", GitleaksVersion)
 		w("        env:")
 		w("          BASE: ${{ github.event.pull_request.base.sha }}")
 		w("          HEAD: ${{ github.event.pull_request.head.sha }}")
+		w("          # Sin atributos de git: un .gitattributes no esconde un archivo como binario.")
+		w("          GIT_ATTR_SOURCE: %s", emptyTree)
 		w("        run: |")
 		for _, line := range strings.Split(strings.TrimSuffix(GitleaksScript(o.Self.Name), "\n"), "\n") {
 			if line == "" {
@@ -213,7 +235,7 @@ func GitHubWorkflow(o CIOptions) (string, error) {
 		w("          --risk '%s'", r)
 	}
 	if o.Gitleaks {
-		w("          --gitleaks \"$RUNNER_TEMP/gitleaks.json\"")
+		w("          --gitleaks \"$RUNNER_TEMP/gitleaks.json\" --gitleaks-net \"$RUNNER_TEMP/gitleaks-net.json\"")
 	}
 	w("          --self %s --policy %s --comment", o.Self.Name, o.Policy)
 	return b.String(), nil

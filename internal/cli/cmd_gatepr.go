@@ -39,6 +39,7 @@ func gatePR(a *app, args []string) error {
 	summary := fs.String("summary", os.Getenv("GITHUB_STEP_SUMMARY"), "archivo del resumen del job")
 	planFile := fs.String("plan", "", "plan de Terraform en JSON (terraform show -json) que generó el pipeline")
 	leaksFile := fs.String("gitleaks", "", "reporte JSON de gitleaks sobre los commits del PR (ADR-0021)")
+	leaksNet := fs.String("gitleaks-net", "", "reporte JSON de gitleaks sobre el diff neto del PR")
 	if _, err := parseArgs(fs, args); err != nil {
 		return err
 	}
@@ -94,14 +95,39 @@ func gatePR(a *app, args []string) error {
 			in.PlanWhy += "; " + strings.Join(r, ", ")
 		}
 	}
-	if *leaksFile != "" {
+	if *leaksFile != "" || *leaksNet != "" {
 		// Sin reporte no hay revisión: el paso de gitleaks falló o no corrió.
-		data, err := fsx.ReadCapped(*leaksFile, 64<<20)
-		if err != nil {
-			return fail(1, "no puedo leer el reporte de gitleaks: %v", err)
+		read := func(p string) ([]ci.Leak, int, error) {
+			if p == "" {
+				return nil, 0, nil
+			}
+			data, err := fsx.ReadCapped(p, 64<<20)
+			if err != nil {
+				return nil, 0, fmt.Errorf("no puedo leer el reporte de gitleaks: %v", err)
+			}
+			return ci.ReadGitleaks(bytes.NewReader(data))
 		}
-		if in.Leaks, in.LeaksTotal, err = ci.ReadGitleaks(bytes.NewReader(data)); err != nil {
+		hist, histTotal, err := read(*leaksFile)
+		if err != nil {
 			return fail(1, "%v", err)
+		}
+		net, _, err := read(*leaksNet)
+		if err != nil {
+			return fail(1, "%v", err)
+		}
+		// El diff neto repite lo que ya vio el escaneo de los commits; solo
+		// suma lo que llegó por otro camino (un merge, un rename).
+		inHist := map[string]bool{}
+		for _, l := range hist {
+			inHist[l.File+"\x00"+l.Rule] = true
+		}
+		in.Leaks, in.LeaksTotal = hist, histTotal
+		for _, l := range net {
+			if !inHist[l.File+"\x00"+l.Rule] {
+				l.Commit = "diff del PR"
+				in.Leaks = append(in.Leaks, l)
+				in.LeaksTotal++
+			}
 		}
 		seenLeak := map[string]bool{}
 		for _, l := range in.Leaks {
