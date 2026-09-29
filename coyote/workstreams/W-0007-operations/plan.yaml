@@ -1,0 +1,18 @@
+# Plan de v0.7, construido fuera del motor: los pasos los ejecuta la persona con su asistente, no coyote run; por eso no llevan max_usd.
+id: W-0007
+title: v0.7 hub de la organización, web v1, SLOs y alertas como código y gitleaks
+owner: "@eramirezhdez"
+autonomy: manual
+risk: R3
+reasoning: docs/plan/EXECUTION_PLAN.md#v07-operación-y-visibilidad--razonamiento
+authorized_by: coyote/approvals/P-0006.json
+gate: G7                    # crear el hub de la organización y llevar las alertas a Faro
+steps:
+  - { id: T45, does: "plan razonado y ADR-0018 a ADR-0021", agent: coyote-sr-solution-architect, output: [docs/plan/EXECUTION_PLAN.md, coyote/decisions/] }
+  - { id: T46, does: hub de la organización, agent: coyote-architect, output: [internal/hub, internal/standards] }
+  - { id: T47, does: web v1 y visibilidad de costos, agent: coyote-dev, output: internal/web }
+  - { id: T48, does: SLOs y alertas como código, agent: coyote-sre, output: [internal/slo, internal/ci, internal/infra] }
+  - { id: T49, does: gitleaks en el pipeline, agent: coyote-devsecops, output: [internal/install, internal/ci] }
+  - { id: T50, does: piloto en solo lectura, agent: persona, output: reportes del piloto, gate: human }
+  - { id: T51, does: verificación y reporte de G7, agent: coyote-reviewer, output: docs/releases/v0.7.0.md, gate: human }
+close: { summary: close.md }

@@ -1,6 +1,6 @@
 # Plan de ejecución — Coyote
 
-Estado: v0.5.0 aprobada en G5 (P-0005), en la rama `v0.5`; `main` sigue en v0.4.0 · v0.6 en construcción en la rama `v0.6` · actualizado 2026-09-29
+Estado: v0.6.0 aprobada en G6 (P-0006), en la rama `v0.6`; `main` sigue en v0.4.0 · v0.7 en construcción en la rama `v0.7` · actualizado 2026-09-29
 
 Este plan ejecuta la propuesta aprobada ("Plan de construcción — Framework Coyote"). Cada release se razona con la plantilla de cinco partes que usarán los agentes de Coyote (problema, restricciones, opciones, decisión, riesgos) y cierra con un gate humano: nada se etiqueta, se publica ni toca otros proyectos sin autorización explícita.
 
@@ -439,12 +439,121 @@ G6 autorizaría:
 3. Proponer `coyote/infra.yaml` a `fintech-infraestructure` en una rama, cuando el repo tenga commits.
 4. Arrancar v0.7: SRE, web v1 (D10) y hub (D12).
 
-## v0.7 a v1.0
+## v0.7 operación y visibilidad — razonamiento
 
-- **v0.7, operación y visibilidad.** SLOs y alertas como código, con Faro como primer destino; web v1 con workstreams, aprobaciones, presupuesto y la visibilidad de costos (D10); el hub de la organización (D12); gitleaks como opción del pipeline.
-- **v1.0.** Endurecimiento, auditoría y documentación.
+**Problema.**
+- Cada proyecto extiende `coyote:default` por su cuenta. El estándar de la organización, sus admins, su presupuesto total y la lista de sus proyectos no viven en ningún lado.
+- `hub:` acepta una ruta local y se lee del árbol de trabajo. Un cambio sin commit en esa carpeta, de una persona o de un agente, cambiaría el estándar de todos los proyectos sin revisión.
+- La web solo muestra costos, y muestra los de todas las personas a quien la abra. Los workstreams, la cola del gate, las aprobaciones vigentes y el presupuesto del mes solo se ven en la terminal, comando por comando.
+- `coyote-sre` entrega un `slo.yaml` que nada valida ni convierte en alertas. Un SLO relajado en un PR (99.9 a 99) pasa como cualquier cambio de YAML.
+- El escáner de coyote solo reconoce formas de alta confianza (ADR-0016). gitleaks quedó para v0.7 como opción del pipeline.
 
-Cada una recibirá su razonamiento completo al cerrar la anterior, con lo aprendido en su gate; así el plan no fija hoy lo que conviene decidir con evidencia.
+**Lo que mostró la lectura (solo lectura, sin abrir ningún `.env`).**
+- `fintech-producto` tiene `hub: ""` y un tope de $30 al mes. Ningún proyecto declara admins.
+- Faro (`observability-platform`):
+  - no es un repo de git;
+  - Mimir 2.14 monolítico, de un solo tenant, con el ruler y el Alertmanager en `filesystem` dentro de su volumen: las reglas se cargan por la API (`mimirtool`), no como archivos;
+  - `-target=all` no arranca el Alertmanager y el ruler no tiene `alertmanager_url`: hoy una alerta se evaluaría sin avisar a nadie;
+  - el gateway expone sus métricas en `:8888`, pero nada las recoge todavía ("Mimir scrapea esto en F3"): los SLIs de ingesta no existen en Mimir;
+  - su documento define cinco SLIs:
+    - dos son proporciones con presupuesto de error: disponibilidad de ingesta al 99.9 % y pérdida de telemetría bajo 0.1 %;
+    - la latencia de ingesta a consulta es un umbral de p95;
+    - la saturación de la cola y los errores de escritura al storage son alertas de umbral, no SLOs.
+- gitleaks v8.30.1 (marzo de 2026) tiene el subcomando `git` con `--log-opts`, `--redact` y reporte JSON.
+  - Lee `.gitleaks.toml`, `.gitleaksignore` y los comentarios `gitleaks:allow` del repo que escanea: en un PR, el autor podría apagarlo.
+  - Su acción de GitHub pide licencia en cuentas de organización; el binario es MIT.
+
+**Restricciones.**
+- Sin servidores (D2): el hub es un repo de git y la web sigue local, de solo lectura y en loopback.
+- Sin red ni dependencias nuevas en la herramienta.
+  - gitleaks corre en el pipeline, fijado por hash.
+  - promtool solo verifica, en el entorno de construcción, lo que genera coyote.
+- coyote no carga reglas en Faro ni habla con su API: genera y revisa archivos. Cargarlos lo hacen la persona o un pipeline, como el `apply` de ADR-0017.
+- Nada se escribe en Faro ni en los repos del producto antes de G7. C1 y R15 como siempre.
+
+**Opciones para el hub.**
+- A. Ruta local leída del árbol de trabajo, como hoy: lo que no tiene commit se aplica.
+- B. Un repo coyote de tipo `hub`, leído en un commit con git de plomería (la rama `main` o un `ref` fijado). Lleva `hub.yaml` (organización, admins, presupuesto y proyectos) y la capa del estándar.
+- C. Un hub como servicio con API propia. Choca con D2.
+
+**Opciones para la web y D10.**
+- A. Filtrar por identidad: cada persona ve lo suyo y los totales; los admins ven todo.
+- B. Sacar del ledger el costo por persona y dejar en git solo agregados. Pierde la trazabilidad que pide A3.
+- C. Cifrar el costo por persona para los admins. Son llaves que operar para un dato que ya está en tu git.
+
+**Opciones para SLOs y alertas.**
+- A. Un generador externo (Sloth, Pyrra) u OpenSLO con su herramienta. Son más maduros, pero son binarios o CRDs y no saben de gates ni de PRs.
+- B. Un formato propio y chico, cercano a esos, con un generador en Go del método del libro de SRE de Google: varias ventanas y varias tasas de consumo del presupuesto.
+- C. Alertas de Grafana hechas en su interfaz. No son código ni pasan por revisión.
+
+**Decisión.**
+- **Hub: B** (ADR-0018).
+  - `coyote hub init` crea el repo de la organización con `coyote/hub.yaml` v1, la capa del estándar y la carpeta de dominios (R4).
+  - `hub:` en `project.yaml` acepta `{path, ref}`; una cadena sigue valiendo como ruta.
+  - Todo lo del hub se lee del commit de `ref` con git de plomería, nunca del árbol de trabajo. `standards status`, `doctor` y `hub status` dicen qué commit rige.
+  - `hub.yaml` declara los admins, el tope mensual de la organización y sus proyectos, con la ruta de su clon para la vista de admins.
+- **Web v1: A** (ADR-0019).
+  - Vistas:
+    - costos (D10);
+    - presupuesto del mes con su proyección;
+    - workstreams con el estado de cada paso;
+    - cola del gate, aprobaciones vigentes y gates de release;
+    - SLOs;
+    - la organización, solo para admins.
+  - D10 es visibilidad por defecto, no control de acceso: el ledger está en git y quien lee el repo lo lee. La web lo dice.
+  - Sigue de solo lectura: aprobar se hace en la terminal. Un botón de aprobar abriría la puerta a CSRF y se saltaría la verificación de que decide una persona.
+- **SLOs: B** (ADR-0020).
+  - **Formato.** `coyote/slo/<servicio>.yaml` v1 declara:
+    - SLOs de proporción: eventos malos sobre totales, con `{{.window}}`;
+    - objetivo, periodo (30 o 28 días) y etiquetas;
+    - alertas `page` y `ticket`.
+  - **Reglas.** `coyote slo rules` genera un archivo de reglas de Prometheus por servicio en `coyote/slo/prometheus/`. Es determinista:
+    - el SLI en 5m, 30m, 1h, 2h, 6h, 1d, 3d y el periodo;
+    - el objetivo y el presupuesto de error;
+    - alerta page: consumo de 14.4 en 1h y 5m, o de 6 en 6h y 30m;
+    - alerta ticket: consumo de 3 en 1d y 2h, o de 1 en 3d y 6h;
+    - los factores se recalculan si el periodo no es de 30 días.
+  - **Revisión.** `coyote slo check` valida el archivo, exige que lo generado esté vigente y que toda alerta page enlace un runbook que exista. Una regla MUST nueva, R19, lo usa en el lint.
+  - **PR.** `gate pr` compara el SLO de la base con el del PR. Es R3 si relaja: baja el objetivo, apaga la alerta page, quita un SLO o cambia qué cuenta como error. Lo demás es R2.
+  - **Gate.** Cargar reglas o silenciar alertas es un comando de infraestructura con efectos: `mimirtool` y `cortextool` (`rules load|sync|delete`, `alertmanager load|delete`) y `amtool` (`silence add|expire|import`).
+- **gitleaks: opción del pipeline** (ADR-0021). Con `features.gitleaks`, `install --ci github` agrega un paso que:
+  - descarga gitleaks v8.30.1 y verifica su sha256 contra el que trae coyote;
+  - escanea solo los commits del PR (`--log-opts base..head`), con `--redact`;
+  - usa la configuración y el `.gitleaksignore` de la rama base e ignora los `gitleaks:allow` del PR;
+  - pasa su reporte a `gate pr --gitleaks`, que suma cada hallazgo como R3 con archivo, línea y regla, nunca el valor.
+
+**Riesgos.**
+- Un hub mal cambiado afecta a todos los proyectos. Mitigación: solo rige lo que tiene commit en `ref`, el commit que rige se ve en `status` y en el lint, y el hub se revisa por PR con sus dueños.
+- D10 se puede tomar por privacidad real. Mitigación: la web y el ADR dicen que es visibilidad por defecto; el control de acceso real pediría un servidor (D2).
+- Un error en la aritmética del generador da alertas que no disparan o que disparan de más. Mitigación: pruebas con valores conocidos y `promtool test rules` con series sintéticas en el entorno de construcción.
+- coyote no valida PromQL completo. Mitigación: revisa la forma (ventana, paréntesis, comillas) y recomienda `promtool check rules` en la CI de quien carga las reglas.
+- A Faro le faltan piezas para que una alerta avise: recoger las métricas del gateway y el Alertmanager. Mitigación: el piloto las lista con su cambio propuesto y G7 decide.
+- gitleaks puede cambiar su CLI o sus reglas. Mitigación: la versión va fijada por hash y subirla es un cambio de coyote con su prueba.
+- Son cuatro frentes en un release. Mitigación: el hub va primero porque la web lo usa. Si el tiempo aprieta, se corta gitleaks, que no bloquea a los otros.
+
+### Tareas de v0.7
+
+| ID | Tarea | Razonamiento | Aceptación | Estado |
+| --- | --- | --- | --- | --- |
+| T45 | Plan y ADR-0018 a ADR-0021 | Cuatro frentes; se razonan antes del código | Esta sección, los ADRs y W-0007 | Hecho |
+| T46 | Hub de la organización | La web y el estándar de la organización dependen de él | `hub init`; `hub:` con `path` y `ref` leídos con plomería; `hub.yaml` v1 validado; la capa del estándar desde el commit; `hub status` y `doctor` | Pendiente |
+| T47 | Web v1 y D10 | Ver sin abrir cinco comandos, sin exponer de más | Costos (D10), presupuesto, workstreams, gate y aprobaciones, SLOs y organización; solo lectura, loopback y sin JavaScript | Pendiente |
+| T48 | SLOs y alertas como código | Un SLO sin alertas generadas y revisadas es una promesa | `slo/*.yaml` v1, `slo rules`, `slo check` y R19; `gate pr` con SLOs relajados; comandos de alertas en el gate; `promtool check` y `test` en el entorno de construcción | Pendiente |
+| T49 | gitleaks en el pipeline | Más patrones en el PR sin que el autor lo pueda apagar | `features.gitleaks`, paso fijado por hash con la configuración de la base y `gate pr --gitleaks`; probado con gitleaks real | Pendiente |
+| T50 | Piloto en solo lectura | Evidencia sobre tus proyectos antes de G7 | Hub propuesto para `kredius`, fuera de `Documents` hasta G7; la web v1 sobre el ledger del piloto; los SLOs de Faro con sus reglas y lo que le falta a Faro | Pendiente |
+| T51 | Verificación y G7 | Evidencia antes de crear el hub y tocar Faro | Pruebas, revisión adversarial y `docs/releases/v0.7.0.md` | Pendiente |
+
+G7 autorizaría:
+
+1. Etiquetar `v0.7.0` en su rama.
+2. Crear el hub `kredius`, en local y en GitHub (el push es tuyo), y apuntar `fintech-producto` a él en una rama `coyote/`.
+3. Llevar las alertas a Faro. Como Faro no es un repo, eliges entre inicializarlo con git y trabajar en una rama, o cargar las reglas con `mimirtool` sin cambiar sus archivos. También decides si se agregan la recolección de métricas del gateway y el Alertmanager.
+4. Prender `features.gitleaks` en el pipeline del producto, en la rama `coyote/pipeline`.
+5. Arrancar v1.0.
+
+## v1.0
+
+Endurecimiento, auditoría y documentación. Recibirá su razonamiento completo al cerrar v0.7, con lo aprendido en G7; así el plan no fija hoy lo que conviene decidir con evidencia.
 
 ## Supuestos sobre decisiones abiertas
 
@@ -455,8 +564,8 @@ Cada una recibirá su razonamiento completo al cerrar la anterior, con lo aprend
 | D4 embeddings | Ninguno en v0.2 (BM25 local); locales cuando lleguen | No sacar código a terceros sin autorización || Confirmado en G2 |
 | D6 aprobación R2–R3 | CLI con registro firmado en v0.3; pull request con `coyote gate pr` en CI después | La CLI funciona sin red; el PR agrega revisión de equipo | Confirmado en G3 |
 | D11 IDE del piloto | Claude Code | Es el de nivel 1 con hooks más completos | Confirmado en G3 |
-| D10 visibilidad de costos | Cada persona ve lo suyo, admins todo | Menor exposición por defecto | v0.7, con la web v1 (movida en G5 a v0.6; el corte de v0.6 la lleva a v0.7) |
-| D12 hub | `kredius`, sin crearlo hasta G5 | Aislamiento | v0.7, con el hub (movida en G5 a v0.6; el corte de v0.6 la lleva a v0.7) |
+| D10 visibilidad de costos | Cada persona ve lo suyo y los totales; los admins del hub o del proyecto ven todo. Es visibilidad por defecto, no control de acceso: el ledger está en git (ADR-0019) | Menor exposición por defecto | G7 |
+| D12 hub | `kredius`: un repo coyote de tipo `hub`, leído en un commit con git de plomería; se crea después de G7 (ADR-0018) | Aislamiento; solo rige lo que tiene commit | G7 |
 | D13 nombres de archivo | `README.coyote.md` y `CONTEXT.coyote.md` | Coherente con `README.md` y `AGENTS.md` | Confirmado en G1 |
 | D14 alcance de R15 | Commits, PRs, comentarios, docs, releases y autoría del commit | Es lo que pediste | Confirmado en G1 |
 | D15 web | Plantillas Go embebidas, solo lectura y solo en 127.0.0.1 | Un solo binario, sin superficie de red || Confirmado en G2 |
@@ -474,6 +583,9 @@ Cada una recibirá su razonamiento completo al cerrar la anterior, con lo aprend
 | D31 secretos del proyecto | Se tratan como credenciales: ningún agente los lee, ni con aprobación; `secrets list` da los nombres (ADR-0016) | Un agente que lee un secreto lo puede filtrar en lo que escribe | Confirmado en G6 |
 | D32 `apply` de infraestructura | Nunca lo corre un agente; un ambiente `reviewed` solo lo aplican la persona o un pipeline con revisor (ADR-0017) | Lo piden R13 y la definición de `coyote-infra` | Confirmado en G6 |
 | D33 corte de v0.6 | Seguridad (IDEs, secretos e infraestructura) en v0.6; SRE, web v1 y hub en v0.7 | Releases que un gate pueda verificar por sí solos | Confirmado en G6 |
+| D34 formato de SLOs | `coyote/slo/<servicio>.yaml` v1, propio y cercano a los formatos conocidos; reglas de Prometheus generadas por coyote y versionadas en `coyote/slo/prometheus/` (ADR-0020) | Un generador sin binarios externos que el gate y `gate pr` entienden | G7 |
+| D35 cargar alertas | Nunca un agente: la persona o un pipeline cargan las reglas en Faro (ADR-0020) | Una alerta cambiada en producción es un cambio de infraestructura | G7 |
+| D36 gitleaks | Opcional (`features.gitleaks`), fijado por hash, con la configuración de la rama base y su reporte en `gate pr` (ADR-0021) | Más patrones en el PR sin que el autor lo apague | G7 |
 | D23 unidad de trabajo | Producto multi-repo: servicios, app y backoffice juntos, en un proyecto aparte que lee los tres (ADR-0011) | Un cambio en uno afecta a los otros (G3) | Confirmado en G4 |
 | D20 lectura sin aprobación | Lista cerrada de comandos de solo lectura en la herramienta; sin patrones propios del proyecto | Leer no tiene efectos y evita la fatiga | Confirmado en G3 |
 | D21 validez de una aprobación | Solo en la máquina donde se dio (firma con clave local), 24 h como máximo | Un registro copiado o fabricado no sirve | Confirmado en G3 |
