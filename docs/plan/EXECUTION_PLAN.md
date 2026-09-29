@@ -430,7 +430,7 @@ G5 autorizó (P-0005), con el ejercicio en ramas:
 | T41 | Secretos y credenciales | Un agente no debe leer ni publicar un secreto | Archivos de secretos y comandos que imprimen credenciales, bloqueados siempre; `secrets list`; escáner en `commit`, lint (R18), `gate pr` y escrituras del agente; pruebas adversariales | Hecho |
 | T42 | Infraestructura como código | Ver qué hace un cambio de infraestructura antes de aplicarlo | `infra.yaml` v1, `infra check` y R13, `extract` para Terraform, `infra plan` y `gate pr --plan`; gate de comandos de infraestructura por ambiente | Hecho |
 | T43 | Piloto en solo lectura | Evidencia sobre tus repos antes de G6 | `infra.yaml` propuesto para `fintech-infraestructure`, con su `infra check`; inventario de archivos de secretos de los repos (nombres y conteos); el canario en tus IDEs, que corres tú | Hecho |
-| T44 | Verificación y G6 | Evidencia antes de activar el gate en otros IDEs y en la infraestructura | Pruebas, revisión adversarial y `docs/releases/v0.6.0.md` | Hecho: tres pasadas adversariales, todo lo encontrado corregido con prueba; G6 pendiente |
+| T44 | Verificación y G6 | Evidencia antes de activar el gate en otros IDEs y en la infraestructura | Pruebas, revisión adversarial y `docs/releases/v0.6.0.md` | Hecho: tres pasadas adversariales, todo lo encontrado corregido con prueba; G6 aprobado (P-0006) |
 
 G6 autorizaría:
 
@@ -470,10 +470,10 @@ Cada una recibirá su razonamiento completo al cerrar la anterior, con lo aprend
 | D27 revisión sin CODEOWNERS | Sin CODEOWNERS, un cambio R2 o R3 lo aprueba cualquier persona que no abrió el PR, y el reporte pide definir dueños | Los tres repos del piloto no tienen CODEOWNERS | Confirmado en G5 |
 | D28 exigir el chequeo del PR | Bandera `features.pr_enforcement`, apagada mientras GitHub no pueda exigir chequeos en repos privados (plan de pago): `gate pr` avisa; prendida, bloquea hasta que aprueba un dueño | La función depende de algo externo que hoy no está | Confirmado en G5 |
 | D29 ejercicio de G5 | En ramas: nada se integra a `main` de coyote ni de los repos del producto; el pipeline se ensaya con PRs contra `coyote/pipeline` | Lo pediste: probar sin tocar producción | Confirmado en G5 |
-| D30 IDEs del equipo | Adaptadores para Codex, Gemini CLI, Copilot, Windsurf/Devin Desktop y Devin CLI; el nivel de cada IDE se mide con el canario en la máquina de cada persona (ADR-0015) | Un nivel declarado no dice si el hook está prendido ni si la negación se respeta | G6 |
-| D31 secretos del proyecto | Se tratan como credenciales: ningún agente los lee, ni con aprobación; `secrets list` da los nombres (ADR-0016) | Un agente que lee un secreto lo puede filtrar en lo que escribe | G6 |
-| D32 `apply` de infraestructura | Nunca lo corre un agente; un ambiente `reviewed` solo lo aplican la persona o un pipeline con revisor (ADR-0017) | Lo piden R13 y la definición de `coyote-infra` | G6 |
-| D33 corte de v0.6 | Seguridad (IDEs, secretos e infraestructura) en v0.6; SRE, web v1 y hub en v0.7 | Releases que un gate pueda verificar por sí solos | G6 |
+| D30 IDEs del equipo | Adaptadores para Codex, Gemini CLI, Copilot, Windsurf/Devin Desktop y Devin CLI; el nivel de cada IDE se mide con el canario en la máquina de cada persona (ADR-0015) | Un nivel declarado no dice si el hook está prendido ni si la negación se respeta | Confirmado en G6 |
+| D31 secretos del proyecto | Se tratan como credenciales: ningún agente los lee, ni con aprobación; `secrets list` da los nombres (ADR-0016) | Un agente que lee un secreto lo puede filtrar en lo que escribe | Confirmado en G6 |
+| D32 `apply` de infraestructura | Nunca lo corre un agente; un ambiente `reviewed` solo lo aplican la persona o un pipeline con revisor (ADR-0017) | Lo piden R13 y la definición de `coyote-infra` | Confirmado en G6 |
+| D33 corte de v0.6 | Seguridad (IDEs, secretos e infraestructura) en v0.6; SRE, web v1 y hub en v0.7 | Releases que un gate pueda verificar por sí solos | Confirmado en G6 |
 | D23 unidad de trabajo | Producto multi-repo: servicios, app y backoffice juntos, en un proyecto aparte que lee los tres (ADR-0011) | Un cambio en uno afecta a los otros (G3) | Confirmado en G4 |
 | D20 lectura sin aprobación | Lista cerrada de comandos de solo lectura en la herramienta; sin patrones propios del proyecto | Leer no tiene efectos y evita la fatiga | Confirmado en G3 |
 | D21 validez de una aprobación | Solo en la máquina donde se dio (firma con clave local), 24 h como máximo | Un registro copiado o fabricado no sirve | Confirmado en G3 |

@@ -1,0 +1,26 @@
+{
+  "id": "P-0006",
+  "gate": "G6",
+  "release": "v0.6.0",
+  "workstream": "W-0006",
+  "decision": "approved",
+  "approver": "@eramirezhdez",
+  "date": "2026-09-29",
+  "reviewed_commit": "6f4d030",
+  "authorizes": [
+    "etiquetar v0.6.0 sobre la rama v0.6 de coyote; main queda en v0.4.0",
+    "aceptar ADR-0015, ADR-0016 y ADR-0017 y entregar los binarios",
+    "instalar el gate en los IDEs de la persona, en coyote y en el piloto, y medir su nivel con el canario; en los repos del producto, solo en ramas coyote/",
+    "confirmar D30, D31, D32 y D33",
+    "arrancar v0.7 en su propia rama: SRE, web v1 (D10) y hub (D12)"
+  ],
+  "conditions": [
+    "el ejercicio se hace en ramas: nada se integra a main de coyote ni de los repos del producto",
+    "el trabajo sobre los repos del producto va en ramas feature/ o coyote/, nunca en main",
+    "el push de las ramas y de la etiqueta, la instalación de los hooks y el canario los hace la persona",
+    "la propuesta de coyote/infra.yaml a fintech-infraestructure queda fuera de G6",
+    "los nombres de la organización y de sus repos no entran al código de la herramienta (C1)"
+  ],
+  "response": "aprobar v0.6.0 en su rama; gate en mis IDEs; arrancar v0.7 en su rama",
+  "evidence": "docs/releases/v0.6.0.md"
+}
