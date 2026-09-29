@@ -24,3 +24,4 @@
 2026-09-29T03:28Z|@eramirezhdez/coyote-devsecops|W-0006|coyote|note|gate|dec: el gate lee cada comando como lo correría el shell; los…|doc:CONTEXT.coyote.md|-|-|ok
 2026-09-29T03:28Z|@eramirezhdez/coyote-devsecops|W-0006|coyote|doc|gate|cómo lee el gate un comando, el lanzador que falla cerrado y…|-|-|-|ok
 2026-09-29T04:22Z|@eramirezhdez/coyote-devsecops|W-0006|coyote|fix|secrets|reglas por proyecto en cada ruta, cuerpo bajo un encabezado versionado, UTF-16…|-|-|-|ok
+2026-09-29T04:22Z|@eramirezhdez/coyote-devsecops|W-0006|coyote|fix|gate|eval, rg --iglob, listados hacia xargs, parches con ++, llaves bajo su…|-|-|-|ok

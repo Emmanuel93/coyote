@@ -7,8 +7,10 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
+	"github.com/Emmanuel93/coyote/internal/fsx"
 	"github.com/Emmanuel93/coyote/internal/infra"
 	"github.com/Emmanuel93/coyote/internal/secrets"
 )
@@ -357,37 +359,39 @@ func hard(format string, a ...any) *Hard { return &Hard{fmt.Sprintf(format, a...
 // shellProtected son textos que en un comando delatan que toca el gate o
 // credenciales, aunque el comando no se pueda analizar. cred marca lo que se
 // bloquea aun para leer: credenciales y la configuración de un IDE que puede
-// llevar tokens (el env de sus servidores MCP). Lo demás es la configuración
-// del gate, que un comando de solo lectura puede mirar. data marca las
-// claves que desarman el gate: cuentan también dentro de un dato (echo
-// '{"disableAllHooks": true}' > x.json).
+// llevar tokens (el env de sus servidores MCP); de esta última, cfg, un
+// programa que solo ve nombres (ls, stat) puede mirar el nombre. Lo demás es
+// la configuración del gate, que un comando de solo lectura puede mirar.
+// data marca las claves que desarman el gate: cuentan también dentro de un
+// dato (echo '{"disableAllHooks": true}' > x.json).
 var shellProtected = []struct {
 	re   *regexp.Regexp
 	why  string
 	cred bool
+	cfg  bool
 	data bool
 }{
 	{re: regexp.MustCompile(`(?i)\.git/config\b`), why: "la configuración de git, que puede llevar tokens", cred: true},
 	{re: regexp.MustCompile(`(?i)\.git/hooks\b`), why: "los hooks de git"},
 	{re: regexp.MustCompile(`(?i)hookspath`), why: "core.hooksPath de git", data: true},
-	{re: regexp.MustCompile(`(?i)\.claude/settings`), why: "la configuración de Claude Code", cred: true},
+	{re: regexp.MustCompile(`(?i)\.claude/settings`), why: "la configuración de Claude Code", cred: true, cfg: true},
 	{re: regexp.MustCompile(`(?i)\.claude/hooks`), why: "los hooks de Claude Code"},
 	{re: regexp.MustCompile(`(?i)\.claude/\.credentials`), why: "las credenciales de Claude Code", cred: true},
-	{re: regexp.MustCompile(`(?i)managed-settings`), why: "la configuración administrada del IDE", cred: true},
+	{re: regexp.MustCompile(`(?i)managed-settings`), why: "la configuración administrada del IDE", cred: true, cfg: true},
 	{re: regexp.MustCompile(`(?i)disableallhooks`), why: "el apagado de hooks", data: true},
 	{re: regexp.MustCompile(`(?i)\.cursor/hooks`), why: "los hooks de Cursor"},
-	{re: regexp.MustCompile(`(?i)\.codex/config`), why: "la configuración de Codex", cred: true},
+	{re: regexp.MustCompile(`(?i)\.codex/config`), why: "la configuración de Codex", cred: true, cfg: true},
 	{re: regexp.MustCompile(`(?i)\.codex/(hooks|requirements)`), why: "los hooks de Codex"},
-	{re: regexp.MustCompile(`(?i)\.gemini/settings`), why: "la configuración de Gemini CLI", cred: true},
+	{re: regexp.MustCompile(`(?i)\.gemini/settings`), why: "la configuración de Gemini CLI", cred: true, cfg: true},
 	{re: regexp.MustCompile(`(?i)\.gemini/hooks`), why: "los hooks de Gemini CLI"},
 	{re: regexp.MustCompile(`(?i)\.github/hooks`), why: "los hooks de Copilot"},
-	{re: regexp.MustCompile(`(?i)\.copilot/config`), why: "la configuración de Copilot", cred: true},
+	{re: regexp.MustCompile(`(?i)\.copilot/config`), why: "la configuración de Copilot", cred: true, cfg: true},
 	{re: regexp.MustCompile(`(?i)\.copilot/hooks`), why: "los hooks de Copilot"},
 	{re: regexp.MustCompile(`(?i)\.(windsurf|devin)/hooks|\.codeium/(windsurf/)?hooks|\.windsurf/config`), why: "los hooks de Windsurf o de Devin"},
-	{re: regexp.MustCompile(`(?i)\.devin/config|\.junie/config`), why: "la configuración de Devin o de Junie", cred: true},
+	{re: regexp.MustCompile(`(?i)\.devin/config|\.junie/config`), why: "la configuración de Devin o de Junie", cred: true, cfg: true},
 	{re: regexp.MustCompile(`(?i)\.kiro/hooks|\.clinerules/hooks`), why: "los hooks de Kiro o Cline"},
 	{re: regexp.MustCompile(`(?i)chat\.(use(claude)?hooks|hookfileslocations)`), why: "los hooks de VS Code", data: true},
-	{re: regexp.MustCompile(`(?i)(^|[\s/'"=~])\.claude\.json\b`), why: "la configuración global de Claude Code", cred: true},
+	{re: regexp.MustCompile(`(?i)(^|[\s/'"=~])\.claude\.json\b`), why: "la configuración global de Claude Code", cred: true, cfg: true},
 	{re: regexp.MustCompile(`(?i)coyote/approvals`), why: "los registros de aprobación"},
 	{re: regexp.MustCompile(`(?i)coyote/project\.yaml`), why: "la configuración del proyecto (autonomía)"},
 	{re: regexp.MustCompile(`(?i)coyote/infra\.yaml`), why: "el inventario de la infraestructura"},
@@ -406,8 +410,9 @@ func (ps Paths) protectedIn(cmd string, readOnly bool) (string, bool) {
 	check := func(segs [][]string, data bool) (string, bool) {
 		for _, seg := range segs {
 			line := segText(seg)
+			prog, _ := mainProg(seg)
 			for _, p := range shellProtected {
-				if (readOnly && !p.cred) || (data && !p.data) {
+				if (readOnly && (!p.cred || (p.cfg && nameOnly[prog]))) || (data && !p.data) {
 					continue
 				}
 				if p.re.MatchString(line) {
@@ -491,18 +496,35 @@ func (ps Paths) hardInfra(cmd string) *Hard {
 	if ps.Infra == nil {
 		return nil
 	}
-	for _, seg := range view(cmd, true) {
+	segs := view(cmd, true)
+	if dynamic(cmd) {
+		// make $(echo apply): el target llega por una sustitución.
+		var words []string
+		for _, f := range strings.Fields(neutralize(cmd)) {
+			words = append(words, strings.Trim(f, "\"'();&|$`"))
+		}
+		segs = append(segs, words)
+	}
+	for _, seg := range segs {
 		if c, ok := ps.Infra.DeclaredApply(seg); ok {
 			return hard("%q aplica infraestructura según coyote/infra.yaml: lo corre la persona o un pipeline con revisor", c)
 		}
 	}
 	if effect {
-		if env, ok := ps.Infra.EnvFor(strings.Join(texts, " ; ")); ok && ps.Infra.Environments[env].Apply == infra.Reviewed {
+		joined := strings.Join(texts, " ; ")
+		if len(joined) > maxInfraCommand {
+			return hard("el comando cambia infraestructura y es demasiado largo para saber a qué ambiente toca (%d bytes)", len(joined))
+		}
+		if env, ok := ps.Infra.EnvFor(joined); ok && ps.Infra.Environments[env].Apply == infra.Reviewed {
 			return hard("el comando cambia el ambiente %s, que solo aplica la persona o un pipeline con revisor (coyote/infra.yaml)", env)
 		}
 	}
 	return nil
 }
+
+// maxInfraCommand es el largo máximo de un comando de infraestructura cuyo
+// ambiente se busca entre las marcas del inventario.
+const maxInfraCommand = 64 << 10
 
 // sameAgent compara nombres de agente sin mayúsculas ni prefijos de plugin.
 func sameAgent(declared, reported string) bool {
@@ -780,6 +802,9 @@ func (ps Paths) hardFile(a Action) *Hard {
 		}
 		return hard("el cambio escribe un secreto literal (%s%s); usa una variable de entorno o el gestor de secretos, o, si es un dato de prueba, marca la línea con %s", f.Kind, line, secrets.AllowMarker)
 	}
+	if ps.keyUnderHeader(a, cwd) {
+		return hard("el cambio pega el cuerpo de una llave privada bajo el encabezado que ya está en el archivo; los valores los pone la persona, o, si es un dato de prueba, marca la línea con %s", secrets.AllowMarker)
+	}
 	targets := targetPaths(a)
 	if len(targets) == 0 {
 		// Formato desconocido: se revisa todo texto que parezca una ruta.
@@ -822,7 +847,105 @@ func secretContent(a Action) (secrets.Finding, bool) {
 			return f[0], true
 		}
 	}
+	// En un parche, el encabezado de una llave puede ser una línea de
+	// contexto y el cuerpo, una agregada.
+	for _, text := range patchTexts(a) {
+		var window []string
+		for _, l := range patchLines(text) {
+			if l.added && secrets.KeyBody(l.text) && !strings.Contains(l.text, secrets.AllowMarker) {
+				for _, w := range window {
+					if secrets.PEMHeader(w) {
+						return secrets.Finding{Kind: "llave privada", Hint: "BEGIN … PRIVATE KEY"}, true
+					}
+				}
+			}
+			window = append(window, l.text)
+			if len(window) > 4 {
+				window = window[1:]
+			}
+		}
+	}
 	return secrets.Finding{}, false
+}
+
+// patchTexts son los textos de parche de una herramienta.
+func patchTexts(a Action) []string {
+	var out []string
+	for k, v := range a.Input {
+		lk := strings.ToLower(k)
+		if s, ok := v.(string); ok && (lk == "patch" || lk == "diff" || (strings.EqualFold(a.Tool, "apply_patch") && (lk == "input" || lk == "command"))) {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// pline es una línea de un parche: agregada o de contexto.
+type pline struct {
+	added bool
+	text  string
+}
+
+var hunkHeader = regexp.MustCompile(`^@@ -\d+(?:,(\d+))? \+\d+(?:,(\d+))? @@`)
+
+// patchLines lee las líneas agregadas y de contexto de un parche: el formato
+// de Codex (*** Begin Patch, donde toda línea con + es agregada) o un diff
+// unificado, contando las líneas de cada hunk para que una línea agregada que
+// empieza con "++" no se confunda con un encabezado.
+func patchLines(text string) []pline {
+	var out []pline
+	lines := strings.Split(text, "\n")
+	if strings.Contains(text, "*** Begin Patch") {
+		for _, l := range lines {
+			switch {
+			case strings.HasPrefix(l, "*** "):
+			case strings.HasPrefix(l, "+"):
+				out = append(out, pline{true, l[1:]})
+			case strings.HasPrefix(l, " "):
+				out = append(out, pline{false, l[1:]})
+			}
+		}
+		return out
+	}
+	oldLeft, newLeft, hunks := 0, 0, 0
+	for _, l := range lines {
+		in := oldLeft > 0 || newLeft > 0
+		switch {
+		case in && strings.HasPrefix(l, "+"):
+			out = append(out, pline{true, l[1:]})
+			newLeft--
+		case in && strings.HasPrefix(l, "-"):
+			oldLeft--
+		case in && strings.HasPrefix(l, " "):
+			out = append(out, pline{false, l[1:]})
+			oldLeft--
+			newLeft--
+		case strings.HasPrefix(l, "@@"):
+			hunks++
+			oldLeft, newLeft = 1, 1
+			if m := hunkHeader.FindStringSubmatch(l); m != nil {
+				if m[1] != "" {
+					oldLeft, _ = strconv.Atoi(m[1])
+				}
+				if m[2] != "" {
+					newLeft, _ = strconv.Atoi(m[2])
+				}
+			} else {
+				oldLeft, newLeft = 1<<30, 1<<30 // sin conteo: hasta el próximo encabezado
+			}
+		case strings.HasPrefix(l, "diff ") || strings.HasPrefix(l, "--- ") || strings.HasPrefix(l, "+++ ") && !in:
+			oldLeft, newLeft = 0, 0
+		}
+	}
+	if hunks == 0 {
+		// Sin hunks, cuenta como agregada toda línea con + que no sea encabezado.
+		for _, l := range lines {
+			if strings.HasPrefix(l, "+") && !strings.HasPrefix(l, "+++ ") {
+				out = append(out, pline{true, l[1:]})
+			}
+		}
+	}
+	return out
 }
 
 // newContent junta los textos nuevos de una escritura: sin los campos old*
@@ -840,9 +963,9 @@ func newContent(a Action) []string {
 		case string:
 			if lk == "patch" || lk == "diff" || (patch && (lk == "input" || lk == "command")) {
 				var added []string
-				for _, l := range strings.Split(t, "\n") {
-					if strings.HasPrefix(l, "+") && !strings.HasPrefix(l, "+++") {
-						added = append(added, l[1:])
+				for _, l := range patchLines(t) {
+					if l.added {
+						added = append(added, l.text)
 					}
 				}
 				out = append(out, strings.Join(added, "\n"))
@@ -863,6 +986,65 @@ func newContent(a Action) []string {
 		walk(k, v)
 	}
 	return out
+}
+
+// keyUnderHeader dice si una edición pega el cuerpo de una llave justo debajo
+// del encabezado de llave privada que ya está en el archivo: el encabezado
+// no viene en el texto nuevo, pero el resultado es una llave.
+func (ps Paths) keyUnderHeader(a Action, cwd string) bool {
+	targets := targetPaths(a)
+	if len(targets) == 0 {
+		return false
+	}
+	var pairs [][2]string
+	var walk func(v any)
+	walk = func(v any) {
+		switch t := v.(type) {
+		case map[string]any:
+			var oldText, newText string
+			var hasOld, hasNew bool
+			for k, x := range t {
+				s, ok := x.(string)
+				lk := strings.ToLower(k)
+				switch {
+				case ok && strings.HasPrefix(lk, "old"):
+					oldText, hasOld = s, true
+				case ok && strings.HasPrefix(lk, "new"):
+					newText, hasNew = s, true
+				}
+				walk(x)
+			}
+			if hasOld && hasNew && oldText != "" {
+				pairs = append(pairs, [2]string{oldText, newText})
+			}
+		case []any:
+			for _, x := range t {
+				walk(x)
+			}
+		}
+	}
+	walk(map[string]any(a.Input))
+	if len(pairs) == 0 {
+		return false
+	}
+	data, err := fsx.ReadCapped(resolve(targets[0], cwd, ps.Home), 4<<20)
+	if err != nil {
+		return false
+	}
+	content := string(data)
+	for _, p := range pairs {
+		idx := strings.Index(content, p[0])
+		if idx < 0 {
+			continue
+		}
+		start := 1 + strings.Count(content[:idx], "\n")
+		for k, l := range strings.Split(p[1], "\n") {
+			if secrets.KeyBody(l) && !strings.Contains(l, secrets.AllowMarker) && secrets.HeaderBefore(content, start+k) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // looksLikePath distingue una ruta de un texto cualquiera.
@@ -887,6 +1069,11 @@ func (ps Paths) hardOther(a Action) *Hard {
 		if code, ok := Canary(t); ok {
 			return hard("%s", canaryReason(code))
 		}
+	}
+	// Un secreto literal tampoco sale por una herramienta MCP (un issue, un
+	// mensaje, un archivo remoto).
+	if f, ok := secretContent(a); ok {
+		return hard("la herramienta lleva un secreto literal (%s); si es un dato de prueba, marca la línea con %s", f.Kind, secrets.AllowMarker)
 	}
 	var texts []string
 	for _, k := range commandFields {

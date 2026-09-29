@@ -349,6 +349,10 @@ func viewOf(text string, dropData bool, depth int) [][]string {
 			words[i] = expandVars(words[i], vars)
 		}
 		prog, at := mainProg(words)
+		if prog == "eval" && depth < 4 {
+			// eval corre sus argumentos como un comando.
+			out = append(out, viewOf(strings.Join(words[at+1:], " "), dropData, depth+1)...)
+		}
 		drop := dropData && !exec && !s.subst
 		data := map[int]bool{}
 		if drop {

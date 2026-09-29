@@ -198,3 +198,60 @@ func TestSecretoEnDosEdiciones(t *testing.T) {
 		t.Errorf("el encabezado solo pide aprobación: %s (%s)", d.Verdict, d.Reason)
 	}
 }
+
+func TestParchesYLlavesPartidas(t *testing.T) {
+	ps, root := secretPaths(t)
+	body := strings.Repeat("MIIEvQIBADANBgkqhkiG9w0B", 3)
+	header := "-----BEGIN " + "RSA PRIVATE KEY-----"
+	token := "ghp_" + strings.Repeat("a1B2", 9)
+	f := filepath.Join(root, "deploy", "tls.yaml")
+	if err := os.MkdirAll(filepath.Dir(f), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(f, []byte("key: |\n  "+header+"\n  PEGA_AQUI\n  -----END RSA PRIVATE KEY-----\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	codex := func(patch string) Action {
+		return hook(t, map[string]any{"hook_event_name": "PreToolUse", "turn_id": "t", "cwd": root, "tool_name": "apply_patch",
+			"tool_input": map[string]any{"command": patch}}, "codex")
+	}
+	blocked := map[string]Action{
+		"cuerpo bajo el encabezado del archivo": claude(t, "Edit", map[string]any{"file_path": f, "old_string": "PEGA_AQUI", "new_string": body}, root),
+		"parche de Codex con ++":                codex("*** Begin Patch\n*** Add File: notas.md\n+x\n+++ token " + token + "\n*** End Patch\n"),
+		"diff unificado con +++ agregada": claude(t, "mcp__fs__apply_diff", map[string]any{"path": "notas.md",
+			"diff": "--- a/notas.md\n+++ b/notas.md\n@@ -1,0 +1,2 @@\n+x\n+++ token " + token + "\n"}, root),
+		"encabezado de contexto y cuerpo agregado": codex("*** Begin Patch\n*** Update File: deploy/tls.yaml\n@@\n   " + header + "\n-  PEGA_AQUI\n+  " + body + "\n*** End Patch\n"),
+	}
+	for name, a := range blocked {
+		if d := ps.Evaluate(a); d.Verdict != Block {
+			t.Errorf("%s: %s (%s)", name, d.Verdict, d.Reason)
+		}
+	}
+	// Un cuerpo lejos de cualquier encabezado es un dato cualquiera.
+	g := filepath.Join(root, "src", "datos.go")
+	if err := os.WriteFile(g, []byte("package src\n\nvar x = \"PEGA\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if d := ps.Evaluate(claude(t, "Edit", map[string]any{"file_path": g, "old_string": "PEGA", "new_string": body}, root)); d.Verdict != NeedsApproval {
+		t.Errorf("un tramo base64 sin encabezado pide aprobación: %s (%s)", d.Verdict, d.Reason)
+	}
+}
+
+func TestListadosQueAlimentanOtroPrograma(t *testing.T) {
+	ps, root := secretPaths(t)
+	inv, err := infra.Parse([]byte(gateInventory))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ps.Infra = inv
+	for _, c := range []string{"cat $(ls .env)", "ls .env | xargs cat", "find . -name '*.env' | xargs cat", "cat `find . -name .env`", "make $(echo apply)"} {
+		if d := ps.Evaluate(claude(t, "Bash", map[string]any{"command": c}, root)); d.Verdict != Block {
+			t.Errorf("%q: %s (%s)", c, d.Verdict, d.Reason)
+		}
+	}
+	for _, c := range []string{"ls -la .env", "find . -name .env", "stat .env"} {
+		if d := ps.Evaluate(claude(t, "Bash", map[string]any{"command": c}, root)); d.Verdict == Block {
+			t.Errorf("%q solo ve nombres: %s", c, d.Reason)
+		}
+	}
+}

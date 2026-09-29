@@ -110,10 +110,16 @@ func cmdTexts(cmd string) []string {
 	for _, seg := range view(cmd, true) {
 		out = append(out, segText(seg))
 	}
-	if strings.Contains(cmd, "$(") || strings.Contains(cmd, "`") || strings.Contains(cmd, "<(") || strings.Contains(cmd, ">(") {
+	if dynamic(cmd) {
 		out = append(out, neutralize(cmd))
 	}
 	return out
+}
+
+// dynamic dice si un comando arma palabras al correr: sustituciones de
+// comandos o de procesos.
+func dynamic(cmd string) bool {
+	return strings.Contains(cmd, "$(") || strings.Contains(cmd, "`") || strings.Contains(cmd, "<(") || strings.Contains(cmd, ">(")
 }
 
 // neutralize quita del comando los textos que son datos: mensajes, títulos y
@@ -208,10 +214,20 @@ func findRuns(seg []lword) bool {
 // secretos (cat .env, cp .env x, --env-file=.env, grep -f.env) o un patrón de
 // búsqueda que los alcance (rg -g '*.env').
 func (ps Paths) secretWord(cmd, cwd string) (string, bool) {
-	for _, seg := range lenientSplit(neutralize(cmd)) {
+	segs := lenientSegs(neutralize(cmd))
+	// Con un ejecutor en el comando (xargs, sh…), lo que listan ls o find
+	// puede terminar como argumento de otro programa: también se revisa.
+	exec := false
+	for _, s := range segs {
+		if p, _ := mainProg(texts(s.words)); executors[p] {
+			exec = true
+		}
+	}
+	for _, ls := range segs {
+		seg := ls.words
 		words := texts(seg)
 		prog, at := mainProg(words)
-		if nameOnly[prog] && !(prog == "find" && findRuns(seg)) {
+		if nameOnly[prog] && !(prog == "find" && findRuns(seg)) && !exec && !ls.subst {
 			continue
 		}
 		skip := map[int]bool{}
