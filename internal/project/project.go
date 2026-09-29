@@ -380,7 +380,7 @@ func ensureLine(path, line string) (string, error) {
 	if info, err := os.Lstat(path); err == nil && info.Mode()&os.ModeSymlink != 0 {
 		return "omitido", nil // no se escribe a través de un symlink
 	}
-	data, err := os.ReadFile(path)
+	data, err := fsx.ReadCapped(path, fsx.MaxText)
 	if os.IsNotExist(err) {
 		return "creado", os.WriteFile(path, []byte(line+"\n"), 0o644)
 	}
@@ -420,7 +420,7 @@ func InstallHook(dir string, force, onlyCreate bool) (string, string, error) {
 		return "", "", err
 	}
 	status := "creado"
-	if existing, err := os.ReadFile(p); err == nil {
+	if existing, err := fsx.ReadCapped(p, fsx.MaxText); err == nil {
 		switch {
 		case bytes.Equal(existing, data):
 			return p, "existe", nil
@@ -451,7 +451,7 @@ func HookCurrent(dir string) bool {
 	if err != nil {
 		return false
 	}
-	have, err := os.ReadFile(filepath.Join(hooks, "commit-msg"))
+	have, err := fsx.ReadCapped(filepath.Join(hooks, "commit-msg"), fsx.MaxText)
 	if err != nil {
 		return false
 	}
@@ -466,7 +466,7 @@ func HookInstalled(dir string) bool {
 	if err != nil {
 		return false
 	}
-	data, err := os.ReadFile(filepath.Join(hooks, "commit-msg"))
+	data, err := fsx.ReadCapped(filepath.Join(hooks, "commit-msg"), fsx.MaxText)
 	if err != nil {
 		return false
 	}
@@ -538,7 +538,7 @@ func AddRepo(root string, r RepoRef) (string, error) {
 		return "", err
 	}
 	p := filepath.Join(root, filepath.FromSlash(ConfigPath))
-	data, err := os.ReadFile(p)
+	data, err := fsx.ReadCapped(p, fsx.MaxText)
 	if err != nil {
 		return "", err
 	}

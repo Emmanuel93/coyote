@@ -13,6 +13,7 @@ import (
 	"github.com/Emmanuel93/coyote/internal/attribution"
 	"github.com/Emmanuel93/coyote/internal/ccf"
 	"github.com/Emmanuel93/coyote/internal/ccfdoc"
+	"github.com/Emmanuel93/coyote/internal/fsx"
 	"github.com/Emmanuel93/coyote/internal/gitx"
 	"github.com/Emmanuel93/coyote/internal/glob"
 	"github.com/Emmanuel93/coyote/internal/identity"
@@ -201,7 +202,7 @@ func cmdCommit(a *app, args []string) error {
 	led := ledger.Open(root)
 	path := led.PathFor(now, person.Slug)
 	relPath := rel(root, path)
-	backup, backupErr := os.ReadFile(path)
+	backup, backupErr := fsx.ReadCapped(path, fsx.MaxText)
 	if backupErr != nil && !os.IsNotExist(backupErr) {
 		return backupErr
 	}
@@ -304,7 +305,7 @@ func attributionCheck(a *app, attr *attribution.Config, args []string) error {
 		}
 		for _, f := range files {
 			if glob.Any(paths, f) && !glob.Any(except, f) && !attr.Allowed(f) {
-				if data, err := os.ReadFile(filepath.Join(root, f)); err == nil {
+				if data, err := fsx.ReadCapped(filepath.Join(root, f), fsx.MaxText); err == nil {
 					report(f, attr.Check(string(data), false))
 				}
 			}
@@ -314,7 +315,7 @@ func attributionCheck(a *app, attr *attribution.Config, args []string) error {
 		}
 	}
 	for _, p := range pos {
-		data, err := os.ReadFile(p)
+		data, err := fsx.ReadCapped(p, fsx.MaxText)
 		if err != nil {
 			return err
 		}
@@ -359,7 +360,7 @@ func attributionScrub(a *app, attr *attribution.Config, args []string) error {
 	}
 	var data []byte
 	if len(pos) > 0 {
-		data, err = os.ReadFile(pos[0])
+		data, err = fsx.ReadCapped(pos[0], fsx.MaxText)
 	} else {
 		data, err = io.ReadAll(io.LimitReader(a.stdin, 4<<20))
 	}

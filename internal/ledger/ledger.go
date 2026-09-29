@@ -55,7 +55,7 @@ func (l Ledger) Append(line ccf.Line, user string) (string, error) {
 	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 		return "", err
 	}
-	prev, statErr := os.ReadFile(p)
+	prev, statErr := fsx.ReadCapped(p, fsx.MaxText)
 	if statErr != nil && !os.IsNotExist(statErr) {
 		return "", statErr
 	}
@@ -121,7 +121,7 @@ func (l Ledger) ReadAll() ([]Entry, []Problem, error) {
 			probs = append(probs, Problem{p, 0, fmt.Errorf("no es un archivo regular del ledger o es demasiado grande")})
 			return nil
 		}
-		data, err := os.ReadFile(p)
+		data, err := fsx.ReadCapped(p, fsx.MaxText)
 		if err != nil {
 			return err
 		}

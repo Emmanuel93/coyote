@@ -212,3 +212,48 @@ func TestEscanerSegundaRevision(t *testing.T) {
 		t.Errorf("una plantilla de Helm y valores de ejemplo no son secretos: %d\n%s", s.code, s.stdout)
 	}
 }
+
+func TestTerceraRevision(t *testing.T) {
+	// UTF-16 marcado con diff en .gitattributes: git da hunks de texto con
+	// bytes 0, y el archivo se relee completo y decodificado.
+	_, root := gateProject(t)
+	write(t, root, ".gitignore", ".coyote/\n")
+	write(t, root, ".gitattributes", "*.ps1 diff\n")
+	git(t, root, "add", "-A")
+	git(t, root, "commit", "-qm", "inicio", "--no-verify")
+	utf16 := []byte{0xFF, 0xFE}
+	for _, r := range "$t = '" + cliGitHub + "'\r\n" {
+		utf16 = append(utf16, byte(r), 0)
+	}
+	if err := os.WriteFile(filepath.Join(root, "cfg.ps1"), utf16, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, root, "add", "cfg.ps1")
+	if s := run(t, root, "", "secrets", "scan", "--staged"); s.code != 1 || !strings.Contains(s.stdout, "token de GitHub") {
+		t.Errorf("UTF-16 con diff en .gitattributes: %d\n%s", s.code, s.stdout)
+	}
+	git(t, root, "reset", "-q")
+	// doctor avisa si disableAllHooks apaga los hooks de Claude Code.
+	write(t, root, ".claude/settings.local.json", `{"disableAllHooks": true}`)
+	if d := run(t, root, "", "doctor"); !strings.Contains(d.stdout, "disableAllHooks") {
+		t.Errorf("doctor no avisa de disableAllHooks:\n%s", d.stdout)
+	}
+}
+
+func TestGatePRReglasDeUnProyectoEnSubcarpeta(t *testing.T) {
+	base := setup(t)
+	productoDemo(t, base)
+	svc := filepath.Join(base, "servicios")
+	write(t, svc, "api/coyote/project.yaml", "name: api\nsecrets:\n  files: [\"config/prod/*.yaml\"]\n")
+	git(t, svc, "add", "-A")
+	git(t, svc, "commit", "-qm", "proyecto coyote en una subcarpeta")
+	baseSHA := strings.TrimSpace(git(t, svc, "rev-parse", "HEAD"))
+	write(t, svc, "api/config/prod/db.yaml", "password: corta\n")
+	git(t, svc, "add", "-A")
+	git(t, svc, "commit", "-qm", "configuración")
+	headSHA := strings.TrimSpace(git(t, svc, "rev-parse", "HEAD"))
+	r := run(t, base, "", "gate", "pr", "--repo", "servicios="+svc, "--self", "servicios", "--base", baseSHA, "--head", headSHA, "--event", "", "--policy", "fail")
+	if r.code != 1 || !strings.Contains(r.stdout, "api/config/prod/db.yaml") {
+		t.Errorf("gate pr con secrets.files de un proyecto en subcarpeta: %d\n%s", r.code, r.stdout)
+	}
+}

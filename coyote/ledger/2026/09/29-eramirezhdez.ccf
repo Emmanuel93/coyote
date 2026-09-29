@@ -29,3 +29,4 @@
 2026-09-29T04:22Z|@eramirezhdez/coyote-devsecops|W-0006|coyote|fix|ci|el riesgo del plan pide la aprobación de un dueño aunque el…|-|-|-|ok
 2026-09-29T04:22Z|@eramirezhdez/coyote-infra|W-0006|coyote|fix|infra|rangos abiertos por prefijo, URIs públicas, recursos enormes en R3 y topes…|-|-|-|ok
 2026-09-29T04:22Z|@eramirezhdez/coyote-devsecops|W-0006|coyote|doc|specs|segunda revisión de v0.6 en gate, secretos, instalación, CI e infraestructura|-|-|-|ok
+2026-09-29T05:15Z|@eramirezhdez/coyote-devsecops|W-0006|coyote|fix|core|lecturas con tope en todo el repo y cierre de las variantes…|-|-|-|ok

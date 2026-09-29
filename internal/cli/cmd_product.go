@@ -167,7 +167,7 @@ func writeProductFile(root, relPath, content string) (string, error) {
 		return "", fail(1, "%v", err)
 	}
 	p := filepath.Join(root, filepath.FromSlash(relPath))
-	old, err := os.ReadFile(p)
+	old, err := fsx.ReadCapped(p, fsx.MaxText)
 	status := "creado"
 	if err == nil {
 		if string(old) == content {
@@ -575,7 +575,7 @@ func (a *app) writeInfraProposal(root, relPath, content string, force, check boo
 	if err := fsx.NoSymlinks(root, relPath); err != nil {
 		return "", fail(1, "%v", err)
 	}
-	old, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(relPath)))
+	old, err := fsx.ReadCapped(filepath.Join(root, filepath.FromSlash(relPath)), fsx.MaxText)
 	switch {
 	case err == nil && string(old) == content:
 		return "sin cambios", nil
@@ -595,7 +595,7 @@ func (a *app) writeProposal(root, relPath, content string, force, check bool) (s
 	if err := fsx.NoSymlinks(root, relPath); err != nil {
 		return "", fail(1, "%v", err)
 	}
-	old, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(relPath)))
+	old, err := fsx.ReadCapped(filepath.Join(root, filepath.FromSlash(relPath)), fsx.MaxText)
 	if err == nil {
 		if sameProposal(string(old), content) {
 			return "sin cambios", nil

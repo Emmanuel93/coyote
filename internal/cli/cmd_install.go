@@ -385,11 +385,11 @@ var vscodeClaudeHooks = regexp.MustCompile(`"chat\.useClaudeHooks"\s*:\s*true`)
 // doubleVSCode dice si VS Code correría dos hooks de coyote: el de Copilot y,
 // con chat.useClaudeHooks, el de Claude Code.
 func doubleVSCode(root string) bool {
-	vs, err := os.ReadFile(filepath.Join(root, ".vscode", "settings.json"))
+	vs, err := fsx.ReadCapped(filepath.Join(root, ".vscode", "settings.json"), fsx.MaxText)
 	if err != nil || !vscodeClaudeHooks.Match(vs) {
 		return false
 	}
-	claude, _ := os.ReadFile(filepath.Join(root, ".claude", "settings.json"))
+	claude, _ := fsx.ReadCapped(filepath.Join(root, ".claude", "settings.json"), fsx.MaxText)
 	_, errCopilot := os.Stat(filepath.Join(root, filepath.FromSlash(install.CopilotFile)))
 	return strings.Contains(string(claude), "coyote-gate") && errCopilot == nil
 }
@@ -502,7 +502,7 @@ func (a *app) installCI(kind, policy, ref, coyoteRepo string, check, dry bool) e
 			return fail(1, "%v", err)
 		}
 		relPath := "coyote/ci/" + self.Name + ".yml"
-		old, _ := os.ReadFile(filepath.Join(root, filepath.FromSlash(relPath)))
+		old, _ := fsx.ReadCapped(filepath.Join(root, filepath.FromSlash(relPath)), fsx.MaxText)
 		status := "sin cambios"
 		switch {
 		case old == nil:

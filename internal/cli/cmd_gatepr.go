@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path"
 	"strings"
 
 	"github.com/Emmanuel93/coyote/internal/ci"
@@ -65,15 +66,10 @@ func gatePR(a *app, args []string) error {
 	if err != nil {
 		return fail(1, "%v", err)
 	}
-	// Las reglas de secretos del repo salen de la rama base: un PR no se
-	// dispensa a sí mismo agregando secrets.allow.
-	baseRules := secrets.Rules{}
-	if text, ok := product.FileAt(dir, p.pr.BaseSHA, project.ConfigPath); ok {
-		if cfg, err := project.Parse([]byte(text), p.self); err == nil {
-			baseRules = cfg.Secrets
-		}
-	}
-	in.Secrets = scanAdded(added, func(f string) (secrets.Rules, string) { return baseRules, f }, func(f string) (string, bool) { return product.FileAt(dir, right, f) })
+	// Las reglas de secretos salen de la rama base: un PR no se dispensa a sí
+	// mismo agregando secrets.allow. Cada ruta lleva las del proyecto coyote
+	// que la contiene, también en una subcarpeta.
+	in.Secrets = scanAdded(added, baseRules(dir, p.pr.BaseSHA, p.self), func(f string) (string, bool) { return product.FileAt(dir, right, f) })
 	var plan *infra.PlanSummary
 	if *planFile != "" {
 		f, err := os.Open(*planFile)
@@ -302,4 +298,36 @@ func fileList(files []string, n int) string {
 // acentos graves que lo cierren ni barras que partan la tabla.
 func codeCell(s string) string {
 	return strings.NewReplacer("`", "'", "|", "¦", "\n", " ", "\r", " ").Replace(s)
+}
+
+// baseRules da, para cada ruta del repo, las reglas de secretos del proyecto
+// coyote que la contiene en la revisión base, con la ruta relativa a ese
+// proyecto; sin proyecto, las de siempre.
+func baseRules(dir, base, name string) func(string) (secrets.Rules, string) {
+	cache := map[string]*secrets.Rules{}
+	return func(f string) (secrets.Rules, string) {
+		for d := path.Dir(f); ; d = path.Dir(d) {
+			prefix := ""
+			if d != "." && d != "/" {
+				prefix = d + "/"
+			}
+			r, seen := cache[prefix]
+			if !seen {
+				if text, ok := product.FileAt(dir, base, prefix+project.ConfigPath); ok {
+					rules := secrets.Rules{}
+					if cfg, err := project.Parse([]byte(text), name); err == nil {
+						rules = cfg.Secrets
+					}
+					r = &rules
+				}
+				cache[prefix] = r
+			}
+			if r != nil {
+				return *r, strings.TrimPrefix(f, prefix)
+			}
+			if prefix == "" {
+				return secrets.Rules{}, f
+			}
+		}
+	}
 }

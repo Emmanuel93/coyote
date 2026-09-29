@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -177,10 +178,12 @@ func (inv *Inventory) Validate() []string {
 		if !relPath(s.Path) {
 			errs = append(errs, fmt.Sprintf("%s.path %q: ruta relativa al repo, sin ..", where, s.Path))
 		}
-		if seen[s.Path] {
+		// p, p/ y ./p son el mismo stack.
+		clean := path.Clean(filepath.ToSlash(s.Path))
+		if seen[clean] {
 			errs = append(errs, fmt.Sprintf("%s.path %q repetido", where, s.Path))
 		}
-		seen[s.Path] = true
+		seen[clean] = true
 		if !cloudRe.MatchString(s.Cloud) {
 			errs = append(errs, fmt.Sprintf("%s.cloud %q inválido (gcp, aws, azure…)", where, s.Cloud))
 		}

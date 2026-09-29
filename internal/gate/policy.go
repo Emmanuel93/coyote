@@ -620,6 +620,9 @@ func (ps Paths) readShell(a Action) (ok bool, why string, cred bool) {
 			continue
 		}
 		names := nameOnly[s.prog] // ls, find, stat…: ven nombres, no contenidos
+		if s.prog == "echo" || s.prog == "printf" {
+			continue // imprimen sus argumentos: no leen archivos
+		}
 		var targets []string
 		for i, w := range s.args {
 			if why, bad := ps.readArg(w, segCwd, recursive); bad {
@@ -802,7 +805,7 @@ func (ps Paths) hardFile(a Action) *Hard {
 		}
 		return hard("el cambio escribe un secreto literal (%s%s); usa una variable de entorno o el gestor de secretos, o, si es un dato de prueba, marca la línea con %s", f.Kind, line, secrets.AllowMarker)
 	}
-	if ps.keyUnderHeader(a, cwd) {
+	if ps.keyUnderHeader(a, cwd) || ps.patchUnderHeader(a, cwd) {
 		return hard("el cambio pega el cuerpo de una llave privada bajo el encabezado que ya está en el archivo; los valores los pone la persona, o, si es un dato de prueba, marca la línea con %s", secrets.AllowMarker)
 	}
 	targets := targetPaths(a)
@@ -1033,18 +1036,104 @@ func (ps Paths) keyUnderHeader(a Action, cwd string) bool {
 	}
 	content := string(data)
 	for _, p := range pairs {
-		idx := strings.Index(content, p[0])
-		if idx < 0 {
-			continue
+		// Todas las apariciones: con replace_all se reemplazan todas.
+		for from, n := 0, 0; n < 64; n++ {
+			idx := strings.Index(content[from:], p[0])
+			if idx < 0 {
+				break
+			}
+			idx += from
+			start := 1 + strings.Count(content[:idx], "\n")
+			for k, l := range strings.Split(p[1], "\n") {
+				if secrets.KeyBody(l) && !strings.Contains(l, secrets.AllowMarker) && secrets.HeaderBefore(content, start+k) {
+					return true
+				}
+			}
+			from = idx + max(len(p[0]), 1)
 		}
-		start := 1 + strings.Count(content[:idx], "\n")
-		for k, l := range strings.Split(p[1], "\n") {
-			if secrets.KeyBody(l) && !strings.Contains(l, secrets.AllowMarker) && secrets.HeaderBefore(content, start+k) {
-				return true
+	}
+	return false
+}
+
+// patchUnderHeader dice si un parche agrega el cuerpo de una llave justo
+// debajo del encabezado que ya está en el archivo que actualiza: las líneas
+// de contexto o las que quita del hunk están a pocas líneas del encabezado.
+func (ps Paths) patchUnderHeader(a Action, cwd string) bool {
+	for _, text := range patchTexts(a) {
+		for _, sec := range patchSections(text) {
+			body := false
+			for _, l := range sec.lines {
+				if l.kind == '+' && secrets.KeyBody(l.text) && !strings.Contains(l.text, secrets.AllowMarker) {
+					body = true
+				}
+			}
+			if !body || sec.path == "" {
+				continue
+			}
+			data, err := fsx.ReadCapped(resolve(sec.path, cwd, ps.Home), 4<<20)
+			if err != nil {
+				continue
+			}
+			lines := strings.Split(string(data), "\n")
+			old := map[string]bool{}
+			for _, l := range sec.lines {
+				if l.kind != '+' && strings.TrimSpace(l.text) != "" {
+					old[strings.TrimSpace(l.text)] = true
+				}
+			}
+			for h, l := range lines {
+				if !secrets.PEMHeader(l) {
+					continue
+				}
+				for j := h + 1; j < len(lines) && j <= h+4+1; j++ {
+					if old[strings.TrimSpace(lines[j])] {
+						return true
+					}
+				}
 			}
 		}
 	}
 	return false
+}
+
+// patchSection es la parte de un parche que toca un archivo.
+type patchSection struct {
+	path  string
+	lines []struct {
+		kind byte // '+', '-' o ' '
+		text string
+	}
+}
+
+// patchSections parte un parche por archivo: el formato de Codex (*** Update
+// File: ruta) o un diff unificado (+++ b/ruta).
+func patchSections(text string) []patchSection {
+	var out []patchSection
+	codex := strings.Contains(text, "*** Begin Patch")
+	cur := -1
+	add := func(kind byte, t string) {
+		if cur >= 0 {
+			out[cur].lines = append(out[cur].lines, struct {
+				kind byte
+				text string
+			}{kind, t})
+		}
+	}
+	for _, l := range strings.Split(text, "\n") {
+		switch {
+		case codex && (strings.HasPrefix(l, "*** Update File:") || strings.HasPrefix(l, "*** Add File:")):
+			out = append(out, patchSection{path: strings.TrimSpace(l[strings.Index(l, ":")+1:])})
+			cur = len(out) - 1
+		case codex && strings.HasPrefix(l, "*** "):
+		case !codex && strings.HasPrefix(l, "+++ "):
+			out = append(out, patchSection{path: strings.TrimPrefix(strings.TrimSpace(l[4:]), "b/")})
+			cur = len(out) - 1
+		case !codex && (strings.HasPrefix(l, "--- ") || strings.HasPrefix(l, "diff ") || strings.HasPrefix(l, "@@")):
+		case strings.HasPrefix(l, "+"), strings.HasPrefix(l, "-"), strings.HasPrefix(l, " "):
+			add(l[0], l[1:])
+		}
+	}
+	return out
 }
 
 // looksLikePath distingue una ruta de un texto cualquiera.

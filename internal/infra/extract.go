@@ -106,7 +106,8 @@ func Propose(root string) (*Inventory, error) {
 			}
 		}
 	}
-	for _, dir := range backendDirs(root) {
+	budget := int64(maxCheckBytes)
+	for _, dir := range backendDirs(root, &budget) {
 		known := false
 		for _, s := range inv.Stacks {
 			if s.Path == dir {

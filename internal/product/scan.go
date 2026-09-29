@@ -12,6 +12,8 @@ import (
 	"strings"
 
 	"go.yaml.in/yaml/v3"
+
+	"github.com/Emmanuel93/coyote/internal/fsx"
 )
 
 // Roles de una entrada del mapa.
@@ -170,7 +172,7 @@ func readRegular(dir, rel string) ([]byte, bool) {
 	if err != nil || !info.Mode().IsRegular() || info.Size() > maxFile {
 		return nil, false
 	}
-	data, err := os.ReadFile(p)
+	data, err := fsx.ReadCapped(p, fsx.MaxText)
 	if err != nil || bytes.IndexByte(data, 0) >= 0 {
 		return nil, false
 	}

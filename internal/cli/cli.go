@@ -200,7 +200,7 @@ type docState struct {
 }
 
 func loadDoc(root, name string) docState {
-	data, err := os.ReadFile(filepath.Join(root, name))
+	data, err := fsx.ReadCapped(filepath.Join(root, name), fsx.MaxText)
 	if err != nil {
 		return docState{name: name}
 	}

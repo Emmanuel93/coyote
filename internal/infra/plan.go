@@ -207,7 +207,10 @@ func scanAfter(raw json.RawMessage) afterFacts {
 	}
 	var v any
 	dec := json.NewDecoder(strings.NewReader(string(raw)))
+	dec.UseNumber() // un número enorme no debe hacer fallar la lectura
 	if dec.Decode(&v) != nil {
+		// Lo que no se puede leer no se da por seguro: cuenta como R3.
+		f.truncated = true
 		return f
 	}
 	nodes := 0

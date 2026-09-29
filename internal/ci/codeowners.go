@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/Emmanuel93/coyote/internal/fsx"
 	"github.com/Emmanuel93/coyote/internal/glob"
 )
 
@@ -36,7 +37,7 @@ func ReadCodeowners(dir string) *Owners {
 		if err != nil || !info.Mode().IsRegular() || info.Size() > 3<<20 {
 			continue
 		}
-		data, err := os.ReadFile(p)
+		data, err := fsx.ReadCapped(p, fsx.MaxText)
 		if err != nil {
 			continue
 		}

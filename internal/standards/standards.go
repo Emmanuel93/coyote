@@ -19,6 +19,8 @@ import (
 	"go.yaml.in/yaml/v3"
 
 	coyote "github.com/Emmanuel93/coyote"
+
+	"github.com/Emmanuel93/coyote/internal/fsx"
 )
 
 // DefaultRef es el nombre del estándar que trae la herramienta.
@@ -249,7 +251,7 @@ func resolve(root string) ([]layer, []string, error) {
 			return nil, warnings, fmt.Errorf("ciclo en extends: %s", cur)
 		}
 		seen[cur] = true
-		data, err := os.ReadFile(cur)
+		data, err := fsx.ReadCapped(cur, fsx.MaxText)
 		if err != nil {
 			if os.IsNotExist(err) && depth == 0 {
 				cur = DefaultRef
@@ -296,7 +298,7 @@ func inside(root, path string) bool {
 
 // hubRules devuelve el rules.yaml del hub si project.yaml apunta a un hub local.
 func hubRules(root string) string {
-	data, err := os.ReadFile(filepath.Join(root, "coyote", "project.yaml"))
+	data, err := fsx.ReadCapped(filepath.Join(root, "coyote", "project.yaml"), fsx.MaxText)
 	if err != nil {
 		return ""
 	}

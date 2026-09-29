@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/Emmanuel93/coyote/internal/ccfdoc"
+	"github.com/Emmanuel93/coyote/internal/fsx"
 	"github.com/Emmanuel93/coyote/internal/standards"
 )
 
@@ -104,7 +105,7 @@ func Write(root, content string, force bool) (string, error) {
 	if info, err := os.Lstat(p); err == nil && info.Mode()&os.ModeSymlink != 0 && !force {
 		return "omitido", fmt.Errorf("AGENTS.md es un symlink; no se escribe a través de él (usa --force para reemplazarlo)")
 	}
-	existing, err := os.ReadFile(p)
+	existing, err := fsx.ReadCapped(p, fsx.MaxText)
 	status := "creado"
 	if err == nil {
 		if string(existing) == content {
@@ -127,7 +128,7 @@ func Write(root, content string, force bool) (string, error) {
 }
 
 func load(root, name string) *ccfdoc.Doc {
-	data, err := os.ReadFile(filepath.Join(root, name))
+	data, err := fsx.ReadCapped(filepath.Join(root, name), fsx.MaxText)
 	if err != nil {
 		return nil
 	}

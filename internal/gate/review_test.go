@@ -255,3 +255,36 @@ func TestListadosQueAlimentanOtroPrograma(t *testing.T) {
 		}
 	}
 }
+
+func TestLlaveBajoEncabezadoTodasLasFormas(t *testing.T) {
+	ps, root := secretPaths(t)
+	body := strings.Repeat("MIIEvQIBADANBgkqhkiG9w0B", 3)
+	header := "-----BEGIN " + "PRIVATE KEY-----"
+	f := filepath.Join(root, "deploy", "tls.yaml")
+	if err := os.MkdirAll(filepath.Dir(f), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(f, []byte("# reemplaza PEGA_AQUI por la llave\nkey: |\n  "+header+"\n  PEGA_AQUI\n  -----END PRIVATE KEY-----\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	codex := func(patch string) Action {
+		return hook(t, map[string]any{"hook_event_name": "PreToolUse", "turn_id": "t", "cwd": root, "tool_name": "apply_patch",
+			"tool_input": map[string]any{"command": patch}}, "codex")
+	}
+	for name, a := range map[string]Action{
+		"replace_all":         claude(t, "Edit", map[string]any{"file_path": f, "old_string": "PEGA_AQUI", "new_string": body, "replace_all": true}, root),
+		"parche sin contexto": codex("*** Begin Patch\n*** Update File: deploy/tls.yaml\n@@\n-  PEGA_AQUI\n+  " + body + "\n*** End Patch\n"),
+	} {
+		if d := ps.Evaluate(a); d.Verdict != Block {
+			t.Errorf("%s: %s (%s)", name, d.Verdict, d.Reason)
+		}
+	}
+	for _, c := range []string{`echo "**"`, "echo '***'", `printf '%s\n' "**/*.env"`} {
+		if d := ps.Evaluate(claude(t, "Bash", map[string]any{"command": c}, root)); d.Verdict == Block {
+			t.Errorf("%q solo imprime texto: %s", c, d.Reason)
+		}
+	}
+	if d := ps.Evaluate(claude(t, "Bash", map[string]any{"command": "echo x > .env"}, root)); d.Verdict != Block {
+		t.Errorf("echo a .env escribe un archivo de secretos: %s", d.Verdict)
+	}
+}

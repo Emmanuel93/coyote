@@ -246,7 +246,7 @@ func cmdNote(a *app, args []string) error {
 		return fail(1, "%v", err)
 	}
 	p := filepath.Join(root, *file)
-	data, err := os.ReadFile(p)
+	data, err := fsx.ReadCapped(p, fsx.MaxText)
 	if err != nil {
 		return fail(1, "falta %s; corre coyote init", *file)
 	}
@@ -278,7 +278,7 @@ func cmdNote(a *app, args []string) error {
 
 // refreshAgents regenera AGENTS.md si lo generó coyote; uno ajeno no se toca.
 func (a *app) refreshAgents(root string, cfg *project.Config) (string, error) {
-	if got, err := os.ReadFile(filepath.Join(root, "AGENTS.md")); err == nil && !strings.HasPrefix(string(got), agentsmd.Marker) {
+	if got, err := fsx.ReadCapped(filepath.Join(root, "AGENTS.md"), fsx.MaxText); err == nil && !strings.HasPrefix(string(got), agentsmd.Marker) {
 		return "omitido", nil
 	}
 	st, err := standards.Load(root, a.now())
@@ -468,7 +468,7 @@ func cmdGenerate(a *app, args []string) error {
 		return err
 	}
 	if *check {
-		got, _ := os.ReadFile(filepath.Join(root, "AGENTS.md"))
+		got, _ := fsx.ReadCapped(filepath.Join(root, "AGENTS.md"), fsx.MaxText)
 		if string(got) != content {
 			return fail(1, "AGENTS.md desactualizado; corre coyote generate agents")
 		}
@@ -508,7 +508,7 @@ func cmdHooks(a *app, args []string) error {
 func gateInstalled(root string) []string {
 	var out []string
 	for _, f := range []struct{ ide, rel string }{{"claude-code", ".claude/settings.json"}, {"cursor", ".cursor/hooks.json"}} {
-		if data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(f.rel))); err == nil && strings.Contains(string(data), "coyote-gate.sh") {
+		if data, err := fsx.ReadCapped(filepath.Join(root, filepath.FromSlash(f.rel)), fsx.MaxText); err == nil && strings.Contains(string(data), "coyote-gate.sh") {
 			out = append(out, f.ide)
 		}
 	}

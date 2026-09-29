@@ -93,7 +93,22 @@ type Context struct {
 	// Secrets son los archivos de secretos propios del proyecto y sus
 	// dispensas (coyote/project.yaml), para el check secrets (R18).
 	Secrets secrets.Rules
+
+	// texts guarda lo leído a través de symlinks, por su ruta real (mil
+	// symlinks al mismo archivo lo leen una vez), y read, cuánto se leyó:
+	// pasado maxLintBytes no se lee más.
+	texts map[string]textEntry
+	read  int64
 }
+
+type textEntry struct {
+	text string
+	ok   bool
+}
+
+// maxLintBytes acota lo que el lint lee de los archivos del proyecto: un
+// repo con miles de symlinks a un archivo grande no lo cuelga.
+const maxLintBytes = 256 << 20
 
 // NewContext arma el contexto de lint para el proyecto en root.
 func NewContext(root string, st *Standard, profile string, waivers map[string]string, autonomy string, now time.Time) (*Context, error) {
@@ -336,12 +351,30 @@ func (ctx *Context) expand(entries []string) []string {
 }
 
 func (ctx *Context) readText(rel string) (string, bool) {
-	// Solo archivos regulares y con tope: un symlink a /dev/zero no se lee.
-	data, err := fsx.ReadCapped(ctx.abs(rel), 2<<20)
+	p := ctx.abs(rel)
+	real, err := filepath.EvalSymlinks(p)
 	if err != nil {
 		return "", false
 	}
-	return fsx.Text(data)
+	if e, ok := ctx.texts[real]; ok {
+		return e.text, e.ok
+	}
+	if ctx.texts == nil {
+		ctx.texts = map[string]textEntry{}
+	}
+	if ctx.read >= maxLintBytes {
+		return "", false
+	}
+	// Solo archivos regulares y con tope: un symlink a /dev/zero no se lee.
+	var e textEntry
+	if data, err := fsx.ReadCapped(real, 2<<20); err == nil {
+		ctx.read += int64(len(data))
+		e.text, e.ok = fsx.Text(data)
+	}
+	if info, err := os.Lstat(p); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		ctx.texts[real] = e // solo los destinos de symlinks: los demás se leen una vez
+	}
+	return e.text, e.ok
 }
 
 func short(s string) string {
@@ -489,7 +522,7 @@ func checkCommitFormat(ctx *Context, c Check) []Finding {
 func checkCCFDoc(ctx *Context, c Check) []Finding {
 	var out []Finding
 	for _, f := range c.Files {
-		data, err := os.ReadFile(ctx.abs(f))
+		data, err := fsx.ReadCapped(ctx.abs(f), fsx.MaxText)
 		if err != nil {
 			continue // file_exists reporta los faltantes
 		}

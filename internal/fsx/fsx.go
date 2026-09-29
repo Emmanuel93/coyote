@@ -75,6 +75,11 @@ func ReadFile(root, rel string, max int64) ([]byte, error) {
 	return io.ReadAll(io.LimitReader(f, max+1))
 }
 
+// MaxText es el tope para leer un archivo de texto de un repo (documentos,
+// configuración, el ledger): más grande que cualquiera legítimo y lo bastante
+// chico para que un archivo que apunta a /dev/zero no cuelgue un comando.
+const MaxText = 16 << 20
+
 // ReadCapped lee un archivo que puede ser un symlink, pero solo si lo que
 // alcanza es un archivo regular de hasta max bytes: un symlink a /dev/zero o
 // a un FIFO no se lee. Sirve para los archivos de un repo ajeno, donde un

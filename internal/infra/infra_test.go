@@ -441,3 +441,18 @@ func TestInventarioConTopes(t *testing.T) {
 		t.Errorf("un inventario con demasiadas marcas es un error: %v", err)
 	}
 }
+
+func TestPlanQueNoSeLeeEsR3(t *testing.T) {
+	big := "1" + strings.Repeat("0", 400)
+	plan := `{"format_version":"1.2","resource_changes":[
+ {"address":"aws_security_group.web","mode":"managed","type":"aws_security_group","change":{"actions":["create"],"after":{"b":` + big + `,"ingress":[{"cidr_blocks":["0.0.0.0/0"]}]}}}
+]}`
+	s, err := ReadPlan(strings.NewReader(plan))
+	if err != nil || s.Risk != "R3" {
+		t.Fatalf("un número enorme no esconde la regla abierta: %v %+v", err, s)
+	}
+	inv := strings.Replace(validInventory, "stacks:\n", "stacks:\n  - { path: ./stacks/gcp/demo/, cloud: gcp, env: demo, status: scaffold }\n", 1)
+	if _, err := Parse([]byte(inv)); err == nil || !strings.Contains(err.Error(), "repetido") {
+		t.Errorf("p, p/ y ./p son el mismo stack: %v", err)
+	}
+}

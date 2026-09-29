@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/Emmanuel93/coyote/internal/fsx"
 	"github.com/Emmanuel93/coyote/internal/github"
 )
 
@@ -35,7 +36,7 @@ var shaRe = regexp.MustCompile(`^[0-9a-f]{40}$`)
 
 // ReadPR lee el evento de GitHub Actions (GITHUB_EVENT_PATH).
 func ReadPR(path string) (PR, error) {
-	data, err := os.ReadFile(path)
+	data, err := fsx.ReadCapped(path, fsx.MaxText)
 	if err != nil {
 		return PR{}, fmt.Errorf("no puedo leer el evento de GitHub: %w", err)
 	}

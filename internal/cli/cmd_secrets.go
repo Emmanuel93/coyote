@@ -4,11 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 
+	"github.com/Emmanuel93/coyote/internal/fsx"
 	"github.com/Emmanuel93/coyote/internal/product"
 	"github.com/Emmanuel93/coyote/internal/project"
 	"github.com/Emmanuel93/coyote/internal/secrets"
@@ -115,7 +115,7 @@ func secretsList(a *app, args []string) error {
 			return nil
 		}
 		if info, err := d.Info(); err == nil && info.Size() <= 1<<20 {
-			if data, err := os.ReadFile(p); err == nil {
+			if data, err := fsx.ReadCapped(p, fsx.MaxText); err == nil {
 				e.Names = secrets.Names(rel, data)
 			}
 		}
@@ -301,7 +301,17 @@ func scanAdded(files []product.AddedFile, rulesFor func(string) (secrets.Rules, 
 				continue
 			}
 		}
-		if f.Whole {
+		// Lo que git lista sin hunks, o con hunks de texto con bytes 0 (un
+		// UTF-16 marcado con diff en .gitattributes), se lee completo y
+		// decodificado en la revisión nueva.
+		nul := false
+		for _, l := range f.Lines {
+			if strings.IndexByte(l.Text, 0) >= 0 {
+				nul = true
+				break
+			}
+		}
+		if f.Whole || nul {
 			if text, ok := whole(f.Path); ok {
 				out = append(out, secrets.Scan(f.Path, text)...)
 			}

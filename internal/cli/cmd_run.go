@@ -661,7 +661,7 @@ func cmdClose(a *app, args []string) error {
 	if err := fsx.NoSymlinks(root, relPath); err != nil {
 		return fail(1, "%v", err)
 	}
-	old, err := os.ReadFile(path)
+	old, err := fsx.ReadCapped(path, fsx.MaxText)
 	var content string
 	switch {
 	case err != nil:

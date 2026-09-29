@@ -3,13 +3,13 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 
 	"github.com/Emmanuel93/coyote/internal/attribution"
 	"github.com/Emmanuel93/coyote/internal/ccfdoc"
+	"github.com/Emmanuel93/coyote/internal/fsx"
 	"github.com/Emmanuel93/coyote/internal/gitx"
 	"github.com/Emmanuel93/coyote/internal/identity"
 	"github.com/Emmanuel93/coyote/internal/project"
@@ -362,7 +362,7 @@ func cmdDoctor(a *app, args []string) error {
 }
 
 func claudeSettingsState(root string) (string, string) {
-	data, err := os.ReadFile(filepath.Join(root, ".claude", "settings.json"))
+	data, err := fsx.ReadCapped(filepath.Join(root, ".claude", "settings.json"), fsx.MaxText)
 	if err != nil {
 		return "warn", "no existe; coyote init la crea con la atribución apagada y el gate"
 	}
@@ -372,9 +372,19 @@ func claudeSettingsState(root string) (string, string) {
 			PR     *string `json:"pr"`
 		} `json:"attribution"`
 		IncludeCoAuthoredBy *bool `json:"includeCoAuthoredBy"`
+		DisableAllHooks     bool  `json:"disableAllHooks"`
 	}
 	if err := json.Unmarshal(data, &s); err != nil {
 		return "warn", "JSON inválido: " + err.Error()
+	}
+	var local struct {
+		DisableAllHooks bool `json:"disableAllHooks"`
+	}
+	if ldata, err := fsx.ReadCapped(filepath.Join(root, ".claude", "settings.local.json"), fsx.MaxText); err == nil {
+		_ = json.Unmarshal(ldata, &local)
+	}
+	if s.DisableAllHooks || local.DisableAllHooks {
+		return "fail", "disableAllHooks está prendida: Claude Code no corre ningún hook y el gate queda apagado; quítala"
 	}
 	off := s.Attribution.Commit != nil && *s.Attribution.Commit == "" && s.Attribution.PR != nil && *s.Attribution.PR == ""
 	legacyOff := s.IncludeCoAuthoredBy != nil && !*s.IncludeCoAuthoredBy

@@ -231,6 +231,15 @@ func (ps Paths) secretWord(cmd, cwd string) (string, bool) {
 			continue
 		}
 		skip := map[int]bool{}
+		// Lo que imprime echo es dato, salvo sus redirecciones: echo "**" no lee
+		// nada. Con un ejecutor o dentro de una sustitución puede ser código.
+		if !exec && !ls.subst && (prog == "echo" || prog == "printf" || prog == "print") {
+			for i := range dataWords(prog, words, at) {
+				if !seg[i].subst {
+					skip[i] = true
+				}
+			}
+		}
 		var globs []string
 		search := func(kind string, from int) {
 			sp := parseSearch(kind, words[from:])

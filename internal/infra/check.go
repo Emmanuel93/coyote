@@ -35,9 +35,18 @@ var (
 var remoteBackends = map[string]bool{"gcs": true, "s3": true, "azurerm": true, "remote": true, "http": true, "consul": true,
 	"pg": true, "kubernetes": true, "oss": true, "cos": true}
 
+// maxCheckBytes acota lo que la revisión lee de los .tf del repo: un repo con
+// miles de archivos grandes no la cuelga.
+const maxCheckBytes = 256 << 20
+
 // Check compara el inventario con el repo en root. tracked son los archivos
 // que git conoce (vacío si el repo no tiene commits).
 func Check(root string, inv *Inventory, tracked []string) []Finding {
+	budget := int64(maxCheckBytes)
+	return check(root, inv, tracked, &budget)
+}
+
+func check(root string, inv *Inventory, tracked []string, budget *int64) []Finding {
 	var out []Finding
 	add := func(level, where, format string, a ...any) {
 		out = append(out, Finding{Level: level, Where: where, Msg: fmt.Sprintf(format, a...)})
@@ -99,7 +108,7 @@ func Check(root string, inv *Inventory, tracked []string) []Finding {
 		}
 		tf := tfFiles(root, s.Path)
 		if s.Status == "scaffold" {
-			if len(tf) > 0 && backendOf(root, tf) != "" {
+			if len(tf) > 0 && backendOf(root, tf, budget) != "" {
 				add(Warn, where, "está como scaffold, pero ya tiene Terraform con backend: ¿está activo?")
 			}
 			continue
@@ -108,7 +117,7 @@ func Check(root string, inv *Inventory, tracked []string) []Finding {
 			add(Error, where, "está activo, pero no tiene archivos .tf")
 			continue
 		}
-		switch b := backendOf(root, tf); {
+		switch b := backendOf(root, tf, budget); {
 		case b == "":
 			add(Error, where, "sin backend: el estado quedaría en la máquina de quien aplica")
 		case !remoteBackends[b]:
@@ -133,7 +142,7 @@ func Check(root string, inv *Inventory, tracked []string) []Finding {
 		}
 	}
 	// Stacks con backend que el inventario no declara.
-	for _, dir := range backendDirs(root) {
+	for _, dir := range backendDirs(root, budget) {
 		if !declared[dir] {
 			add(Warn, "stacks", "%s tiene un backend y no está en el inventario", dir)
 		}
@@ -160,18 +169,20 @@ func tfFiles(root, rel string) []string {
 // maxStackFiles acota los .tf que se leen de un stack para hallar su backend.
 const maxStackFiles = 256
 
-// backendOf devuelve el backend que declaran los .tf de un stack.
-func backendOf(root string, files []string) string {
+// backendOf devuelve el backend que declaran los .tf de un stack. Lee a lo
+// sumo maxStackFiles archivos y descuenta lo leído de budget.
+func backendOf(root string, files []string, budget *int64) string {
 	for i, f := range files {
-		if i == maxStackFiles {
+		if i == maxStackFiles || *budget <= 0 {
 			break
 		}
 		// Solo archivos regulares y con tope: un .tf que apunta a /dev/zero no
 		// se lee.
-		data, err := fsx.ReadCapped(filepath.Join(root, filepath.FromSlash(f)), 2<<20)
+		data, err := fsx.ReadCapped(filepath.Join(root, filepath.FromSlash(f)), min(2<<20, *budget))
 		if err != nil {
 			continue
 		}
+		*budget -= int64(len(data))
 		if m := backendRe.FindSubmatch(data); m != nil {
 			return string(m[1])
 		}
@@ -183,7 +194,7 @@ func backendOf(root string, files []string) string {
 }
 
 // backendDirs devuelve las carpetas del repo con un backend declarado.
-func backendDirs(root string) []string {
+func backendDirs(root string, budget *int64) []string {
 	var out []string
 	n := 0
 	_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
@@ -211,7 +222,7 @@ func backendDirs(root string) []string {
 		if contains(out, rel) {
 			return nil
 		}
-		if backendOf(root, []string{filepath.ToSlash(filepath.Join(rel, d.Name()))}) != "" {
+		if backendOf(root, []string{filepath.ToSlash(filepath.Join(rel, d.Name()))}, budget) != "" {
 			out = append(out, rel)
 		}
 		return nil
