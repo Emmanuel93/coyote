@@ -26,3 +26,4 @@
 2026-09-29T04:22Z|@eramirezhdez/coyote-devsecops|W-0006|coyote|fix|secrets|reglas por proyecto en cada ruta, cuerpo bajo un encabezado versionado, UTF-16…|-|-|-|ok
 2026-09-29T04:22Z|@eramirezhdez/coyote-devsecops|W-0006|coyote|fix|gate|eval, rg --iglob, listados hacia xargs, parches con ++, llaves bajo su…|-|-|-|ok
 2026-09-29T04:22Z|@eramirezhdez/coyote-devsecops|W-0006|coyote|fix|install|Copilot conserva hooks ajenos y disableAllHooks deja la instalación en conflicto|-|-|-|ok
+2026-09-29T04:22Z|@eramirezhdez/coyote-devsecops|W-0006|coyote|fix|ci|el riesgo del plan pide la aprobación de un dueño aunque el…|-|-|-|ok

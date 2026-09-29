@@ -266,3 +266,26 @@ func TestRevisionesYEquipos(t *testing.T) {
 		t.Errorf("PR con 250 commits: %v", err)
 	}
 }
+
+func TestPlanSinRutasDeRiesgo(t *testing.T) {
+	head := strings.Repeat("h", 40)
+	owners := ParseCodeowners("* @ana\n")
+	in := GateInput{Author: "beto", HeadSHA: head, Owners: owners, Changed: []string{"docs/prod.md"}, PlanRisk: R3, PlanWhy: "reemplazar 1"}
+	r := DecideGate(in)
+	if !r.Required || r.OK || r.Risk != R3 || len(r.Groups) != 1 || strings.Join(r.Groups[0].Owners, " ") != "@ana" {
+		t.Fatalf("un plan R3 sin rutas de riesgo espera a un dueño: %+v", r)
+	}
+	in.Reviews = []Review{{User: "ana", State: "APPROVED", CommitID: head}}
+	if r = DecideGate(in); !r.OK {
+		t.Errorf("con la aprobación del dueño en el último commit, pasa: %+v", r)
+	}
+	// Un riesgo que pide revisión nunca queda sin grupo.
+	if r = DecideGate(GateInput{Author: "beto", HeadSHA: head, Impact: R2, ImpactWhy: "x"}); r.OK || len(r.Groups) == 0 {
+		t.Errorf("sin archivos, igual pide una aprobación: %+v", r)
+	}
+	for _, p := range []string{"stacks/prod/main.tf.json", "environments/prod.tfvars", "live/prod/terragrunt.hcl", "stacks/demo/.terraform.lock.hcl", "coyote/infra.yaml", ".codex/hooks.json"} {
+		if f := PathRisks([]string{p}, DefaultRules); len(f) != 1 || f[0].Risk != R3 {
+			t.Errorf("%s es R3: %+v", p, f)
+		}
+	}
+}

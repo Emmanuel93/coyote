@@ -152,6 +152,26 @@ func DecideGate(in GateInput) GateResult {
 			}
 		}
 	}
+	// El riesgo del plan de Terraform es del cambio entero: lo aprueba un
+	// dueño de lo cambiado. Y un riesgo que pide revisión nunca queda sin
+	// grupo: sin grupos, el PR pasaría sin ninguna aprobación.
+	if Rank(in.PlanRisk) >= 2 || len(keys) == 0 {
+		var all []string
+		for _, f := range in.Changed {
+			all = append(all, in.Owners.For(f)...)
+		}
+		owners := sortedUnique(all)
+		files := in.Changed
+		if len(files) == 0 {
+			files = []string{"(el cambio)"}
+		}
+		// Una clave propia: no se mezcla con un grupo de archivos riesgosos.
+		k := "plan " + strings.Join(owners, " ")
+		if byKey[k] == nil {
+			byKey[k] = &Group{Owners: owners, Files: files}
+			keys = append(keys, k)
+		}
+	}
 	sort.Strings(keys)
 	if in.Owners == nil {
 		res.Notes = append(res.Notes, "el repo no tiene CODEOWNERS: cuenta la aprobación de cualquier persona que no abrió el PR; define dueños en .github/CODEOWNERS")
