@@ -1,7 +1,6 @@
 package standards
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"io/fs"
@@ -342,14 +341,7 @@ func (ctx *Context) readText(rel string) (string, bool) {
 	if err != nil {
 		return "", false
 	}
-	head := data
-	if len(head) > 8000 {
-		head = head[:8000]
-	}
-	if bytes.IndexByte(head, 0) >= 0 {
-		return "", false
-	}
-	return string(data), true
+	return fsx.Text(data)
 }
 
 func short(s string) string {

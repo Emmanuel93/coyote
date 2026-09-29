@@ -168,34 +168,33 @@ func secretsScan(a *app, args []string) error {
 		return err
 	}
 	rules, root := secretRules(dir)
-	// Las reglas del proyecto son relativas a su carpeta; las rutas de git, a
-	// la raíz del repo, que puede estar más arriba.
-	prefix := ""
-	if root != "" {
-		dir = root
-		if *staged || *rng != "" {
-			_, p, err := product.GitPrefix(root)
-			if err != nil {
-				return fail(1, "%v", err)
-			}
-			prefix = p
-		}
-	}
 	var found []secrets.Finding
 	switch {
-	case *staged:
-		files, err := product.StagedAdded(dir, false)
+	case *staged || *rng != "":
+		// Las rutas de git son relativas a la raíz del repo; cada una lleva las
+		// reglas del proyecto coyote que la contiene. Así el hook commit-msg, que
+		// git corre en la raíz, aplica las de un proyecto en una subcarpeta.
+		top, _, err := product.GitPrefix(dir)
 		if err != nil {
 			return fail(1, "%v", err)
 		}
-		found = scanAdded(files, rules, prefix, func(p string) (string, bool) { return product.IndexText(dir, p) })
-	case *rng != "":
+		if *staged {
+			files, err := product.StagedAdded(dir, false)
+			if err != nil {
+				return fail(1, "%v", err)
+			}
+			found = scanAdded(files, newRuleSet(top).For, func(p string) (string, bool) { return product.IndexText(dir, p) })
+			break
+		}
 		files, right, err := product.AddedText(dir, *rng)
 		if err != nil {
 			return fail(1, "%v", err)
 		}
-		found = scanAdded(files, rules, prefix, func(p string) (string, bool) { return product.FileAt(dir, right, p) })
+		found = scanAdded(files, newRuleSet(top).For, func(p string) (string, bool) { return product.FileAt(dir, right, p) })
 	default:
+		if root != "" {
+			dir = root
+		}
 		files, err := product.TrackedFiles(dir)
 		if err != nil {
 			// Fuera de git se recorren los archivos, sin dependencias ni compilación.
@@ -240,21 +239,54 @@ func scanTracked(dir string, files []string, rules secrets.Rules) []secrets.Find
 	return out
 }
 
+// ruleSet da las reglas de secretos de cada ruta de git: las del proyecto
+// coyote que la contiene (su coyote/project.yaml más cercano), con la ruta
+// relativa a ese proyecto; fuera de un proyecto, las de siempre.
+type ruleSet struct {
+	top   string
+	roots map[string]string // carpeta → raíz del proyecto ("" si no hay)
+	rules map[string]secrets.Rules
+}
+
+func newRuleSet(top string) *ruleSet {
+	return &ruleSet{top: top, roots: map[string]string{}, rules: map[string]secrets.Rules{}}
+}
+
+// For devuelve las reglas para una ruta relativa a la raíz del repo y la
+// ruta relativa al proyecto.
+func (r *ruleSet) For(gitPath string) (secrets.Rules, string) {
+	abs := filepath.Join(r.top, filepath.FromSlash(gitPath))
+	dir := filepath.Dir(abs)
+	root, ok := r.roots[dir]
+	if !ok {
+		root, _ = project.FindRoot(dir)
+		r.roots[dir] = root
+	}
+	if root == "" {
+		return secrets.Rules{}, gitPath
+	}
+	rules, ok := r.rules[root]
+	if !ok {
+		if cfg, err := project.Load(root); err == nil {
+			rules = cfg.Secrets
+		}
+		r.rules[root] = rules
+	}
+	rel, err := filepath.Rel(root, abs)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return secrets.Rules{}, gitPath
+	}
+	return rules, filepath.ToSlash(rel)
+}
+
 // scanAdded revisa lo que agrega un cambio: los archivos de secretos nuevos
 // por su nombre, las líneas agregadas y, completos, los que git lista sin
-// hunks (binarios, vacíos o con -diff). prefix es la carpeta del proyecto
-// dentro del repo: sus reglas valen para las rutas que están debajo; fuera
-// de ella valen las de siempre.
-func scanAdded(files []product.AddedFile, projectRules secrets.Rules, prefix string, whole func(string) (string, bool)) []secrets.Finding {
+// hunks (binarios, vacíos o con -diff). rulesFor da las reglas de cada ruta
+// y la ruta relativa a su proyecto.
+func scanAdded(files []product.AddedFile, rulesFor func(string) (secrets.Rules, string), whole func(string) (string, bool)) []secrets.Finding {
 	var out []secrets.Finding
 	for _, f := range files {
-		rules, rel := projectRules, f.Path
-		if prefix != "" {
-			var in bool
-			if rel, in = strings.CutPrefix(f.Path, prefix); !in {
-				rules, rel = secrets.Rules{}, f.Path
-			}
-		}
+		rules, rel := rulesFor(f.Path)
 		if rules.Allowed(rel) {
 			continue
 		}
@@ -285,7 +317,21 @@ func scanAdded(files []product.AddedFile, projectRules secrets.Rules, prefix str
 			for _, l := range f.Lines[i:j] {
 				block = append(block, l.Text)
 			}
-			out = append(out, secrets.ScanFrom(f.Path, f.Lines[i].Line, strings.Join(block, "\n"))...)
+			found := secrets.ScanFrom(f.Path, f.Lines[i].Line, strings.Join(block, "\n"))
+			if len(found) == 0 {
+				// El cuerpo de una llave pegado bajo un encabezado que ya estaba en el
+				// archivo: el encabezado no es una línea agregada.
+				for _, l := range f.Lines[i:j] {
+					if !secrets.KeyBody(l.Text) || strings.Contains(l.Text, secrets.AllowMarker) {
+						continue
+					}
+					if text, ok := whole(f.Path); ok && secrets.HeaderBefore(text, l.Line) {
+						found = append(found, secrets.Finding{Path: f.Path, Line: l.Line, Kind: "llave privada", Hint: "BEGIN … PRIVATE KEY"})
+					}
+					break
+				}
+			}
+			out = append(out, found...)
 			i = j
 		}
 	}

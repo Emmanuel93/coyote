@@ -4,12 +4,15 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/Emmanuel93/coyote/internal/fsx"
 )
 
 // ---- cambios por archivos ----
@@ -275,16 +278,30 @@ func (m *Map) sideFor(dir string, c Change) (diffSide, string, string) {
 // fileText lee un archivo del repo en una revisión, o del árbol de trabajo.
 func fileText(dir, rev, p string) (string, bool) {
 	if rev == "" {
-		data, ok := readRegular(dir, p)
-		return string(data), ok
+		return worktreeText(dir, p)
 	}
 	cmd := gitRead(dir, "cat-file", "blob", rev+":"+p)
 	var out bytes.Buffer
 	cmd.Stdout = &out
-	if cmd.Run() != nil || out.Len() > maxFile || bytes.IndexByte(out.Bytes(), 0) >= 0 {
+	if cmd.Run() != nil || out.Len() > maxFile {
 		return "", false
 	}
-	return out.String(), true
+	return fsx.Text(out.Bytes())
+}
+
+// worktreeText lee un archivo regular del árbol de trabajo como texto (UTF-8
+// o UTF-16 con BOM); un binario no es texto.
+func worktreeText(dir, rel string) (string, bool) {
+	p := filepath.Join(dir, filepath.FromSlash(rel))
+	info, err := os.Lstat(p)
+	if err != nil || !info.Mode().IsRegular() || info.Size() > maxFile {
+		return "", false
+	}
+	data, err := fsx.ReadCapped(p, maxFile)
+	if err != nil {
+		return "", false
+	}
+	return fsx.Text(data)
 }
 
 // methodAfter devuelve el método que declara una anotación en la línea dada

@@ -158,7 +158,7 @@ func cmdCommit(a *app, args []string) error {
 	// R18: ningún secreto entra al commit; --no-verify no lo omite (ADR-0016).
 	// Las rutas de git son relativas a la raíz del repo, que puede estar por
 	// encima del proyecto.
-	top, prefix, err := product.GitPrefix(root)
+	top, _, err := product.GitPrefix(root)
 	if err != nil {
 		return fail(1, "no pude revisar si el commit lleva secretos (%v); el commit no sigue", err)
 	}
@@ -166,7 +166,7 @@ func cmdCommit(a *app, args []string) error {
 	if err != nil {
 		return fail(1, "no pude revisar si el commit lleva secretos (%v); el commit no sigue", err)
 	}
-	if found := scanAdded(files, cfg.Secrets, prefix, func(p string) (string, bool) {
+	if found := scanAdded(files, newRuleSet(top).For, func(p string) (string, bool) {
 		if *all {
 			return product.WorktreeText(top, p)
 		}

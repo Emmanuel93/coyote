@@ -4,11 +4,13 @@
 package fsx
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode/utf16"
 )
 
 // NoSymlinks verifica que rel quede dentro de root y que ninguno de sus
@@ -148,4 +150,38 @@ func WriteAtomic(path string, data []byte, perm os.FileMode) error {
 	}
 	ok = true
 	return nil
+}
+
+// Text devuelve un contenido como texto: decodifica UTF-16 con BOM (lo que
+// escribe PowerShell 5) y quita el BOM de UTF-8. ok es false si parece
+// binario (un byte 0 en los primeros 8000).
+func Text(data []byte) (string, bool) {
+	switch {
+	case len(data) >= 2 && data[0] == 0xFF && data[1] == 0xFE:
+		return utf16Text(data[2:], false), true
+	case len(data) >= 2 && data[0] == 0xFE && data[1] == 0xFF:
+		return utf16Text(data[2:], true), true
+	case len(data) >= 3 && data[0] == 0xEF && data[1] == 0xBB && data[2] == 0xBF:
+		data = data[3:]
+	}
+	head := data
+	if len(head) > 8000 {
+		head = head[:8000]
+	}
+	if bytes.IndexByte(head, 0) >= 0 {
+		return "", false
+	}
+	return string(data), true
+}
+
+func utf16Text(b []byte, big bool) string {
+	u := make([]uint16, len(b)/2)
+	for i := range u {
+		if big {
+			u[i] = uint16(b[2*i])<<8 | uint16(b[2*i+1])
+		} else {
+			u[i] = uint16(b[2*i+1])<<8 | uint16(b[2*i])
+		}
+	}
+	return string(utf16.Decode(u))
 }

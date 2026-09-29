@@ -131,6 +131,11 @@ func TestSecretosEnProyectoDeSubcarpeta(t *testing.T) {
 	if !strings.Contains(s.stdout, "demo/conf/prod.conf") || !strings.Contains(s.stdout, "secretos del proyecto") {
 		t.Errorf("scan --staged:\n%s", s.stdout)
 	}
+	// El hook commit-msg corre en la raíz del repo: las reglas del proyecto de
+	// la subcarpeta aplican igual.
+	if s := run(t, mono, "", "secrets", "scan", "--staged"); s.code != 1 || !strings.Contains(s.stdout, "demo/conf/prod.conf") {
+		t.Errorf("scan --staged desde la raíz del repo:\n%s", s.stdout)
+	}
 	for _, args := range [][]string{{"commit", "-m", "feat(conf): configuración de producción"}, {"commit", "-a", "-m", "feat(conf): configuración de producción"}} {
 		c := run(t, root, "", args...)
 		if c.code != 1 || !strings.Contains(c.stderr, "R18") || !strings.Contains(c.stderr, "demo/conf/prod.conf") {
@@ -165,5 +170,45 @@ func TestEscanerNoSeEvade(t *testing.T) {
 	git(t, root, "commit", "-qm", "oops", "--no-verify")
 	if s := run(t, root, "", "secrets", "scan"); s.code != 1 || !strings.Contains(s.stdout, "dos..puntos.txt:1") {
 		t.Errorf("scan con dos..puntos.txt: %d\n%s", s.code, s.stdout)
+	}
+}
+
+func TestEscanerSegundaRevision(t *testing.T) {
+	_, root := gateProject(t)
+	write(t, root, ".gitignore", ".coyote/\n")
+	header := "-----BEGIN " + "PRIVATE KEY-----"
+	body := strings.Repeat("MIIEvQIBADANBgkqhkiG9w0B", 3)
+	write(t, root, "deploy/tls.yaml", "key: |\n  "+header+"\n  PEGA_AQUI\n  -----END PRIVATE KEY-----\n")
+	git(t, root, "add", "-A")
+	git(t, root, "commit", "-qm", "inicio", "--no-verify")
+	// El cuerpo pegado bajo un encabezado que ya estaba versionado.
+	write(t, root, "deploy/tls.yaml", "key: |\n  "+header+"\n  "+body+"\n  -----END PRIVATE KEY-----\n")
+	git(t, root, "add", "deploy/tls.yaml")
+	if s := run(t, root, "", "secrets", "scan", "--staged"); s.code != 1 || !strings.Contains(s.stdout, "deploy/tls.yaml:3") {
+		t.Errorf("el cuerpo bajo un encabezado ya versionado: %d\n%s", s.code, s.stdout)
+	}
+	if c := run(t, root, "", "commit", "-m", "feat(deploy): llave"); c.code != 1 || !strings.Contains(c.stderr, "R18") {
+		t.Errorf("commit con el cuerpo de una llave: %d\n%s", c.code, c.stderr)
+	}
+	git(t, root, "reset", "-q", "--hard")
+	// Un archivo en UTF-16 con BOM (lo que escribe PowerShell 5).
+	utf16 := []byte{0xFF, 0xFE}
+	for _, r := range "token = " + cliGitHub + "\r\n" {
+		utf16 = append(utf16, byte(r), 0)
+	}
+	if err := os.WriteFile(filepath.Join(root, "config.ps1.txt"), utf16, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, root, "add", "config.ps1.txt")
+	if s := run(t, root, "", "secrets", "scan", "--staged"); s.code != 1 || !strings.Contains(s.stdout, "token de GitHub") {
+		t.Errorf("un archivo UTF-16 con un token: %d\n%s", s.code, s.stdout)
+	}
+	git(t, root, "reset", "-q")
+	// La plantilla de un chart de Helm no es un archivo de secretos.
+	write(t, root, "chart/templates/secret.yaml", "apiVersion: v1\nkind: Secret\ndata:\n  password: {{ .Values.password | b64enc }}\n")
+	write(t, root, "README.md", readFile(t, filepath.Join(root, "README.md"))+"\nSLACK_BOT_TOKEN=xoxb-your-bot-token\nAWS_ACCESS_KEY_ID=AKIA"+"IOSFODNN7EXAMPLE\n")
+	git(t, root, "add", "chart", "README.md")
+	if s := run(t, root, "", "secrets", "scan", "--staged"); s.code != 0 {
+		t.Errorf("una plantilla de Helm y valores de ejemplo no son secretos: %d\n%s", s.code, s.stdout)
 	}
 }

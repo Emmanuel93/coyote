@@ -127,15 +127,25 @@ func FindRoot(start string) (string, error) {
 	}
 }
 
-// Load lee y valida coyote/project.yaml.
+// maxConfig es el tamaño máximo de coyote/project.yaml.
+const maxConfig = 1 << 20
+
+// Load lee y valida coyote/project.yaml. Lo lee con tope y sin seguir
+// symlinks: el gate lo lee en cada llamada y no puede colgarse.
 func Load(root string) (*Config, error) {
-	data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(ConfigPath)))
+	data, err := fsx.ReadFile(root, ConfigPath, maxConfig)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, ErrNotProject
 		}
 		return nil, err
 	}
+	return Parse(data, filepath.Base(root))
+}
+
+// Parse lee y valida el contenido de coyote/project.yaml; name es el nombre
+// del proyecto si el archivo no lo dice.
+func Parse(data []byte, name string) (*Config, error) {
 	var c Config
 	if err := yaml.Unmarshal(data, &c); err != nil {
 		return nil, fmt.Errorf("%s: %w", ConfigPath, err)
@@ -144,7 +154,7 @@ func Load(root string) (*Config, error) {
 		c.Autonomy = "manual"
 	}
 	if c.Name == "" {
-		c.Name = filepath.Base(root)
+		c.Name = name
 	}
 	return &c, c.Validate()
 }

@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/Emmanuel93/coyote/internal/fsx"
 )
 
 // AddedLine es una línea que agrega un cambio, con su número en el lado nuevo.
@@ -244,10 +246,10 @@ func IndexText(dir, path string) (string, bool) {
 	cmd := gitRead(dir, "cat-file", "blob", ":"+path)
 	var out bytes.Buffer
 	cmd.Stdout = &out
-	if cmd.Run() != nil || out.Len() > maxFile || bytes.IndexByte(out.Bytes(), 0) >= 0 {
+	if cmd.Run() != nil || out.Len() > maxFile {
 		return "", false
 	}
-	return out.String(), true
+	return fsx.Text(out.Bytes())
 }
 
 // WorktreeText lee un archivo de texto del árbol de trabajo, sin seguir symlinks.

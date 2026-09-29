@@ -10,6 +10,7 @@ import (
 	"github.com/Emmanuel93/coyote/internal/github"
 	"github.com/Emmanuel93/coyote/internal/infra"
 	"github.com/Emmanuel93/coyote/internal/product"
+	"github.com/Emmanuel93/coyote/internal/project"
 	"github.com/Emmanuel93/coyote/internal/secrets"
 )
 
@@ -64,7 +65,15 @@ func gatePR(a *app, args []string) error {
 	if err != nil {
 		return fail(1, "%v", err)
 	}
-	in.Secrets = scanAdded(added, secrets.Rules{}, "", func(f string) (string, bool) { return product.FileAt(dir, right, f) })
+	// Las reglas de secretos del repo salen de la rama base: un PR no se
+	// dispensa a sí mismo agregando secrets.allow.
+	baseRules := secrets.Rules{}
+	if text, ok := product.FileAt(dir, p.pr.BaseSHA, project.ConfigPath); ok {
+		if cfg, err := project.Parse([]byte(text), p.self); err == nil {
+			baseRules = cfg.Secrets
+		}
+	}
+	in.Secrets = scanAdded(added, func(f string) (secrets.Rules, string) { return baseRules, f }, func(f string) (string, bool) { return product.FileAt(dir, right, f) })
 	var plan *infra.PlanSummary
 	if *planFile != "" {
 		f, err := os.Open(*planFile)

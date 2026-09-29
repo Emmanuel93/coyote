@@ -112,7 +112,7 @@ func FileKind(p string) (string, bool) {
 		return "variables de entorno", true
 	case accountRe.MatchString(base):
 		return "cuenta de servicio u OAuth", true
-	case secretsRe.MatchString(base):
+	case secretsRe.MatchString(base) && !templateDir(p):
 		return "secretos", true
 	case tfstateRe.MatchString(base):
 		return "estado de Terraform", true
@@ -120,6 +120,19 @@ func FileKind(p string) (string, bool) {
 		return "credenciales de Docker", true
 	}
 	return "", false
+}
+
+// templateDir dice si una ruta está en una carpeta templates/: el
+// templates/secret.yaml de un chart de Helm arma el secreto con valores que
+// vienen de afuera ({{ .Values.x | b64enc }}), no lo guarda.
+func templateDir(p string) bool {
+	parts := strings.Split(strings.ToLower(p), "/")
+	for _, d := range parts[:len(parts)-1] {
+		if d == "templates" {
+			return true
+		}
+	}
+	return false
 }
 
 // Kind aplica las reglas del proyecto: sus archivos propios se suman y las
@@ -161,10 +174,13 @@ func GlobMayMatch(pattern string) (string, bool) {
 	if !glob.HasMeta(pattern) {
 		return "", false
 	}
-	base := path.Base(pattern)
-	for _, s := range samples {
-		if glob.Match(base, s) || glob.Match(pattern, s) || glob.Match(pattern, "a/"+s) {
-			return s, true
+	// Sin distinguir mayúsculas: rg --iglob y el disco de macOS no las distinguen.
+	for _, p := range []string{pattern, strings.ToLower(pattern)} {
+		base := path.Base(p)
+		for _, s := range samples {
+			if glob.Match(base, s) || glob.Match(p, s) || glob.Match(p, "a/"+s) {
+				return s, true
+			}
 		}
 	}
 	return "", false
@@ -253,16 +269,28 @@ var detectors = []detector{
 		check: func(m []string) bool { return randomLooking(m[1]) }},
 }
 
-// placeholderWords delatan un valor de ejemplo en la documentación o en las
-// pruebas: la llave de ejemplo de AWS, xoxb-your-bot-token, ghp_xxxx….
-var placeholderWords = []string{"example", "sample", "placeholder", "your", "dummy", "fake", "redacted", "changeme", "xxxx"}
+// knownExamples son valores de ejemplo publicados: los de la documentación de AWS.
+var knownExamples = map[string]bool{"AKIAIOSFODNN7EXAMPLE": true, "AKIAI44QH8DHBEXAMPLE": true,
+	"wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY": true, "je7MtGbClwBF/2Zp9Utk/h3yCo8nvbEXAMPLEKEY": true}
 
-// placeholder dice si un valor es de ejemplo: nombra un ejemplo o repite un
-// mismo caracter seis veces seguidas.
+// placeholderWords delatan un valor de ejemplo en la documentación o en las
+// pruebas (xoxb-your-bot-token, ghp_YOUR_TOKEN_HERE) cuando son una palabra
+// entera del valor: dentro de un token al azar no cuentan.
+var placeholderWords = map[string]bool{"example": true, "sample": true, "placeholder": true, "your": true, "dummy": true,
+	"fake": true, "redacted": true, "changeme": true, "xxxx": true, "here": true}
+
+// placeholder dice si un valor es de ejemplo: uno publicado, uno que termina
+// en EXAMPLE, uno con una palabra de ejemplo o uno que repite un mismo
+// caracter seis veces seguidas.
 func placeholder(s string) bool {
-	lower := strings.ToLower(s)
-	for _, w := range placeholderWords {
-		if strings.Contains(lower, w) {
+	if knownExamples[s] || strings.HasSuffix(s, "EXAMPLE") || strings.HasSuffix(s, "EXAMPLEKEY") {
+		return true
+	}
+	words := strings.FieldsFunc(strings.ToLower(s), func(r rune) bool {
+		return !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9')
+	})
+	for _, w := range words {
+		if placeholderWords[w] {
 			return true
 		}
 	}
@@ -334,6 +362,28 @@ func ScanFrom(p string, first int, text string) []Finding {
 		out = append(out, found...)
 	}
 	return out
+}
+
+// KeyBody dice si una línea parece el cuerpo de una llave (ver keyBody).
+func KeyBody(line string) bool { return keyBody(line) }
+
+// PEMHeader dice si una línea lleva el encabezado de una llave privada.
+func PEMHeader(line string) bool {
+	return pemHeaderRe.MatchString(line) && !strings.Contains(line, AllowMarker)
+}
+
+// HeaderBefore dice si alguna de las pemWindow líneas anteriores a la línea n
+// (desde 1) de un texto es el encabezado de una llave privada: un cuerpo
+// pegado bajo un encabezado que ya estaba en el archivo es una llave.
+func HeaderBefore(text string, n int) bool {
+	lines := strings.Split(text, "\n")
+	start := min(n-2, len(lines)-1)
+	for i := start; i >= 0 && i >= n-1-pemWindow; i-- {
+		if pemHeaderRe.MatchString(lines[i]) && !strings.Contains(lines[i], AllowMarker) {
+			return true
+		}
+	}
+	return false
 }
 
 // NeedsContent dice si un tipo de archivo de secretos se confirma por su
