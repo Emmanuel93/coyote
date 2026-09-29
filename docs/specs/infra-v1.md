@@ -35,6 +35,7 @@ commands:
 - **Marcas.** Son palabras o tramos de ruta: `ENV=prod` no coincide con `ENV=production`. El var-file y las carpetas de sus stacks también cuentan como marcas.
 - **Stacks.** `active` tiene Terraform que se aplica; `scaffold` es andamiaje.
 - **Protección.** Un campo desconocido es un error. Ningún agente escribe el inventario: está protegido como `project.yaml`, también para los comandos de shell. Un inventario que es un symlink, no es un archivo regular o pesa más de 1 MiB no se lee: el gate bloquea los cambios de infraestructura hasta corregirlo.
+- **Topes.** Hasta 64 ambientes, 32 marcas por ambiente (de 3 a 128 caracteres), 256 stacks, 64 comandos de apply y 64 dueños: el gate lee el inventario en cada comando. Un comando de infraestructura de más de 64 KiB se bloquea: es demasiado largo para saber a qué ambiente toca.
 
 `coyote infra propose` arma el inventario desde el repo, sin escribir nada:
 
@@ -72,11 +73,11 @@ Cada recurso que cambia se clasifica:
 
 | Riesgo | Cambios |
 |--------|---------|
-| R3 | destruir o reemplazar; permisos (IAM, roles, políticas, llaves de cuentas de servicio); llaves y secretos (KMS, Secret Manager, Key Vault); reglas de entrada abiertas a internet (`0.0.0.0/0`, `::/0`, `*` en Azure), también en NACL; acceso público (`allUsers`, ACL `public-read`); bases de datos con `deletion_protection` o `deletion_protection_enabled` en `false` |
+| R3 | destruir o reemplazar; permisos (IAM, roles, políticas, llaves de cuentas de servicio); llaves y secretos (KMS, Secret Manager, Key Vault); entrada abierta a internet en cualquier recurso (un rango público de 8 bits o menos, como `0.0.0.0/0` o `0.0.0.0/1` con `128.0.0.0/1`; `::/0`; `*` en Azure; de `0.x` a `255.x`), también en NACL, redes autorizadas de una base de datos o el endpoint de un cluster; acceso público (`allUsers`, el grupo `AllUsers` de S3, ACL `public-read`); bases de datos con `deletion_protection` o `deletion_protection_enabled` en `false`; un recurso demasiado grande para revisarlo entero |
 | R2 | cualquier otra creación o cambio; sacar un recurso del estado sin destruirlo (`forget`) o importarlo; una acción que esta versión no conoce |
 | R1 | un plan sin cambios |
 
-La clasificación recorre el JSON del estado final de cada recurso, no su texto: un plan con sangría (`jq .`) da lo mismo que uno compacto. Una regla de salida abierta a internet (`egress`) es lo normal y no sube el riesgo.
+La clasificación recorre el JSON del estado final de cada recurso, no su texto, y en orden: un plan con sangría (`jq .`) da lo mismo que uno compacto, y dos lecturas del mismo plan dan lo mismo. Una regla de salida (`egress`) o una ruta abierta a internet son lo normal y no suben el riesgo.
 
 - **Solo metadatos.** El plan en JSON lleva los valores de los recursos, secretos incluidos. coyote lo lee sin copiarlo y solo reporta direcciones, tipos y acciones.
 - **Costo.** Los tipos que suelen mover el costo (clusters, grupos de nodos, bases de datos, balanceadores, NAT) se listan para compararlos con el presupuesto del ambiente.

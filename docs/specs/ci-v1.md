@@ -58,7 +58,7 @@ Es la aprobación en equipo sin claves compartidas. Hace lo mismo que `ci impact
 
 | Riesgo | Rutas |
 |--------|-------|
-| R3 | el pipeline, las acciones propias y CODEOWNERS; `.gitattributes` y `.gitmodules`; migraciones y SQL; `auth`, `security`, `crypto`; infraestructura (Terraform, Helm, Kubernetes, Dockerfile); la configuración del gate y del estándar |
+| R3 | el pipeline, las acciones propias y CODEOWNERS; `.gitattributes` y `.gitmodules`; migraciones y SQL; `auth`, `security`, `crypto`; infraestructura (Terraform con `*.tf.json`, `*.tfvars`, `terragrunt.hcl` y `.terraform.lock.hcl`, Helm, Kubernetes, Dockerfile); la configuración del gate, de los hooks de cada IDE, del inventario (`coyote/infra.yaml`) y del estándar |
 | R2 | contratos de API (OpenAPI, AsyncAPI, proto, Avro, GraphQL); dependencias (`go.mod`, `pom.xml`, Gradle, `package.json`, `pubspec.yaml`…); configuración del servicio (`application*.yml`) |
 
 El proyecto agrega las suyas en `coyote/project.yaml`, un archivo que ningún agente puede editar. `install --ci` las lleva a cada workflow:
@@ -72,6 +72,10 @@ risk:
 **Riesgo por impacto.** Romper a un consumidor es R3. Llegar a otro repo del producto es R2.
 
 **Plan de Terraform.** En un repo de infraestructura, el pipeline puede generar el plan y pasarlo con `--plan plan.json`: su riesgo se suma al del PR y el comentario lleva la tabla de recursos, sin valores (docs/specs/infra-v1.md). Generarlo necesita credenciales de la nube en el pipeline; coyote no las pide.
+
+El riesgo del plan es del cambio entero: lo aprueba un dueño de lo que cambió el PR, aunque el PR no toque rutas de riesgo (un plan que reemplaza una base de datos por un cambio en un `.tfvars`). Un riesgo que pide revisión nunca queda sin grupo de dueños: sin archivos que lo expliquen, aprueba cualquier dueño de lo cambiado o, sin CODEOWNERS, cualquier persona que no abrió el PR.
+
+**Secretos.** Las dispensas de secretos (`secrets.allow` de `coyote/project.yaml`) salen de la rama base: un PR no se dispensa a sí mismo.
 
 **Secretos (R18).** Lo que agrega el PR pasa por el escáner de secretos, como dato y sin ejecutar nada: los archivos de secretos nuevos por su nombre, las líneas agregadas y, completos, los archivos que git lista sin hunks. Un PR que agrega secretos queda en R3 y no pasa con ninguna aprobación: el secreto ya está en GitHub y hay que rotarlo. El comentario dice archivo, línea y tipo, nunca el valor (docs/specs/secrets-v1.md).
 

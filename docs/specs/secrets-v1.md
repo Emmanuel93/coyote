@@ -90,7 +90,7 @@ No cuentan:
 
 - una llave de API de Google (`AIza…`): en Firebase va dentro de la app por diseño y se limita por app;
 - el encabezado PEM solo, sin cuerpo: lo menciona el código que lee llaves y su documentación;
-- los valores de ejemplo: la llave de ejemplo de AWS (`AKIA…EXAMPLE`), `xoxb-your-bot-token`, un valor con `example`, `your`, `dummy`, `xxxx` o un mismo caracter seis veces seguidas.
+- los valores de ejemplo: los de la documentación de AWS (`AKIA…EXAMPLE`), un valor con `example`, `your`, `here`, `dummy` o `xxxx` como palabra entera (`xoxb-your-bot-token`, `ghp_YOUR_TOKEN_HERE`) o con un mismo caracter seis veces seguidas. Dentro de un token al azar esas letras no cuentan.
 
 El escáner revisa todas las líneas, de cualquier largo: una línea de más de 64 KiB (un archivo minificado) se revisa por tramos. En un cambio cuenta las líneas de cada hunk, así que una línea agregada que empieza con `++` no se confunde con el encabezado de otro archivo.
 
@@ -102,7 +102,11 @@ Dónde corre:
 - **`coyote gate pr`.** Un PR que agrega secretos queda en R3 y no pasa con ninguna aprobación: el secreto ya está en GitHub y hay que rotarlo.
 - **Gate.** Cubre lo que escribe un agente. Un encabezado PEM sin cuerpo pide la aprobación normal: si un agente escribe una llave en dos ediciones, la persona ve el encabezado al aprobar la primera, y el escáner detiene la llave completa en el commit.
 
-En un proyecto que vive en una subcarpeta de su repo, `secrets.files` y `secrets.allow` se toman relativas a la carpeta del proyecto; fuera de ella valen los nombres de siempre.
+Cada ruta de un cambio lleva las reglas del proyecto coyote que la contiene (su `coyote/project.yaml` más cercano), relativas a la carpeta de ese proyecto; fuera de un proyecto valen los nombres de siempre. Así el hook `commit-msg`, que git corre en la raíz del repo, aplica las reglas de un proyecto que vive en una subcarpeta, y un monorepo con varios proyectos aplica las de cada uno. `gate pr` toma las reglas de la rama base.
+
+Un cuerpo de llave que se pega bajo un encabezado que ya estaba en el archivo también se detiene: en el commit se busca el encabezado en la versión nueva del archivo, y en el gate, en el archivo actual.
+
+Un archivo en UTF-16 con BOM (lo que escribe PowerShell 5) se revisa como texto. La plantilla `templates/secret.yaml` de un chart de Helm no es un archivo de secretos: arma el secreto con valores que vienen de afuera.
 
 ## Límites
 

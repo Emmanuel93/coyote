@@ -104,12 +104,13 @@ Los agentes remotos (el agente de Copilot en GitHub, Devin en la nube) no corren
 - `settings.json` y `hooks.json` se leen conservando el orden de sus claves. coyote cambia solo sus entradas y deja los permisos y hooks de la persona:
   - son de coyote los hooks cuyo comando nombra el script `coyote-gate.sh` por su nombre exacto, y el de v0.1; un `notify-coyote-gateway.sh` es de la persona;
   - si el archivo no es JSON válido, o una clave que coyote necesita no tiene la forma esperada, install falla sin escribir.
-- Un `.github/hooks/coyote.json` que no generó coyote queda **en conflicto**: no se pisa, pero Copilot queda sin gate. `install` escribe lo demás y sale con 1, y `install --check` y `doctor` fallan hasta que la persona lo renombre.
+- Un `.github/hooks/coyote.json` que no generó coyote queda **en conflicto**: no se pisa, pero Copilot queda sin gate. `install` escribe lo demás y sale con 1, y `install --check` y `doctor` fallan hasta que la persona lo renombre. Si es de coyote y la persona le sumó otros hooks, se conservan.
+- `"disableAllHooks": true` en `.claude/settings.json` o en `.claude/settings.local.json` también deja la instalación **en conflicto**: Claude Code no corre ningún hook y el gate queda apagado hasta que la persona la quite.
 - Cada archivo se escribe en un temporal con nombre al azar, creado en exclusiva, y se renombra: un temporal plantado como symlink no desvía la escritura.
 - Un agente o skill que existe y no lo generó coyote no se pisa.
 - Todo archivo generado lleva una marca; los que coyote generó y ya no existen en la definición se borran.
 - `CLAUDE.md` existente conserva su contenido y gana la línea `@AGENTS.md`. Un `AGENTS.md` ajeno no se toca.
-- `.gitignore` gana `.coyote/` si falta.
+- `.gitignore` gana `.coyote/` si falta; un `.gitignore` que es un symlink no se toca.
 
 ## Comandos
 
