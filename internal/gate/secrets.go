@@ -34,7 +34,7 @@ var credCommands = []credCmd{
 	cred(`\baws`+sub+`ssm\s+get-parameters?(?:-by-path)?\b.*--with-decryption`, "un parámetro cifrado de AWS"),
 	cred(`\baz`+sub+`(?:account\s+get-access-token|keyvault\s+secret\s+(?:show|download)|ad\s+sp\s+create-for-rbac|aks\s+get-credentials|storage\s+account\s+keys\s+list)\b`, "credenciales de Azure"),
 	cred(`\baz`+sub+`acr\s+login\b.*--expose-token`, "un token de Azure"),
-	cred(`\b(?:kubectl|oc)`+sub+`get\s+(?:\S+\s+)*?[a-z,]*\bsecrets?\b`, "un secreto de Kubernetes"),
+	cred(`\b(?:kubectl|oc)`+sub+`(?:get|describe)\s+(?:\S+\s+)*?[a-z,]*\bsecrets?\b`, "un secreto de Kubernetes"),
 	cred(`\b(?:kubectl|oc)`+sub+`(?:create\s+token\b|config\s+view\b.*--(?:raw|flatten)\b)`, "credenciales de Kubernetes"),
 	cred(`\b(?:terraform|tofu)`+sub+`(?:output|console|show)\b`, "valores del estado o del plan de Terraform"),
 	cred(`\b(?:terraform|tofu)`+sub+`state\s+(?:pull|show)\b`, "el estado de Terraform"),
@@ -82,21 +82,38 @@ func secretVar(text string) bool {
 	return false
 }
 
-// credCommand dice si un comando imprime o crea credenciales. Los mensajes y
-// las notas son datos: mencionar un comando en un mensaje de commit no lo corre.
+// credCommand dice si un comando imprime o crea credenciales. Se revisa como
+// lo correría el shell: las comillas no esconden un subcomando (gcloud auth
+// "print-access-token"). Los mensajes, las notas y los datos (lo que imprime
+// echo, el patrón de grep) no son comandos.
 func credCommand(cmd string) (string, bool) {
-	text := neutralize(cmd)
-	for _, c := range credCommands {
-		if c.re.MatchString(text) {
-			return c.what, true
+	for _, text := range cmdTexts(cmd) {
+		for _, c := range credCommands {
+			if c.re.MatchString(text) {
+				return c.what, true
+			}
 		}
 	}
-	for _, seg := range lenientSplit(text) {
+	for _, seg := range view(cmd, false) {
 		if what, ok := envDump(seg); ok {
 			return what, true
 		}
 	}
 	return "", false
+}
+
+// cmdTexts son los textos de un comando que revisan los detectores por
+// patrón: cada segmento como lo correría el shell y sin sus datos. Si el
+// comando arma palabras al correr (sustituciones), también el texto entero.
+func cmdTexts(cmd string) []string {
+	var out []string
+	for _, seg := range view(cmd, true) {
+		out = append(out, segText(seg))
+	}
+	if strings.Contains(cmd, "$(") || strings.Contains(cmd, "`") || strings.Contains(cmd, "<(") || strings.Contains(cmd, ">(") {
+		out = append(out, neutralize(cmd))
+	}
+	return out
 }
 
 // neutralize quita del comando los textos que son datos: mensajes, títulos y
@@ -108,35 +125,28 @@ func neutralize(cmd string) string {
 }
 
 // envDump reconoce un segmento que imprime las variables de entorno, donde
-// suelen vivir tokens: env o printenv a secas, export -p, declare -p, set a
-// secas, o echo de una variable con nombre de secreto.
-func envDump(seg []lword) (string, bool) {
-	prog := ""
-	for _, w := range seg {
-		if !assignRe.MatchString(w.text) {
-			prog = strings.ToLower(filepath.Base(w.text))
-			break
-		}
+// suelen vivir tokens: env o printenv a secas, export -p, declare -p (a secas
+// o de una variable con nombre de secreto), set a secas, o echo de una
+// variable con nombre de secreto.
+func envDump(seg []string) (string, bool) {
+	prog, at := mainProg(seg)
+	if at < 0 {
+		return "", false
 	}
-	pos := positionalWords(seg)
+	var pos []string
 	flags := 0
-	for _, w := range seg {
-		if strings.HasPrefix(w.text, "-") {
+	for _, w := range seg[at+1:] {
+		if strings.HasPrefix(w, "-") {
 			flags++
+		} else {
+			pos = append(pos, w)
 		}
 	}
 	switch prog {
 	case "env":
-		// env con un comando lo corre con otras variables; sin comando, las imprime.
-		rest := 0
-		for _, p := range pos {
-			if !assignRe.MatchString(p) {
-				rest++
-			}
-		}
-		if rest == 0 {
-			return "las variables de entorno", true
-		}
+		// env con un comando lo corre con otras variables (mainProg lo salta);
+		// sin comando, las imprime.
+		return "las variables de entorno", true
 	case "printenv":
 		if len(pos) == 0 {
 			return "las variables de entorno", true
@@ -146,17 +156,25 @@ func envDump(seg []lword) (string, bool) {
 				return "una variable con nombre de secreto", true
 			}
 		}
-	case "export", "declare", "typeset":
+	case "export", "declare", "typeset", "readonly":
 		if len(pos) == 0 {
 			return "las variables de entorno", true
+		}
+		if flags > 0 {
+			// declare -p GITHUB_TOKEN imprime el valor.
+			for _, p := range pos {
+				if !assignRe.MatchString(p) && secretName(p) {
+					return "una variable con nombre de secreto", true
+				}
+			}
 		}
 	case "set":
 		if len(pos) == 0 && flags == 0 {
 			return "las variables del shell", true
 		}
 	case "echo", "printf", "print":
-		for _, w := range seg[1:] {
-			if secretVar(w.text) {
+		for _, w := range seg[at+1:] {
+			if secretVar(w) {
 				return "una variable con nombre de secreto", true
 			}
 		}
@@ -187,28 +205,48 @@ func findRuns(seg []lword) bool {
 }
 
 // secretWord busca en un comando una palabra que nombre un archivo de
-// secretos (cat .env, cp .env x, --env-file=.env).
+// secretos (cat .env, cp .env x, --env-file=.env, grep -f.env) o un patrón de
+// búsqueda que los alcance (rg -g '*.env').
 func (ps Paths) secretWord(cmd, cwd string) (string, bool) {
 	for _, seg := range lenientSplit(neutralize(cmd)) {
-		prog := program(seg)
+		words := texts(seg)
+		prog, at := mainProg(words)
 		if nameOnly[prog] && !(prog == "find" && findRuns(seg)) {
 			continue
 		}
-		skipPattern := grepPrograms[prog] || (prog == "git" && len(seg) > 1 && seg[1].text == "grep")
-		seenProg, skipped := false, false
-		for _, w := range seg {
-			if !seenProg {
-				if assignRe.MatchString(w.text) {
-					if what, ok := ps.secretToken(w.text, cwd); ok {
-						return what, true
-					}
-					continue
-				}
-				seenProg = true
-				continue
+		skip := map[int]bool{}
+		var globs []string
+		search := func(kind string, from int) {
+			sp := parseSearch(kind, words[from:])
+			for i := range sp.pattern {
+				skip[from+i] = true // el patrón de la búsqueda es dato
 			}
-			if skipPattern && !skipped && !strings.HasPrefix(w.text, "-") && !(prog == "git" && w.text == "grep") {
-				skipped = true // el patrón de la búsqueda
+			for i := range sp.globWords {
+				skip[from+i] = true // los patrones de nombres se revisan abajo
+			}
+			globs = sp.globs
+		}
+		switch {
+		case at < 0:
+		case grepPrograms[prog]:
+			search(prog, at+1)
+		case prog == "git":
+			if sub, off := gitSub(words[at+1:]); sub == "grep" {
+				search("git-grep", at+2+off)
+			}
+		}
+		// Un patrón que incluye nombres (rg -g, grep --include) manda sobre
+		// .gitignore: con él, la búsqueda lee los archivos que alcanza.
+		for _, g := range globs {
+			if s, ok := secrets.GlobMayMatch(g); ok {
+				return "un patrón de búsqueda que alcanza archivos de secretos (" + s + ")", true
+			}
+			if what, ok := ps.secretToken(g, cwd); ok {
+				return what, true
+			}
+		}
+		for i, w := range seg {
+			if skip[i] {
 				continue
 			}
 			// Una ruta puede venir dentro de un script (python -c 'open(".env")'):
@@ -223,11 +261,18 @@ func (ps Paths) secretWord(cmd, cwd string) (string, bool) {
 	return "", false
 }
 
-// secretToken revisa una palabra: una ruta, o una opción con ruta (--env-file=.env).
+// secretToken revisa una palabra: una ruta, una opción con ruta
+// (--env-file=.env) o una opción corta con el valor pegado (-f.env).
 func (ps Paths) secretToken(tok, cwd string) (string, bool) {
 	cands := []string{tok}
 	if i := strings.IndexByte(tok, '='); i >= 0 {
 		cands = append(cands, tok[i+1:])
+	}
+	if len(tok) > 2 && tok[0] == '-' && tok[1] != '-' {
+		// -f.env, -xf.env: el valor empieza después de una o más letras.
+		for k := 2; k < len(tok) && k <= 6; k++ {
+			cands = append(cands, tok[k:])
+		}
 	}
 	for _, c := range cands {
 		c = strings.Trim(c, `"'(),;`)
@@ -273,11 +318,11 @@ func (ps Paths) secretGlobWord(pattern, cwd string) (string, bool) {
 func (ps Paths) secretFile(abs string) (kind, rel string, ok bool) {
 	rel = ps.Rel(abs)
 	if filepath.IsAbs(filepath.FromSlash(rel)) {
-		// Fuera del proyecto solo cuenta el nombre.
-		kind, ok = secrets.FileKind(rel)
+		// Fuera del proyecto cuentan el nombre y, si hace falta, el contenido.
+		kind, ok = secrets.Rules{}.KindAt("", rel)
 		return kind, rel, ok
 	}
-	kind, ok = ps.Secrets.Kind(rel)
+	kind, ok = ps.Secrets.KindAt(ps.Root, rel)
 	return kind, rel, ok
 }
 

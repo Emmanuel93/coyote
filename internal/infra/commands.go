@@ -1,6 +1,7 @@
 package infra
 
 import (
+	"path"
 	"regexp"
 	"strings"
 )
@@ -53,32 +54,48 @@ func Effect(cmd string) bool {
 	return false
 }
 
-// DeclaredApply dice si el comando corre uno de los comandos de apply del
-// inventario (commands.apply: make apply, make down…).
-func (inv *Inventory) DeclaredApply(cmd string) (string, bool) {
+// DeclaredApply dice si un segmento de un comando, palabra por palabra y sin
+// comillas, corre uno de los comandos de apply del inventario
+// (commands.apply: make apply, make down…). Cuenta el programa por su nombre
+// (/usr/bin/make, gmake no) en cualquier lugar del segmento, con los targets
+// entre sus argumentos: make -C . apply, make ENV=prod apply y make -j4
+// destroy corren el target igual.
+func (inv *Inventory) DeclaredApply(words []string) (string, bool) {
 	if inv == nil {
 		return "", false
 	}
-	fields := strings.Fields(cmd)
 	for _, c := range inv.Commands.Apply {
 		want := strings.Fields(c)
 		if len(want) == 0 {
 			continue
 		}
-		for i := 0; i+len(want) <= len(fields); i++ {
-			ok := true
-			for j := range want {
-				if strings.Trim(fields[i+j], `"'();&|`) != want[j] {
-					ok = false
+		for i, w := range words {
+			if !strings.EqualFold(path.Base(w), want[0]) {
+				continue
+			}
+			rest := words[i+1:]
+			all := true
+			for _, t := range want[1:] {
+				if !containsWord(rest, t) {
+					all = false
 					break
 				}
 			}
-			if ok {
+			if all {
 				return c, true
 			}
 		}
 	}
 	return "", false
+}
+
+func containsWord(list []string, w string) bool {
+	for _, x := range list {
+		if x == w {
+			return true
+		}
+	}
+	return false
 }
 
 // EnvFor devuelve el ambiente que delata un comando por sus marcas (match):

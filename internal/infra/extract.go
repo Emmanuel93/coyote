@@ -170,7 +170,7 @@ func (inv *Inventory) YAML(source string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# coyote/infra.yaml: inventario de la infraestructura (R13, ADR-0017).\n")
 	if source != "" {
-		fmt.Fprintf(&b, "# Propuesto por coyote extract desde %s: revísalo antes de llevarlo al repo.\n", source)
+		fmt.Fprintf(&b, "# Propuesto por coyote desde %s: revísalo antes de llevarlo al repo.\n", source)
 	}
 	fmt.Fprintf(&b, "version: 1\ntool: %s\n", inv.Tool)
 	if inv.Versions != "" {

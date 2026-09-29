@@ -355,32 +355,79 @@ func (h *Hard) Error() string { return h.Reason }
 func hard(format string, a ...any) *Hard { return &Hard{fmt.Sprintf(format, a...)} }
 
 // shellProtected son textos que en un comando delatan que toca el gate o
-// credenciales, aunque el comando no se pueda analizar.
+// credenciales, aunque el comando no se pueda analizar. cred marca lo que se
+// bloquea aun para leer: credenciales y la configuración de un IDE que puede
+// llevar tokens (el env de sus servidores MCP). Lo demás es la configuración
+// del gate, que un comando de solo lectura puede mirar. data marca las
+// claves que desarman el gate: cuentan también dentro de un dato (echo
+// '{"disableAllHooks": true}' > x.json).
 var shellProtected = []struct {
-	re  *regexp.Regexp
-	why string
+	re   *regexp.Regexp
+	why  string
+	cred bool
+	data bool
 }{
-	{regexp.MustCompile(`(?i)\.git/(hooks|config)\b`), "los hooks o la configuración de git"},
-	{regexp.MustCompile(`(?i)hookspath`), "core.hooksPath de git"},
-	{regexp.MustCompile(`(?i)\.claude/(settings|hooks)`), "la configuración de Claude Code"},
-	{regexp.MustCompile(`(?i)managed-settings`), "la configuración administrada del IDE"},
-	{regexp.MustCompile(`(?i)disableallhooks`), "el apagado de hooks"},
-	{regexp.MustCompile(`(?i)\.cursor/hooks`), "los hooks de Cursor"},
-	{regexp.MustCompile(`(?i)\.codex/(hooks|config|requirements)`), "los hooks o la configuración de Codex"},
-	{regexp.MustCompile(`(?i)\.gemini/(settings|hooks)`), "los hooks o la configuración de Gemini CLI"},
-	{regexp.MustCompile(`(?i)\.github/hooks`), "los hooks de Copilot"},
-	{regexp.MustCompile(`(?i)\.copilot/(hooks|config)`), "los hooks o la configuración de Copilot"},
-	{regexp.MustCompile(`(?i)\.(windsurf|devin)/(hooks|config)|\.codeium/(windsurf/)?hooks`), "los hooks de Windsurf o de Devin"},
-	{regexp.MustCompile(`(?i)\.junie/config|\.kiro/hooks|\.clinerules/hooks`), "los hooks de Junie, Kiro o Cline"},
-	{regexp.MustCompile(`(?i)chat\.(use(claude)?hooks|hookfileslocations)`), "los hooks de VS Code"},
-	{regexp.MustCompile(`(?i)(^|[\s/'"=~])\.claude\.json\b`), "la configuración global de Claude Code"},
-	{regexp.MustCompile(`(?i)coyote/approvals`), "los registros de aprobación"},
-	{regexp.MustCompile(`(?i)coyote/project\.yaml`), "la configuración del proyecto (autonomía)"},
-	{regexp.MustCompile(`(?i)(^|[\s/'"=])\.coyote($|[\s/'";|&)])`), "el estado local de coyote"},
-	{regexp.MustCompile(`(?i)\.ssh/|\.gnupg|\.aws/|\.config/gh\b|\.git-credentials|\.netrc|\.docker/config\.json|\.kube/config|keychains/|\.password-store|\.vault-token`), "credenciales"},
-	{regexp.MustCompile(`(?i)\bsecurity\s+(find|dump|export)-|\bsecret-tool\s+lookup|\bgh\s+auth\s+token`), "credenciales del llavero o de gh"},
-	{regexp.MustCompile(`(?i)coyote/[a-z0-9_-]+\.key\b`), "las claves locales de coyote"},
-	{regexp.MustCompile(`(?i)(^|[\s/'"=~])\.(zshrc|zshenv|zprofile|bashrc|bash_profile|profile|gitconfig)\b`), "la configuración del shell o de git"},
+	{re: regexp.MustCompile(`(?i)\.git/config\b`), why: "la configuración de git, que puede llevar tokens", cred: true},
+	{re: regexp.MustCompile(`(?i)\.git/hooks\b`), why: "los hooks de git"},
+	{re: regexp.MustCompile(`(?i)hookspath`), why: "core.hooksPath de git", data: true},
+	{re: regexp.MustCompile(`(?i)\.claude/settings`), why: "la configuración de Claude Code", cred: true},
+	{re: regexp.MustCompile(`(?i)\.claude/hooks`), why: "los hooks de Claude Code"},
+	{re: regexp.MustCompile(`(?i)\.claude/\.credentials`), why: "las credenciales de Claude Code", cred: true},
+	{re: regexp.MustCompile(`(?i)managed-settings`), why: "la configuración administrada del IDE", cred: true},
+	{re: regexp.MustCompile(`(?i)disableallhooks`), why: "el apagado de hooks", data: true},
+	{re: regexp.MustCompile(`(?i)\.cursor/hooks`), why: "los hooks de Cursor"},
+	{re: regexp.MustCompile(`(?i)\.codex/config`), why: "la configuración de Codex", cred: true},
+	{re: regexp.MustCompile(`(?i)\.codex/(hooks|requirements)`), why: "los hooks de Codex"},
+	{re: regexp.MustCompile(`(?i)\.gemini/settings`), why: "la configuración de Gemini CLI", cred: true},
+	{re: regexp.MustCompile(`(?i)\.gemini/hooks`), why: "los hooks de Gemini CLI"},
+	{re: regexp.MustCompile(`(?i)\.github/hooks`), why: "los hooks de Copilot"},
+	{re: regexp.MustCompile(`(?i)\.copilot/config`), why: "la configuración de Copilot", cred: true},
+	{re: regexp.MustCompile(`(?i)\.copilot/hooks`), why: "los hooks de Copilot"},
+	{re: regexp.MustCompile(`(?i)\.(windsurf|devin)/hooks|\.codeium/(windsurf/)?hooks|\.windsurf/config`), why: "los hooks de Windsurf o de Devin"},
+	{re: regexp.MustCompile(`(?i)\.devin/config|\.junie/config`), why: "la configuración de Devin o de Junie", cred: true},
+	{re: regexp.MustCompile(`(?i)\.kiro/hooks|\.clinerules/hooks`), why: "los hooks de Kiro o Cline"},
+	{re: regexp.MustCompile(`(?i)chat\.(use(claude)?hooks|hookfileslocations)`), why: "los hooks de VS Code", data: true},
+	{re: regexp.MustCompile(`(?i)(^|[\s/'"=~])\.claude\.json\b`), why: "la configuración global de Claude Code", cred: true},
+	{re: regexp.MustCompile(`(?i)coyote/approvals`), why: "los registros de aprobación"},
+	{re: regexp.MustCompile(`(?i)coyote/project\.yaml`), why: "la configuración del proyecto (autonomía)"},
+	{re: regexp.MustCompile(`(?i)coyote/infra\.yaml`), why: "el inventario de la infraestructura"},
+	{re: regexp.MustCompile(`(?i)(^|[\s/'"=])\.coyote($|[\s/'";|&)])`), why: "el estado local de coyote"},
+	{re: regexp.MustCompile(`(?i)\.ssh/|\.gnupg|\.aws/|\.config/gh\b|\.git-credentials|\.netrc|\.docker/config\.json|\.kube/config|keychains/|\.password-store|\.vault-token`), why: "credenciales", cred: true},
+	{re: regexp.MustCompile(`(?i)\bsecurity\s+(find|dump|export)-|\bsecret-tool\s+lookup|\bgh\s+auth\s+token`), why: "credenciales del llavero o de gh", cred: true},
+	{re: regexp.MustCompile(`(?i)coyote/[a-z0-9_-]+\.key\b`), why: "las claves locales de coyote", cred: true},
+	{re: regexp.MustCompile(`(?i)(^|[\s/'"=~])\.(zshrc|zshenv|zprofile|bashrc|bash_profile|profile|gitconfig)\b`), why: "la configuración del shell o de git", cred: true},
+}
+
+// protectedIn busca en un comando un texto protegido, segmento por segmento
+// y sin sus datos: mencionar una ruta en un mensaje, en lo que imprime echo o
+// en el patrón de grep no la toca. Un comando de solo lectura puede mirar la
+// configuración del gate, no credenciales.
+func (ps Paths) protectedIn(cmd string, readOnly bool) (string, bool) {
+	check := func(segs [][]string, data bool) (string, bool) {
+		for _, seg := range segs {
+			line := segText(seg)
+			for _, p := range shellProtected {
+				if (readOnly && !p.cred) || (data && !p.data) {
+					continue
+				}
+				if p.re.MatchString(line) {
+					return p.why, true
+				}
+			}
+			if strings.Contains(line, ps.Home) {
+				for _, s := range ps.Sensitive {
+					if strings.Contains(strings.ToLower(line), strings.ToLower(s)) {
+						return "credenciales (" + s + ")", true
+					}
+				}
+			}
+		}
+		return "", false
+	}
+	if why, ok := check(view(cmd, true), false); ok {
+		return why, true
+	}
+	return check(view(cmd, false), true)
 }
 
 // agentFlag extrae el agente que declara un comando de coyote.
@@ -394,20 +441,12 @@ func (ps Paths) hardShell(a Action) *Hard {
 	}
 	// Si el comando se analiza como de solo lectura, coyote solo aparece en
 	// subcomandos de lectura (install --check, por ejemplo).
-	if _, err := analyzeShell(cmd); err != nil && isCoyoteAdmin(cmd) {
+	_, notRead := analyzeShell(cmd)
+	if notRead != nil && isCoyoteAdmin(cmd) {
 		return hard("un agente no aprueba, rechaza ni revoca, no instala el gate ni credenciales y no lanza otros agentes (coyote run, coyote ws run o continue); eso lo hace la persona en su terminal")
 	}
-	for _, p := range shellProtected {
-		if p.re.MatchString(cmd) {
-			return hard("el comando toca %s", p.why)
-		}
-	}
-	if strings.Contains(cmd, ps.Home) {
-		for _, s := range ps.Sensitive {
-			if strings.Contains(strings.ToLower(cmd), strings.ToLower(s)) {
-				return hard("el comando toca credenciales (%s)", s)
-			}
-		}
+	if why, ok := ps.protectedIn(cmd, notRead == nil); ok {
+		return hard("el comando toca %s", why)
 	}
 	if what, ok := credCommand(cmd); ok {
 		return hard("el comando imprime o crea %s; las credenciales las maneja la persona", what)
@@ -419,7 +458,7 @@ func (ps Paths) hardShell(a Action) *Hard {
 	if what, ok := ps.secretWord(cmd, cwd); ok {
 		return hard("el comando toca %s: un agente no lee ni escribe archivos de secretos; pide los nombres con coyote secrets list", what)
 	}
-	if h := ps.hardInfra(neutralize(cmd)); h != nil {
+	if h := ps.hardInfra(cmd); h != nil {
 		return h
 	}
 	if a.AgentType != "" {
@@ -434,22 +473,31 @@ func (ps Paths) hardShell(a Action) *Hard {
 
 // hardInfra aplica el gate por ambiente (ADR-0017): un agente nunca aplica
 // infraestructura como código, ni corre los comandos de apply del
-// inventario, ni cambia un ambiente que se aplica con revisor.
+// inventario, ni cambia un ambiente que se aplica con revisor. El comando se
+// revisa como lo correría el shell: terraform "apply" y make -C . apply
+// cuentan.
 func (ps Paths) hardInfra(cmd string) *Hard {
-	if what, ok := infra.ApplyCommand(cmd); ok {
-		return hard("un agente nunca aplica infraestructura (%s): lo corre la persona en su terminal o un pipeline con revisor", what)
+	texts := cmdTexts(cmd)
+	effect := false
+	for _, t := range texts {
+		if what, ok := infra.ApplyCommand(t); ok {
+			return hard("un agente nunca aplica infraestructura (%s): lo corre la persona en su terminal o un pipeline con revisor", what)
+		}
+		effect = effect || infra.Effect(t)
 	}
-	if ps.InfraErr != nil && infra.Effect(cmd) {
+	if ps.InfraErr != nil && effect {
 		return hard("el comando cambia infraestructura y coyote/infra.yaml no se puede leer (%v): corrígelo antes", ps.InfraErr)
 	}
 	if ps.Infra == nil {
 		return nil
 	}
-	if c, ok := ps.Infra.DeclaredApply(cmd); ok {
-		return hard("%q aplica infraestructura según coyote/infra.yaml: lo corre la persona o un pipeline con revisor", c)
+	for _, seg := range view(cmd, true) {
+		if c, ok := ps.Infra.DeclaredApply(seg); ok {
+			return hard("%q aplica infraestructura según coyote/infra.yaml: lo corre la persona o un pipeline con revisor", c)
+		}
 	}
-	if infra.Effect(cmd) {
-		if env, ok := ps.Infra.EnvFor(cmd); ok && ps.Infra.Environments[env].Apply == infra.Reviewed {
+	if effect {
+		if env, ok := ps.Infra.EnvFor(strings.Join(texts, " ; ")); ok && ps.Infra.Environments[env].Apply == infra.Reviewed {
 			return hard("el comando cambia el ambiente %s, que solo aplica la persona o un pipeline con revisor (coyote/infra.yaml)", env)
 		}
 	}
@@ -485,22 +533,54 @@ func (ps Paths) readShell(a Action) (ok bool, why string, cred bool) {
 	}
 	var contentDirs []string
 	for _, s := range segs {
+		args := make([]string, len(s.args))
+		for i, w := range s.args {
+			args[i] = w.s
+		}
+		segCwd := cwd
 		recursive := s.prog == "rg" || s.prog == "find" || s.prog == "tree" || s.prog == "du"
 		if s.prog == "grep" || s.prog == "egrep" || s.prog == "fgrep" || s.prog == "ls" || s.prog == "diff" {
 			_, recursive = hasFlag(s.args, "-r", "-R", "--recursive", "--dereference-recursive")
 		}
 		// Lee contenidos sin respetar .gitignore: grep -r y diff -r siempre; rg
-		// solo con --hidden, --no-ignore o -u.
+		// con --hidden, --no-ignore o -u; git grep con --no-index o
+		// --no-exclude-standard.
 		readsAll := recursive && (s.prog == "grep" || s.prog == "egrep" || s.prog == "fgrep" || s.prog == "diff")
 		if s.prog == "rg" {
-			if _, ok := hasFlag(s.args, "--hidden", "--no-ignore", "-u", "-uu", "-uuu", "-.", "--no-ignore-vcs"); ok {
+			if _, ok := hasFlag(s.args, "--hidden", "--no-ignore", "-u", "-uu", "-uuu", "-.", "--no-ignore-vcs", "--no-ignore-dot",
+				"--no-ignore-exclude", "--no-ignore-files", "--no-ignore-global", "--no-ignore-parent"); ok {
 				readsAll = true
+			}
+		}
+		// La búsqueda: su patrón es dato y sus operandos son lo que lee.
+		var spec *searchSpec
+		shift := 0
+		switch s.prog {
+		case "grep", "egrep", "fgrep", "rg":
+			sp := parseSearch(s.prog, args)
+			spec = &sp
+		case "git":
+			if sub, off := gitSub(args); sub == "grep" {
+				for i := 0; i+1 < off; i++ {
+					if args[i] == "-C" {
+						segCwd = resolve(args[i+1], segCwd, ps.Home)
+					}
+				}
+				rest := s.args[off+1:]
+				_, noIndex := hasFlag(rest, "--no-index")
+				_, noStd := hasFlag(rest, "--no-exclude-standard")
+				_, std := hasFlag(rest, "--exclude-standard")
+				if (noIndex && !std) || noStd {
+					recursive, readsAll = true, true
+				}
+				sp := parseSearch("git-grep", args[off+1:])
+				spec, shift = &sp, off+1
 			}
 		}
 		if recursive {
 			// sin rutas, recorre la carpeta actual
 			for _, c := range ps.Sensitive {
-				if within(c, cwd) {
+				if within(c, segCwd) {
 					return false, "recorre una carpeta que contiene credenciales (" + c + ")", true
 				}
 			}
@@ -518,35 +598,42 @@ func (ps Paths) readShell(a Action) (ok bool, why string, cred bool) {
 			continue
 		}
 		names := nameOnly[s.prog] // ls, find, stat…: ven nombres, no contenidos
-		patternFirst := s.prog == "grep" || s.prog == "egrep" || s.prog == "fgrep" || s.prog == "rg"
-		if _, ok := hasFlag(s.args, "-e", "--regexp", "-f", "--file"); ok {
-			patternFirst = false // el patrón va en una opción: los posicionales son archivos
-		}
 		var targets []string
-		for _, w := range s.args {
-			if why, bad := ps.readArg(w, cwd, recursive); bad {
+		for i, w := range s.args {
+			if why, bad := ps.readArg(w, segCwd, recursive); bad {
 				return false, why, true
 			}
 			if strings.HasPrefix(w.s, "-") {
 				continue
 			}
-			if patternFirst {
-				patternFirst = false // el patrón de la búsqueda es dato
-				continue
+			if spec != nil && i >= shift && (spec.pattern[i-shift] || spec.globWords[i-shift]) {
+				continue // el patrón es dato; los patrones de nombres los revisó secretWord
 			}
 			if !names {
-				if why, bad := ps.secretArg(w, cwd); bad {
+				if why, bad := ps.secretArg(w, segCwd); bad {
 					return false, why, true
 				}
 			}
-			targets = append(targets, w.s)
+			if spec == nil {
+				targets = append(targets, w.s)
+			}
+		}
+		if spec != nil {
+			for _, i := range spec.files {
+				targets = append(targets, args[shift+i])
+			}
+			for _, r := range spec.reads {
+				if why, bad := ps.secretArg(word{s: r}, segCwd); bad {
+					return false, why, true
+				}
+			}
 		}
 		if readsAll {
 			if len(targets) == 0 {
 				targets = []string{"."}
 			}
 			for _, t := range targets {
-				contentDirs = append(contentDirs, resolve(t, cwd, ps.Home))
+				contentDirs = append(contentDirs, resolve(t, segCwd, ps.Home))
 			}
 		}
 	}
@@ -815,10 +902,8 @@ func (ps Paths) hardOther(a Action) *Hard {
 		if what, ok := ps.secretWord(t, ps.Root); ok {
 			return hard("la herramienta toca %s", what)
 		}
-		for _, p := range shellProtected {
-			if p.re.MatchString(t) {
-				return hard("la herramienta toca %s", p.why)
-			}
+		if why, ok := ps.protectedIn(t, false); ok {
+			return hard("la herramienta toca %s", why)
 		}
 	}
 	return nil

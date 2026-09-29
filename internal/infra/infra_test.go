@@ -144,7 +144,7 @@ func TestProposeAndDetect(t *testing.T) {
 	for _, want := range []string{"tool: terraform", "versions: .tool-versions", "demo:", "prod:", "var_file: environments/prod.tfvars",
 		"apply: reviewed", `match: ["ENV=prod"]`, "{ path: stacks/gcp/demo, cloud: gcp, env: demo, status: active }",
 		"{ path: stacks/gcp/prod, cloud: gcp, env: prod, status: scaffold }", "{ path: stacks/aws/demo, cloud: aws, env: demo, status: scaffold }",
-		`apply: ["make apply", "make destroy", "make up"]`, "pendiente: meta y tope", "Propuesto por coyote extract desde infra@abc1234"} {
+		`apply: ["make apply", "make destroy", "make up"]`, "pendiente: meta y tope", "Propuesto por coyote desde infra@abc1234"} {
 		if !strings.Contains(doc, want) {
 			t.Errorf("la propuesta no tiene %q:\n%s", want, doc)
 		}
@@ -259,11 +259,18 @@ func TestCommands(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c, ok := inv.DeclaredApply("make apply ENV=prod"); !ok || c != "make apply" {
-		t.Errorf("make apply es un comando de apply declarado: %q %v", c, ok)
+	// El programa por su nombre y los targets entre sus argumentos: las
+	// opciones, las variables y la ruta del programa no esconden el target.
+	for _, c := range []string{"make apply ENV=prod", "make -C . apply", "make ENV=prod apply", "/usr/bin/make apply",
+		"make -f Makefile apply", "sudo make apply", "make -j4 destroy"} {
+		if got, ok := inv.DeclaredApply(strings.Fields(c)); !ok || !strings.HasPrefix(got, "make ") {
+			t.Errorf("%q corre un comando de apply declarado: %q %v", c, got, ok)
+		}
 	}
-	if _, ok := inv.DeclaredApply("make plan ENV=prod"); ok {
-		t.Error("make plan no aplica")
+	for _, c := range []string{"make plan ENV=prod", "make help", "echo make", "make -f apply.mk plan", "make plan ARGS=apply"} {
+		if got, ok := inv.DeclaredApply(strings.Fields(c)); ok {
+			t.Errorf("%q no aplica (%s)", c, got)
+		}
 	}
 	cases := map[string]string{
 		"make apply ENV=prod":                              "prod",

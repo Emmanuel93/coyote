@@ -108,7 +108,7 @@ func adminWords(seg []lword, vars map[string]bool) bool {
 		if !isCoyoteWord(strings.TrimSpace(text), vars) {
 			continue
 		}
-		rest := texts(seg[i+1:])
+		rest := expandAll(texts(seg[i+1:]))
 		j := 0
 		for j+1 < len(rest) && rest[j] == "-C" {
 			j += 2
@@ -202,76 +202,21 @@ func hasShortFlag(seg []lword, f rune) bool {
 	return false
 }
 
-// lenientSplit parte un comando en segmentos de palabras sin rechazar nada:
-// separa en ; & | saltos, paréntesis, llaves, acentos graves y $(.
+// lenientSplit parte un comando en segmentos de palabras sin rechazar nada
+// (ver lenientSegs).
 func lenientSplit(cmd string) [][]lword {
-	var segs [][]lword
-	var cur []lword
-	var b strings.Builder
-	in, quoted, subst := false, false, false
-	flush := func() {
-		if in {
-			cur = append(cur, lword{b.String(), quoted, subst})
-		}
-		b.Reset()
-		in, quoted, subst = false, false, false
+	var out [][]lword
+	for _, s := range lenientSegs(cmd) {
+		out = append(out, s.words)
 	}
-	cut := func() {
-		flush()
-		if len(cur) > 0 {
-			segs = append(segs, cur)
-		}
-		cur = nil
+	return out
+}
+
+// expandAll expande las llaves de cada palabra ({approve,x}).
+func expandAll(ws []string) []string {
+	var out []string
+	for _, w := range ws {
+		out = append(out, expandBraces(w)...)
 	}
-	r := []rune(cmd)
-	for i := 0; i < len(r); i++ {
-		c := r[i]
-		switch {
-		case c == '\'':
-			j := i + 1
-			for j < len(r) && r[j] != '\'' {
-				j++
-			}
-			b.WriteString(string(r[i+1 : min(j, len(r))]))
-			in, quoted, i = true, true, j
-		case c == '"':
-			j := i + 1
-			for ; j < len(r) && r[j] != '"'; j++ {
-				if r[j] == '\\' && j+1 < len(r) {
-					j++
-				}
-				if r[j] == '`' || (r[j] == '$' && j+1 < len(r) && r[j+1] == '(') {
-					subst = true
-				}
-				b.WriteRune(r[j])
-			}
-			in, quoted, i = true, true, j
-		case c == '\\':
-			if i+1 < len(r) {
-				i++
-				b.WriteRune(r[i])
-				in = true
-			}
-		case c == ' ' || c == '\t':
-			flush()
-		case c == '$' && i+1 < len(r) && r[i+1] == '(':
-			cut()
-			i++
-		case c == '$' && i+1 < len(r) && r[i+1] == '{':
-			// ${VAR} es parte de la palabra, no una llave del shell.
-			j := i + 2
-			for j < len(r) && r[j] != '}' {
-				j++
-			}
-			b.WriteString(string(r[i:min(j+1, len(r))]))
-			in, i = true, j
-		case strings.ContainsRune(";&|\n(){}`", c):
-			cut()
-		default:
-			b.WriteRune(c)
-			in = true
-		}
-	}
-	cut()
-	return segs
+	return out
 }

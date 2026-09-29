@@ -69,7 +69,7 @@ func (ps Paths) Evaluate(a Action) Decision {
 		return d
 	}
 	d.Verdict = NeedsApproval
-	if d.Kind == KindShell && infra.Effect(neutralize(a.Command)) {
+	if d.Kind == KindShell && InfraEffect(a.Command) {
 		d.Reason = "cambia infraestructura: se aprueba de a un uso"
 	}
 	if d.Reason == "" {
@@ -80,7 +80,14 @@ func (ps Paths) Evaluate(a Action) Decision {
 
 // InfraEffect dice si un comando cambia infraestructura: su aprobación vale
 // para un solo uso (ADR-0017).
-func InfraEffect(cmd string) bool { return infra.Effect(neutralize(cmd)) }
+func InfraEffect(cmd string) bool {
+	for _, t := range cmdTexts(cmd) {
+		if infra.Effect(t) {
+			return true
+		}
+	}
+	return false
+}
 
 // Respond escribe la respuesta en el formato del IDE y devuelve el código de
 // salida del hook. En todos, 2 bloquea. Cursor además espera JSON; Copilot lee

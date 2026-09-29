@@ -10,8 +10,8 @@ import (
 )
 
 var (
-	testAWS = "AKIA" + "IOSFODNN7EXAMPLE"
-	testKey = "-----BEGIN " + "RSA PRIVATE KEY-----"
+	testAWS = "AKIA" + "Q3VZ7T2M9KX4B8JN"
+	testKey = "-----BEGIN " + "RSA PRIVATE KEY-----\n" + strings.Repeat("MIIEvQIBADANBgkqhkiG9w0B", 3)
 )
 
 func secretPaths(t *testing.T) (Paths, string) {
@@ -102,13 +102,13 @@ func TestSecretContentInWrites(t *testing.T) {
 		claude(t, "Write", map[string]any{"file_path": f, "content": "const k = \"" + testAWS + "\"\n"}, root),
 		claude(t, "Edit", map[string]any{"file_path": f, "old_string": "x", "new_string": testKey}, root),
 		hook(t, map[string]any{"hook_event_name": "PreToolUse", "turn_id": "t", "cwd": root, "tool_name": "apply_patch",
-			"tool_input": map[string]any{"command": "*** Begin Patch\n*** Add File: k.pem\n+" + testKey + "\n*** End Patch\n"}}, "codex"),
+			"tool_input": map[string]any{"command": "*** Begin Patch\n*** Add File: k.txt\n+" + strings.ReplaceAll(testKey, "\n", "\n+") + "\n*** End Patch\n"}}, "codex"),
 		hook(t, map[string]any{"agent_action_name": "pre_write_code", "tool_info": map[string]any{"file_path": f,
 			"edits": []any{map[string]any{"old_string": "", "new_string": "k := \"" + testAWS + "\""}}}}, "windsurf"),
 	}
 	for _, a := range blocked {
 		d := ps.Evaluate(a)
-		if d.Verdict != Block || !strings.Contains(d.Reason, "secreto literal") || strings.Contains(d.Reason, "EXAMPLE") {
+		if d.Verdict != Block || !strings.Contains(d.Reason, "secreto literal") || strings.Contains(d.Reason, "Q3VZ") {
 			t.Errorf("%s: un secreto escrito se bloquea sin mostrarlo: %s (%s)", a.Tool, d.Verdict, d.Reason)
 		}
 	}
@@ -141,6 +141,8 @@ func TestCredentialCommands(t *testing.T) {
 		"gh auth status --show-token", "op read op://vault/db/password", "sops -d secrets.enc.yaml", "gpg --decrypt clave.gpg",
 		"cat /proc/self/environ", "env", "env | grep TOKEN", "printenv", "printenv GITHUB_TOKEN", "export -p", "declare -x", "set",
 		"echo $GITHUB_TOKEN", "printf '%s' \"$API_KEY\"", "echo ${apiKey}", "printenv DB_PASSWORD", "bash -c 'gcloud auth print-access-token'",
+		// Las anotaciones de un secreto aplicado con kubectl apply llevan sus datos.
+		"kubectl describe secret db",
 	}
 	for _, c := range blocked {
 		d := ps.Evaluate(claude(t, "Bash", map[string]any{"command": c}, root))
@@ -149,7 +151,7 @@ func TestCredentialCommands(t *testing.T) {
 		}
 	}
 	notBlocked := []string{
-		"kubectl get pods", "kubectl get pods -l app=secret-rotator", "kubectl describe secret db", "terraform plan -out tfplan",
+		"kubectl get pods", "kubectl get pods -l app=secret-rotator", "kubectl describe pod db", "terraform plan -out tfplan",
 		"terraform fmt -check", "helm template ./chart", "printenv PATH", "env FOO=1 make build", "set -euo pipefail",
 		"export FOO=1", "echo $HOME", "echo $AUTHOR_NAME", "echo $PWD", "git commit -m 'docs: explica por qué no se corre terraform output'",
 		"coyote note \"nunca corras gcloud auth print-access-token\" --type inv", "curl -H \"Authorization: Bearer $GITHUB_TOKEN\" https://api.github.com/user",
