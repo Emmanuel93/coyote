@@ -3,3 +3,5 @@
 2026-09-29T00:12Z|@eramirezhdez/coyote-dev|W-0005|coyote|feat|project|bandera pr_enforcement para exigir el chequeo del PR cuando GitHub lo permita|-|-|-|ok
 2026-09-29T01:07Z|@eramirezhdez|W-0005|coyote|close|-|cierre de W-0005: 0 corridas, $0.00|doc:coyote/workstreams/W-0005-team/close.md|0/0/0|$0+$0|ok
 2026-09-29T01:08Z|@eramirezhdez/claude-code|W-0005|coyote|doc|release|aprobación de G5 para v0.5.0|-|-|-|ok
+2026-09-29T01:08Z|@eramirezhdez/claude-code|-|coyote|rel|release|v0.5.0 etiquetada en la rama v0.5 y binarios generados|tag:v0.5.0 sha:8454b1a|-|-|ok
+2026-09-29T01:08Z|@eramirezhdez/claude-code|W-0005|coyote|chore|release|registra el release v0.5.0 en el ledger|-|-|-|ok
