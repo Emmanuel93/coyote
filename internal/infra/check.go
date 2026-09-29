@@ -157,9 +157,15 @@ func tfFiles(root, rel string) []string {
 	return out
 }
 
+// maxStackFiles acota los .tf que se leen de un stack para hallar su backend.
+const maxStackFiles = 256
+
 // backendOf devuelve el backend que declaran los .tf de un stack.
 func backendOf(root string, files []string) string {
-	for _, f := range files {
+	for i, f := range files {
+		if i == maxStackFiles {
+			break
+		}
 		// Solo archivos regulares y con tope: un .tf que apunta a /dev/zero no
 		// se lee.
 		data, err := fsx.ReadCapped(filepath.Join(root, filepath.FromSlash(f)), 2<<20)
@@ -195,7 +201,9 @@ func backendDirs(root string) []string {
 			}
 			return nil
 		}
-		if !strings.HasSuffix(d.Name(), ".tf") {
+		// Solo archivos regulares: un repo con miles de symlinks a un .tf grande
+		// no hace leer lo mismo miles de veces.
+		if !strings.HasSuffix(d.Name(), ".tf") || !d.Type().IsRegular() {
 			return nil
 		}
 		rel, _ := filepath.Rel(root, filepath.Dir(p))

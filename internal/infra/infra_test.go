@@ -380,3 +380,64 @@ func TestLecturasAcotadas(t *testing.T) {
 		t.Errorf("un inventario que es un symlink es un error: %v %v", ok, err)
 	}
 }
+
+func TestPlanExposicionEquivalente(t *testing.T) {
+	plan := `{"format_version":"1.2","resource_changes":[
+ {"address":"aws_security_group_rule.mitades","mode":"managed","type":"aws_security_group_rule","change":{"actions":["create"],"after":{"type":"ingress","cidr_blocks":["0.0.0.0/1","128.0.0.0/1"]}}},
+ {"address":"aws_s3_bucket_acl.grant","mode":"managed","type":"aws_s3_bucket_acl","change":{"actions":["create"],"after":{"access_control_policy":[{"grant":[{"grantee":[{"uri":"http://acs.amazonaws.com/groups/global/AllUsers"}]}]}]}}},
+ {"address":"google_sql_database_instance.db","mode":"managed","type":"google_sql_database_instance","change":{"actions":["update"],"after":{"deletion_protection":true,"settings":[{"ip_configuration":[{"authorized_networks":[{"value":"0.0.0.0/0"}]}]}]}}},
+ {"address":"aws_eks_cluster.k","mode":"managed","type":"aws_eks_cluster","change":{"actions":["update"],"after":{"vpc_config":[{"public_access_cidrs":["0.0.0.0/0"]}]}}},
+ {"address":"azurerm_mssql_firewall_rule.todo","mode":"managed","type":"azurerm_mssql_firewall_rule","change":{"actions":["create"],"after":{"start_ip_address":"0.0.0.0","end_ip_address":"255.255.255.255"}}},
+ {"address":"azurerm_mssql_firewall_rule.azure","mode":"managed","type":"azurerm_mssql_firewall_rule","change":{"actions":["create"],"after":{"start_ip_address":"0.0.0.0","end_ip_address":"0.0.0.0"}}},
+ {"address":"aws_route.salida","mode":"managed","type":"aws_route","change":{"actions":["create"],"after":{"destination_cidr_block":"0.0.0.0/0"}}},
+ {"address":"aws_network_acl_rule.salida","mode":"managed","type":"aws_network_acl_rule","change":{"actions":["create"],"after":{"egress":true,"cidr_block":"0.0.0.0/0"}}},
+ {"address":"aws_vpc.red","mode":"managed","type":"aws_vpc","change":{"actions":["create"],"after":{"cidr_block":"10.0.0.0/8"}}}
+]}`
+	s, err := ReadPlan(strings.NewReader(plan))
+	if err != nil {
+		t.Fatal(err)
+	}
+	risk := map[string]string{}
+	for _, c := range s.Changes {
+		risk[c.Address] = c.Risk
+	}
+	want := map[string]string{"aws_security_group_rule.mitades": "R3", "aws_s3_bucket_acl.grant": "R3", "google_sql_database_instance.db": "R3",
+		"aws_eks_cluster.k": "R3", "azurerm_mssql_firewall_rule.todo": "R3", "azurerm_mssql_firewall_rule.azure": "R2",
+		"aws_route.salida": "R2", "aws_network_acl_rule.salida": "R2", "aws_vpc.red": "R2"}
+	for addr, r := range want {
+		if risk[addr] != r {
+			t.Errorf("%s: %s, se esperaba %s", addr, risk[addr], r)
+		}
+	}
+	// Un recurso demasiado grande para recorrerlo cuenta como R3, siempre igual.
+	var big strings.Builder
+	big.WriteString(`{"format_version":"1.2","resource_changes":[{"address":"x.y","mode":"managed","type":"google_compute_network","change":{"actions":["update"],"after":{"a":[`)
+	for i := 0; i < maxAfterNodes; i++ {
+		if i > 0 {
+			big.WriteString(",")
+		}
+		big.WriteString(`"10.0.0.0/8"`)
+	}
+	big.WriteString(`]}}}]}`)
+	for i := 0; i < 3; i++ {
+		s, err := ReadPlan(strings.NewReader(big.String()))
+		if err != nil || s.Risk != "R3" {
+			t.Fatalf("un recurso enorme es R3: %v %+v", err, s.Changes)
+		}
+	}
+}
+
+func TestInventarioConTopes(t *testing.T) {
+	var b strings.Builder
+	b.WriteString("version: 1\ntool: terraform\nenvironments:\n  prod:\n    budget: { target_usd: 1, cap_usd: 2 }\n    match: [")
+	for i := 0; i < maxMarks+1; i++ {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		b.WriteString(`"marca` + strings.Repeat("x", i%5) + `"`)
+	}
+	b.WriteString("]\n")
+	if _, err := Parse([]byte(b.String())); err == nil || !strings.Contains(err.Error(), "marcas") {
+		t.Errorf("un inventario con demasiadas marcas es un error: %v", err)
+	}
+}

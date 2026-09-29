@@ -106,9 +106,32 @@ func Parse(data []byte) (*Inventory, error) {
 	return &inv, nil
 }
 
+// Topes del inventario: el gate lo lee en cada comando y no puede tardar.
+const (
+	maxEnvironments = 64
+	maxMarks        = 32
+	maxMarkLen      = 128
+	maxStacks       = 256
+	maxApply        = 64
+	maxOwners       = 64
+)
+
 // Validate revisa la forma del inventario, sin mirar el repo.
 func (inv *Inventory) Validate() []string {
 	var errs []string
+	switch {
+	case len(inv.Environments) > maxEnvironments:
+		errs = append(errs, fmt.Sprintf("environments: %d ambientes; el máximo es %d", len(inv.Environments), maxEnvironments))
+	case len(inv.Stacks) > maxStacks:
+		errs = append(errs, fmt.Sprintf("stacks: %d stacks; el máximo es %d", len(inv.Stacks), maxStacks))
+	case len(inv.Commands.Apply) > maxApply:
+		errs = append(errs, fmt.Sprintf("commands.apply: %d comandos; el máximo es %d", len(inv.Commands.Apply), maxApply))
+	case len(inv.Owners) > maxOwners:
+		errs = append(errs, fmt.Sprintf("owners: %d dueños; el máximo es %d", len(inv.Owners), maxOwners))
+	}
+	if len(errs) > 0 {
+		return errs
+	}
 	if inv.Version != 1 {
 		errs = append(errs, fmt.Sprintf("version %d no existe; usa 1", inv.Version))
 	}
@@ -136,9 +159,15 @@ func (inv *Inventory) Validate() []string {
 		if b := e.Budget; b != nil && (b.TargetUSD < 0 || b.CapUSD < 0 || (b.CapUSD > 0 && b.TargetUSD > b.CapUSD)) {
 			errs = append(errs, fmt.Sprintf("environments.%s.budget: la meta no puede pasar el tope ni ser negativa", name))
 		}
-		for _, m := range e.Match {
-			if strings.TrimSpace(m) == "" || len(m) < 3 {
-				errs = append(errs, fmt.Sprintf("environments.%s.match: marca vacía o de menos de 3 caracteres %q", name, m))
+		if len(e.Match) > maxMarks {
+			errs = append(errs, fmt.Sprintf("environments.%s.match: %d marcas; el máximo es %d", name, len(e.Match), maxMarks))
+		}
+		for i, m := range e.Match {
+			if i == maxMarks {
+				break
+			}
+			if strings.TrimSpace(m) == "" || len(m) < 3 || len(m) > maxMarkLen {
+				errs = append(errs, fmt.Sprintf("environments.%s.match: marca vacía, de menos de 3 caracteres o de más de %d %q", name, maxMarkLen, m))
 			}
 		}
 	}

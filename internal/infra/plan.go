@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/netip"
 	"regexp"
 	"sort"
 	"strings"
@@ -97,7 +98,9 @@ func ReadPlan(r io.Reader) (*PlanSummary, error) {
 			c.Risk, c.Why = "R3", "permisos (IAM)"
 		case keysRe.MatchString(rc.Type):
 			c.Risk, c.Why = "R3", "llaves o secretos"
-		case netRe.MatchString(rc.Type) && !strings.Contains(rc.Type, "egress") && after.openCIDR:
+		case after.truncated:
+			c.Risk, c.Why = "R3", "el recurso es demasiado grande para revisarlo"
+		case after.openCIDR && !strings.Contains(rc.Type, "egress") && !strings.Contains(rc.Type, "route"):
 			c.Risk, c.Why = "R3", "abre la red a internet (0.0.0.0/0)"
 		case after.public:
 			c.Risk, c.Why = "R3", "acceso público (allUsers, public-read)"
@@ -159,14 +162,44 @@ func action(acts []string, importing bool) string {
 
 // afterFacts es lo que el estado final de un recurso dice de su riesgo.
 type afterFacts struct {
-	openCIDR    bool // una regla abierta a internet (0.0.0.0/0, ::/0)
-	public      bool // acceso público: allUsers o una ACL public-read
+	openCIDR    bool // una regla de entrada abierta a internet (0.0.0.0/0, ::/0, 0.0.0.0/1…)
+	public      bool // acceso público: allUsers, AllUsers o una ACL public-read
 	unprotected bool // deletion_protection o deletion_protection_enabled en false
+	truncated   bool // demasiado grande para revisarlo entero
+}
+
+// maxAfterNodes acota lo que se recorre de un recurso: pasado el tope, el
+// recurso cuenta como R3.
+const maxAfterNodes = 200000
+
+// openPrefix dice si un texto es un rango de IP que abre a internet: una
+// dirección pública con un prefijo de 8 bits o menos (IPv4) o de 16 o menos
+// (IPv6). 0.0.0.0/1 y 128.0.0.0/1 juntos son 0.0.0.0/0.
+func openPrefix(s string) bool {
+	p, err := netip.ParsePrefix(s)
+	if err != nil {
+		return false
+	}
+	a := p.Addr()
+	if a.IsPrivate() || a.IsLoopback() || a.IsLinkLocalUnicast() {
+		return false
+	}
+	if a.Is4() {
+		return p.Bits() <= 8
+	}
+	return p.Bits() <= 16
+}
+
+// publicURI reconoce los grupos de AWS que abren un bucket a cualquiera.
+func publicURI(s string) bool {
+	return strings.Contains(s, "acs.amazonaws.com/groups/global/AllUsers") ||
+		strings.Contains(s, "acs.amazonaws.com/groups/global/AuthenticatedUsers")
 }
 
 // scanAfter recorre el estado final de un recurso, sin guardar sus valores:
 // solo anota lo que sube el riesgo. Recorre el JSON, no el texto, así que el
-// formato del plan (compacto o con sangría) no cambia la clasificación.
+// formato del plan (compacto o con sangría) no cambia la clasificación, y en
+// orden, así que dos lecturas del mismo plan dan lo mismo.
 func scanAfter(raw json.RawMessage) afterFacts {
 	var f afterFacts
 	if len(raw) == 0 {
@@ -180,17 +213,30 @@ func scanAfter(raw json.RawMessage) afterFacts {
 	nodes := 0
 	outbound := false
 	// walk recorre el JSON; egress marca lo que está dentro de una regla de
-	// salida, que abierta a internet es lo normal.
+	// salida o de una ruta, que abiertas a internet son lo normal.
 	var walk func(key string, v any, depth int, egress bool)
 	walk = func(key string, v any, depth int, egress bool) {
 		nodes++
-		if depth > 64 || nodes > 200000 {
+		if depth > 64 || nodes > maxAfterNodes {
+			f.truncated = true
 			return
 		}
 		switch t := v.(type) {
 		case map[string]any:
-			for k, x := range t {
-				walk(k, x, depth+1, egress || strings.Contains(strings.ToLower(k), "egress"))
+			keys := make([]string, 0, len(t))
+			for k := range t {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+			// Un rango de direcciones: de 0.x a 255.x es internet entero.
+			if start, ok := t["start_ip_address"].(string); ok && !egress {
+				if end, ok := t["end_ip_address"].(string); ok && strings.HasPrefix(start, "0.") && strings.HasPrefix(end, "255.") {
+					f.openCIDR = true
+				}
+			}
+			for _, k := range keys {
+				lk := strings.ToLower(k)
+				walk(k, t[k], depth+1, egress || strings.Contains(lk, "egress") || strings.HasPrefix(lk, "destination"))
 			}
 		case []any:
 			for _, x := range t {
@@ -198,11 +244,11 @@ func scanAfter(raw json.RawMessage) afterFacts {
 			}
 		case string:
 			switch {
-			case (t == "0.0.0.0/0" || t == "::/0") && !egress:
+			case openPrefix(t) && !egress:
 				f.openCIDR = true
 			case key == "source_address_prefix" && (t == "*" || t == "Internet") && !egress:
 				f.openCIDR = true
-			case publicValues[t]:
+			case publicValues[t] || publicURI(t):
 				f.public = true
 			case key == "container_access_type" && (t == "blob" || t == "container"):
 				f.public = true
@@ -216,6 +262,9 @@ func scanAfter(raw json.RawMessage) afterFacts {
 		case bool:
 			if !t && (key == "deletion_protection" || key == "deletion_protection_enabled") {
 				f.unprotected = true
+			}
+			if t && depth == 1 && key == "egress" {
+				outbound = true
 			}
 		}
 	}
