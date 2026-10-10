@@ -748,7 +748,7 @@ G8 autorizaría:
 | D40 evaluación del contexto | Golden y métricas sin modelo en la CI, con umbral de 2 puntos; el juez con modelo es opcional y usa tu presupuesto (ADR-0025) | La CI no gasta y una regresión se ve en el PR | Se confirma en G8 |
 | D41 compatibilidad | Semver sobre formatos, CLI y estándar, con `requires`; el gate puede negar más en cualquier versión (ADR-0026) | Una 1.0 le dice al equipo qué no va a cambiar | Se confirma en G8 |
 | D42 cadena de suministro | Build reproducible, SBOM CycloneDX 1.7 y procedencia SLSA Build L1 en `make dist`; L2 con Actions si se publica (ADR-0027) | Sin red no hay goreleaser, y un binario se verifica reconstruyéndolo | Se confirma en G8 |
-| D43 piloto real | Hito H8a con su propia autorización y presupuesto; sin él, pasa a v1.1 | Toca `fintech-services` y gasta en corridas | Se confirma en H8a |
+| D43 piloto real | Hito H8a con su propia autorización y presupuesto; sin él, pasa a v1.1 | Toca `fintech-services` y gasta en corridas | Confirmado en H8a (P-0008): listado de desembolsos, worktree aparte, tope de $10 |
 | D44 `coyote serve` | Queda para v1.1 si el uso lo pide (D18) | Ningún uso lo pidió | Se confirma en G8 |
 | D45 `main` | Avanza a v1.0.0 en G8, sin merge; el push es tuyo | Las ramas de release descienden de `main` | Se confirma en G8 |
 | D23 unidad de trabajo | Producto multi-repo: servicios, app y backoffice juntos, en un proyecto aparte que lee los tres (ADR-0011) | Un cambio en uno afecta a los otros (G3) | Confirmado en G4 |

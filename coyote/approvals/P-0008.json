@@ -1,0 +1,23 @@
+{
+  "id": "P-0008",
+  "gate": "H8a",
+  "release": "v1.0.0 (piloto real)",
+  "workstream": "W-0008",
+  "decision": "approved",
+  "approver": "@eramirezhdez",
+  "date": "2026-10-10",
+  "reviewed_commit": "de99886",
+  "authorizes": [
+    "proponer y preparar el piloto real de v1.0 (C6.4) en fintech-services: listado paginado de desembolsos por empresa, GET /api/v1/disbursements?companyId&page&size, sobre findByCompany que ya existe",
+    "trabajarlo en un worktree aparte desde origin/main, en la rama ws/W-0001, con coyote adoptado en esa rama y el plan supervised W-0001",
+    "un tope de $10 para las corridas del piloto, dentro de los $30 del mes"
+  ],
+  "conditions": [
+    "las corridas las lanza la persona en su máquina; un agente no gasta por su cuenta",
+    "la rama feature/wip-2026-09-15 y sus cambios sin commit no se tocan",
+    "el piloto termina en un PR revisado, sin merge; el merge lo decide la persona",
+    "cada acción con efectos del agente pasa por el gate y su aprobación (modo supervised)"
+  ],
+  "response": "Sí, propónmela tú; Listado de desembolsos (Recomendado)",
+  "evidence": "docs/plan/EXECUTION_PLAN.md#v10-estable--razonamiento"
+}
