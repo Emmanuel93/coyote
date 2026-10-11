@@ -43,5 +43,5 @@ En el gate G8 la persona pidió agregar la fase del PRD (Product Requirements Do
 - La regla es SHOULD: un plan sin PRD corre, solo avisa. Subirla a MUST pide un ADR y pasar antes por un minor con el aviso (ADR-0026).
 - El aviso comprueba que el PRD exista y esté conectado al plan, no que esté bien escrito. Esa revisión es de la persona.
 - Los planes que ya existen siguen valiendo. Los de riesgo R2 o R3 sin `prd:` reciben el aviso al actualizar.
-- Un PRD aceptado como artefacto de un paso queda junto a las corridas. Para que el equipo lo encuentre y otros workstreams lo citen, la persona lo guarda en `coyote/prd/`: hoy es un `cp` y un commit. Si el piloto muestra que duele, un comando para eso entra en 1.1.
+- Un PRD aceptado como artefacto de un paso queda junto a las corridas. Para que el equipo lo encuentre y otros workstreams lo citen, la persona lo guarda en `coyote/prd/`: hoy es un `cp` y un commit. Si el piloto muestra que duele, se propone un comando para eso y lo decide la persona: v1.1 trae hoy solo los pendientes de G5 a G7.
 - Un PRD largo entra a un paso recortado a unos 3000 tokens, como cualquier entrada (docs/specs/workstream-v1.md). El agente lee el resto con `Read`.
