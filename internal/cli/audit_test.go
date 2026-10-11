@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -402,5 +403,119 @@ func TestAuditTerceraRevision(t *testing.T) {
 	}
 	if r := run(t, root, "", "audit"); !strings.Contains(r.stdout, "| el ledger solo agrega líneas | falla |") {
 		t.Errorf("un injerto escondió la reescritura:\n%s", r.stdout)
+	}
+}
+
+// TestAuditCuartaRevision: cuarta pasada adversarial de v1.0. Una fecha
+// futura no esconde los commits que le siguen, un borrado anterior al
+// periodo se avisa y la verificación de firmas no corre los programas que
+// declara la configuración del repo.
+func TestAuditCuartaRevision(t *testing.T) {
+	base := setup(t)
+	now := time.Now().UTC()
+	at := func(root string, date time.Time, args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
+		cmd.Env = append(os.Environ(), "GIT_COMMITTER_DATE="+date.Format(time.RFC3339), "GIT_AUTHOR_DATE="+date.Format(time.RFC3339))
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	// nuevo deja un proyecto con dos eventos y un commit de adopción con la fecha dada.
+	nuevo := func(name string, when time.Time) (string, string) {
+		t.Helper()
+		must(t, run(t, base, "", "init", name, "--purpose", "API de pedidos de la tienda demo"), 0, "init "+name)
+		root := filepath.Join(base, name)
+		must(t, run(t, root, "", "record", "feat", "alta de pedidos"), 0, "record")
+		must(t, run(t, root, "", "record", "fix", "corrige totales"), 0, "record")
+		git(t, root, "add", "-A")
+		at(root, when, "commit", "-qm", "chore: adopta coyote")
+		files, _ := filepath.Glob(filepath.Join(root, "coyote", "ledger", "*", "*", "*.ccf"))
+		if len(files) != 1 {
+			t.Fatalf("ledger: %v", files)
+		}
+		rel, _ := filepath.Rel(root, files[0])
+		return root, filepath.ToSlash(rel)
+	}
+	rewrite := func(root, f string) {
+		t.Helper()
+		p := filepath.Join(root, f)
+		if err := os.WriteFile(p, []byte(strings.Replace(readFile(t, p), "corrige totales", "otra cosa", 1)), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Un commit con fecha de 2099 no esconde los que le siguen: llega, a más
+	// tardar, ahora. Lo que viene después, con el borrado y la atribución, se ve.
+	root, f := nuevo("futuro", now)
+	at(root, time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC), "commit", "-q", "--allow-empty", "-m", "chore: futuro")
+	rewrite(root, f)
+	git(t, root, "commit", "-qam", "chore: borra", "-m", aiTrailer, "--no-verify")
+	r := run(t, root, "", "audit")
+	must(t, r, 1, "fecha futura")
+	for _, want := range []string{"cambia, borra o esconde líneas de", "| commits del periodo sin atribución a IA (R15) | falla |", "fecha futura"} {
+		if !strings.Contains(r.stdout, want) {
+			t.Errorf("fecha de 2099: falta %q\n%s", want, r.stdout)
+		}
+	}
+
+	// Un borrado en un commit que llegó antes del periodo se avisa, con el mes
+	// en que llegó: es historia que un reporte anterior pudo no ver.
+	root, f = nuevo("viejo", now.AddDate(0, 0, -90))
+	rewrite(root, f)
+	at(root, now.AddDate(0, 0, -70), "commit", "-qam", "chore: borra")
+	at(root, now, "commit", "-q", "--allow-empty", "-m", "chore: hoy")
+	r = run(t, root, "", "audit")
+	must(t, r, 0, "borrado anterior al periodo")
+	for _, want := range []string{"| el ledger solo agrega líneas | aviso |", "cambia, borra o esconde líneas de", "llegó en " + now.AddDate(0, 0, -70).Format("2006-01")} {
+		if !strings.Contains(r.stdout, want) {
+			t.Errorf("borrado anterior al periodo: falta %q\n%s", want, r.stdout)
+		}
+	}
+
+	// Los programas de firma de la configuración del repo no corren: un repo
+	// ajeno no ejecuta nada al auditarlo. Una firma se cuenta, no se verifica.
+	root, _ = nuevo("firma", now)
+	ran := filepath.Join(root, ".git", "programa-corrio")
+	prog := filepath.Join(root, ".git", "programa.sh")
+	if err := os.WriteFile(prog, []byte("#!/bin/sh\ntouch '"+ran+"'\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	signers := filepath.Join(root, ".git", "firmantes")
+	if err := os.WriteFile(signers, []byte("ana@example.com ssh-ed25519 AAAA\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range []string{"gpg.program", "gpg.ssh.program", "gpg.x509.program", "gpg.openpgp.program"} {
+		git(t, root, "config", k, prog)
+	}
+	git(t, root, "config", "gpg.ssh.allowedSignersFile", signers)
+	for _, kind := range []string{"PGP SIGNATURE", "SSH SIGNATURE", "SIGNED MESSAGE"} {
+		tree := strings.TrimSpace(git(t, root, "rev-parse", "HEAD^{tree}"))
+		parent := strings.TrimSpace(git(t, root, "rev-parse", "HEAD"))
+		stamp := strconv.FormatInt(now.Unix(), 10) + " +0000"
+		obj := "tree " + tree + "\nparent " + parent + "\nauthor Ana <ana@example.com> " + stamp + "\ncommitter Ana <ana@example.com> " + stamp +
+			"\ngpgsig -----BEGIN " + kind + "-----\n \n AAAA\n -----END " + kind + "-----\n\nchore: firmado\n"
+		cmd := exec.Command("git", "-C", root, "hash-object", "-t", "commit", "-w", "--stdin")
+		cmd.Stdin = strings.NewReader(obj)
+		out, err := cmd.Output()
+		if err != nil {
+			t.Fatalf("hash-object: %v", err)
+		}
+		git(t, root, "update-ref", "refs/heads/main", strings.TrimSpace(string(out)))
+	}
+	r = run(t, root, "", "audit", "--json")
+	must(t, r, 0, "commits con firma")
+	if _, err := os.Stat(ran); err == nil {
+		t.Errorf("la auditoría corrió el programa de firma que declara el repo")
+	}
+	var rep struct {
+		Commits int `json:"commits"`
+		Signed  int `json:"signed"`
+	}
+	if err := json.Unmarshal([]byte(r.stdout), &rep); err != nil {
+		t.Fatalf("--json: %v\n%s", err, r.stdout)
+	}
+	if rep.Commits != 4 || rep.Signed != 3 {
+		t.Errorf("4 commits con 3 firmas: %+v\n%s", rep, r.stdout)
 	}
 }

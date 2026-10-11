@@ -61,6 +61,13 @@ func TestFooters(t *testing.T) {
 		"Amp-Thread-ID: https://ampcode.com/threads/T-123",
 		"https://chatgpt.com/codex/tasks/task_e_123",
 		"Link to Devin run: https://app.devin.ai/sessions/abc",
+		"Assisted-by: Claude:claude-opus-5-5",
+		"Assisted-by: Claude Code",
+		"Assisted-by: GitHub Copilot",
+		"Assisted-by: Cursor:gpt-5 shellcheck",
+		"assisted-by : ChatGPT",
+		"Generated-by: Gemini",
+		"Written-by: Claude Sonnet 5",
 	}
 	for _, f := range footers {
 		out, found := c.ScrubLines("feat: x\n\n"+f+"\n", true)
@@ -109,6 +116,10 @@ func TestNoFalsePositives(t *testing.T) {
 		"Co-authored-by: Jules Verne <jules@example.com>",
 		"Co-authored-by: Bo Chen <bo@ampcode.com>",
 		"Co-authored-by: Kim Park <kim@windsurf.com>",
+		"Assisted-by: Claude Dupont <claude@example.fr>",
+		"Assisted-by: Ana Ruiz",
+		"Assisted-by: the payments team",
+		"Reviewed-by: Claude Dupont <claude@example.fr>",
 		"Co-authored-by: dependabot[bot] <49699333+dependabot[bot]@users.noreply.github.com>",
 		"fix: reporte creado por el equipo de pagos",
 		"fix: reject images made with AI in avatar uploads",

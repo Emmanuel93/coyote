@@ -297,19 +297,18 @@ func linkApprovals(entries []ledger.Entry, list []Approval) (map[string]link, ma
 	ordered := append([]ledger.Entry(nil), entries...)
 	sort.SliceStable(ordered, func(i, j int) bool { return ordered[i].Line.TS.Before(ordered[j].Line.TS) })
 	links, claimed, recordedBy := map[string]link{}, map[string]string{}, map[string]string{}
-	// Primero los eventos que citan su registro; después, por el gate que
-	// nombran, los de las personas y al final los de los agentes: un agente
-	// que registra antes no le quita su registro a la persona.
-	pass := func(e ledger.Entry) int {
-		switch {
-		case len(refs(e.Line.Refs, "apr:")) > 0:
+	// Primero los eventos de las personas y después los de los agentes, cada
+	// grupo por fecha: un agente que registra antes no le quita su registro a
+	// la persona, y citar un registro no adelanta a un evento en la fila. El
+	// primero que respalda un registro se lo queda; el que llega después y lo
+	// cita o lo nombra no lo tiene.
+	tier := func(e ledger.Entry) int {
+		if usage.Agent(e.Line.Actor) == "" || usage.Agent(e.Line.Actor) == "-" {
 			return 0
-		case usage.Agent(e.Line.Actor) == "" || usage.Agent(e.Line.Actor) == "-":
-			return 1
 		}
-		return 2
+		return 1
 	}
-	sort.SliceStable(ordered, func(i, j int) bool { return pass(ordered[i]) < pass(ordered[j]) })
+	sort.SliceStable(ordered, func(i, j int) bool { return tier(ordered[i]) < tier(ordered[j]) })
 	for _, e := range ordered {
 		l := e.Line
 		if l.Type != "apr" && l.Type != "rej" {

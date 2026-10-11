@@ -20,11 +20,16 @@ import (
 //   - los filtros clean, smudge y process que declare la configuración
 //     anulados por nombre: git status o diff-index los correrían para
 //     comparar el árbol de trabajo;
+//   - sin verificar firmas: log.showSignature apagado y los programas de firma
+//     (gpg, ssh-keygen o los que declare la configuración) anulados;
 //   - sin el candado opcional del índice (GIT_OPTIONAL_LOCKS=0).
 //
 // safe.directory se limita a la carpeta que la persona registró.
 
 var transports = []string{"file", "git", "ssh", "http", "https", "ext"}
+
+// noProgram es un programa que no se puede ejecutar: sustituye a los de firma.
+const noProgram = "/dev/null"
 
 // filterNameRe es lo que un nombre de filtro puede tener para anularlo con -c.
 var filterNameRe = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
@@ -43,6 +48,14 @@ func baseArgs(abs string) []string {
 		"-c", "submodule.recurse=false",
 		"-c", "protocol.allow=never",
 		"-c", "safe.directory=" + abs,
+		// Ninguna lectura verifica firmas: gpg y ssh-keygen, o el programa que
+		// declare la configuración, no corren aunque log.showSignature esté
+		// encendido o un formato pida %G.
+		"-c", "log.showSignature=false",
+		"-c", "gpg.program=" + noProgram,
+		"-c", "gpg.openpgp.program=" + noProgram,
+		"-c", "gpg.x509.program=" + noProgram,
+		"-c", "gpg.ssh.program=" + noProgram,
 	}
 	for _, t := range transports {
 		args = append(args, "-c", "protocol."+t+".allow=never")

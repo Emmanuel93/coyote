@@ -31,6 +31,8 @@ line_patterns:
     pattern: '(?i)(claude\.ai/code/session_|app\.devin\.ai/sessions/|chatgpt\.com/codex/tasks/|jules\.google\.com/task|ampcode\.com/threads/|cursor\.com/agents\?)'
   - id: ai-noreply
     pattern: '(?i)\bnoreply@anthropic\.com\b'
+  - id: ai-assisted-by-trailer
+    pattern: '(?i)^\s*(?:assisted|generated|written|drafted|authored|co-?developed|produced|coded)\s*-\s*by\s*:\s*\[?(?:claude(?:\s+(?:code|opus|sonnet|haiku|fable|mythos)\b|\s*[-:/0-9(<\[]|\s*$)|(?:chatgpt|(?:github\s+)?copilot|gemini|codex|cursor|windsurf|aider|codeium|tabnine|codewhisperer|amazon\s+q)\b|gpt-?[0-9])'
 
 phrase_patterns:
   - id: en-made-with-ai

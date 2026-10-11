@@ -250,3 +250,56 @@ func TestAgenteNoLeQuitaElRegistroALaPersona(t *testing.T) {
 		t.Errorf("cada gate tiene su evento: %+v", c)
 	}
 }
+
+// TestRespaldoCuartaPasada: cuarta pasada. Una cita no adelanta a un evento
+// en el orden de los respaldos: el registro de un gate es del primer evento
+// que lo nombra, una persona antes que un agente, y el que llega después y
+// lo cita no se lo lleva.
+func TestRespaldoCuartaPasada(t *testing.T) {
+	from := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	ev := func(ts, actor, what string, refs ...string) ledger.Entry {
+		e := entry(ts, actor, "apr", what, refs, 0)
+		e.LineNo = len(ts) + len(what) + len(actor) + len(refs)
+		return e
+	}
+	in := Input{Project: "tienda", Root: "/p", From: from, To: from.AddDate(0, 1, 0), Now: from.AddDate(0, 0, 25),
+		Entries: []ledger.Entry{
+			// Dos agentes: el primero lo nombra, el segundo lo cita después.
+			ev("2026-09-20T10:00:00Z", "@ana/coyote-scribe", "G5 aprobado: release 1.2"),
+			ev("2026-09-20T11:00:00Z", "@ana/claude-code", "G5 aprobado: release 1.2", "apr:P-0004"),
+			// Un agente que cita antes que la persona que lo nombra.
+			ev("2026-09-21T08:59:00Z", "@ana/coyote-scribe", "G6 aprobado: release 1.3", "apr:P-0005"),
+			ev("2026-09-21T09:00:00Z", "@ana", "G6 aprobado: release 1.3"),
+		},
+		Approvals: []Approval{
+			{ID: "P-0004", Gate: "G5", Release: "1.2", Decision: "approved", Approver: "@ana", Date: "2026-09-20", Response: "sí"},
+			{ID: "P-0005", Gate: "G6", Release: "1.3", Decision: "approved", Approver: "@ana", Date: "2026-09-21", Response: "sí"},
+		},
+	}
+	r := Build(in)
+	c := check(r, "aprobaciones registradas por un agente")
+	joined := strings.Join(c.Detail, "\n")
+	if c.Result != Fail {
+		t.Fatalf("se esperaba falla: %+v", c)
+	}
+	for _, want := range []string{
+		"2026-09-20 10:00Z @ana/coyote-scribe registró P-0004: la respuesta de la persona",
+		"2026-09-20 11:00Z @ana/claude-code registró \"G5 aprobado: release 1.2\" sin un registro que lo respalde: P-0004 ya respalda el evento del 2026-09-20 10:00Z",
+		"2026-09-21 08:59Z @ana/coyote-scribe registró \"G6 aprobado: release 1.3\" sin un registro que lo respalde: P-0005 ya respalda el evento del 2026-09-21 09:00Z",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("falta %q en:\n%s", want, joined)
+		}
+	}
+	if strings.Contains(joined, "2026-09-20 10:00Z @ana/coyote-scribe registró \"") {
+		t.Errorf("el primero que nombra el gate se queda con su registro:\n%s", joined)
+	}
+	for _, x := range r.Releases {
+		if x.ID == "P-0005" && x.RecordedBy != "@ana" {
+			t.Errorf("el gate G6 lo registró la persona, no %s", x.RecordedBy)
+		}
+		if x.ID == "P-0004" && x.RecordedBy != "@ana/coyote-scribe" {
+			t.Errorf("el gate G5 lo registró el primero, no %s", x.RecordedBy)
+		}
+	}
+}
