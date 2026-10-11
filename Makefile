@@ -38,11 +38,13 @@ install:
 	go install -trimpath -ldflags "$(LDFLAGS)" ./cmd/coyote
 
 # Binarios, SBOM CycloneDX de cada uno y procedencia SLSA Build L1 (ADR-0027).
-# Todo sale del commit: se compila en un clon limpio de HEAD, sin la
-# configuración de git de quien compila (core.autocrlf cambiaría los bytes), así que ni
-# los cambios sin commit, ni skip-worktree, ni un archivo ignorado entran al
-# binario. La versión, el commit y la fecha se leen de git en la receta, y el
-# entorno de Go queda fijo: ni el entorno ni la línea de comandos los cambian.
+# Todo sale del commit: se compila en un clon limpio de HEAD que prepara
+# tools/distsrc.sh sin nada del entorno de git de quien compila (ni
+# configuración, ni atributos globales, ni plantillas, ni GIT_*: un eol=crlf
+# cambiaría los bytes), así que ni los cambios sin commit, ni skip-worktree, ni
+# un archivo ignorado entran al binario. La versión, el commit y la fecha se
+# leen de ese clon, y el entorno de Go queda fijo: ni el entorno ni la línea de
+# comandos los cambian.
 # La carpeta empieza vacía: SHA256SUMS y la procedencia cubren solo este build.
 override DIST_GOENV := CGO_ENABLED=0 GOAMD64=v1 GOARM64=v8.0 GOEXPERIMENT= GOWORK=off GOTOOLCHAIN=local GOFIPS140=off GOENV=off GOFLAGS=-mod=mod GOPROXY=off GOSUMDB=off
 override PLATFORMS := darwin/arm64 darwin/amd64 linux/amd64 linux/arm64
@@ -54,13 +56,9 @@ dist:
 	@rm -rf "./$(DIST)" && mkdir -p "./$(DIST)"
 	@out=$$(cd "./$(DIST)" && pwd) && head=$$(git rev-parse HEAD) && wt=$$(mktemp -d "$${TMPDIR:-/tmp}/coyote-dist.XXXXXX") && \
 	trap 'rm -rf "$$wt"' EXIT && \
-	export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 && \
-	git clone -q --shared --no-checkout . "$$wt/src" && cd "$$wt/src" && \
-	git -c core.autocrlf=false -c core.eol=lf checkout -q --detach "$$head" && \
-	ver=$$(git describe --tags --always) && commit=$$(git rev-parse --short HEAD) && full=$$(git rev-parse HEAD) && \
-	date=$$(TZ=UTC git log -1 --format=%cd --date=format-local:%Y-%m-%dT%H:%MZ) && \
-	rfc=$$(TZ=UTC git log -1 --format=%cd --date=format-local:%Y-%m-%dT%H:%M:%SZ) && \
-	tag=$$(git describe --tags --exact-match 2>/dev/null || true) && \
+	sh tools/distsrc.sh . "$$wt" "$$head" && cd "$$wt/src" && \
+	ver=$$(cat ../meta/ver) && commit=$$(cat ../meta/commit) && full=$$(cat ../meta/full) && \
+	date=$$(cat ../meta/date) && rfc=$$(cat ../meta/rfc) && tag=$$(cat ../meta/tag) && \
 	for p in $(PLATFORMS); do \
 	  os=$${p%/*}; arch=$${p#*/}; dst="$$out/coyote_$${ver}_$${os}_$${arch}"; \
 	  echo "$(DIST)/coyote_$${ver}_$${os}_$${arch}"; \

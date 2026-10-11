@@ -15,7 +15,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"runtime/debug"
 	"sort"
 	"strings"
 )
@@ -50,15 +49,18 @@ func run(args []string, stdout io.Writer) error {
 	// salir de este commit, sin cambios, para su plataforma: un binario viejo
 	// que quedó en la carpeta no entra en la procedencia.
 	var bins []string
+	settings := map[string]map[string]string{} // por plataforma, como se llama su carpeta
 	for _, pl := range strings.Fields(*platforms) {
 		goos, goarch, ok := strings.Cut(pl, "/")
 		if !ok {
 			return fmt.Errorf("plataforma inválida %q", pl)
 		}
 		bin := filepath.Join(*dist, "coyote_"+*ver+"_"+goos+"_"+goarch, "coyote")
-		if err := checkBinary(bin, goos, goarch, *commit); err != nil {
+		got, err := checkBinary(bin, goos, goarch, *commit)
+		if err != nil {
 			return err
 		}
+		settings[goos+"_"+goarch] = got
 		bins = append(bins, bin)
 	}
 	sort.Strings(bins)
@@ -88,11 +90,7 @@ func run(args []string, stdout io.Writer) error {
 			*goVersion = info.GoVersion
 		}
 	}
-	info, err := buildinfo.ReadFile(bins[0])
-	if err != nil {
-		return err
-	}
-	prov := provenance(subjects, *repo, *ver, *tag, *commit, *goVersion, bins, info.Settings)
+	prov := provenance(subjects, *repo, *ver, *tag, *commit, *goVersion, bins, settings)
 	if err := writeJSON(filepath.Join(*dist, "coyote_"+*ver+".provenance.json"), prov); err != nil {
 		return err
 	}
@@ -100,12 +98,25 @@ func run(args []string, stdout io.Writer) error {
 	return nil
 }
 
-// checkBinary revisa con el buildinfo que un binario sea de esa plataforma
-// y salga del commit, con el árbol limpio.
-func checkBinary(bin, goos, goarch, commit string) error {
+// notInMakeDist son las opciones del build que cambian el código y que
+// make dist nunca usa: un binario que las trae es de otro build.
+var notInMakeDist = []string{"-gcflags", "-asmflags", "-tags", "-race", "-msan", "-asan", "-cover", "-covermode", "-coverpkg", "-pgo"}
+
+// checkBinary revisa con el buildinfo que un binario sea de esa plataforma,
+// salga del commit con el árbol limpio y se haya compilado con las opciones
+// de make dist: -trimpath, CGO_ENABLED=0 y nada que cambie el código
+// (-gcflags, -tags, GOEXPERIMENT…). Devuelve sus opciones.
+//
+// Es una verificación de lo que el buildinfo registra, no de cualquier
+// binario. Con -trimpath Go no registra las -ldflags (golang/go#52372), así
+// que unas -ldflags distintas no se ven aquí: lo que las prueba es que make
+// verify-dist reconstruya los mismos bytes. Y vcs.modified lo mide go build
+// donde compiló: fuera de un clon recién hecho, como el de make dist, git
+// puede esconder cambios (assume-unchanged, skip-worktree).
+func checkBinary(bin, goos, goarch, commit string) (map[string]string, error) {
 	info, err := buildinfo.ReadFile(bin)
 	if err != nil {
-		return fmt.Errorf("%s: %v", bin, err)
+		return nil, fmt.Errorf("%s: %v", bin, err)
 	}
 	got := map[string]string{}
 	for _, s := range info.Settings {
@@ -113,15 +124,22 @@ func checkBinary(bin, goos, goarch, commit string) error {
 	}
 	switch {
 	case got["GOOS"] != goos || got["GOARCH"] != goarch:
-		return fmt.Errorf("%s es de %s/%s, no de %s/%s", bin, got["GOOS"], got["GOARCH"], goos, goarch)
+		return nil, fmt.Errorf("%s es de %s/%s, no de %s/%s", bin, got["GOOS"], got["GOARCH"], goos, goarch)
 	case got["vcs.revision"] != commit:
-		return fmt.Errorf("%s sale del commit %q, no de %s", bin, got["vcs.revision"], commit)
+		return nil, fmt.Errorf("%s sale del commit %q, no de %s", bin, got["vcs.revision"], commit)
 	case got["vcs.modified"] != "false":
-		return fmt.Errorf("%s se compiló con cambios sin commit", bin)
+		return nil, fmt.Errorf("%s se compiló con cambios sin commit", bin)
 	case got["-trimpath"] != "true" || got["CGO_ENABLED"] != "0":
-		return fmt.Errorf("%s no se compiló con -trimpath y CGO_ENABLED=0", bin)
+		return nil, fmt.Errorf("%s no se compiló con -trimpath y CGO_ENABLED=0", bin)
+	case got["GOEXPERIMENT"] != "":
+		return nil, fmt.Errorf("%s se compiló con GOEXPERIMENT=%s", bin, got["GOEXPERIMENT"])
 	}
-	return nil
+	for _, k := range notInMakeDist {
+		if _, ok := got[k]; ok {
+			return nil, fmt.Errorf("%s se compiló con %s, que make dist no usa", bin, k)
+		}
+	}
+	return got, nil
 }
 
 func fileSHA256(p string) (string, error) {
@@ -204,12 +222,13 @@ func sbom(bin, sum, ver, date string) (map[string]any, error) {
 
 // provenance arma el statement in-toto v1 con la procedencia SLSA. Sin firma:
 // es Build L1. Sin horas de inicio ni fin: así también es reproducible.
-func provenance(subjects []subject, repo, ver, tag, commit, goVersion string, bins []string, settings []debug.BuildSetting) map[string]any {
+func provenance(subjects []subject, repo, ver, tag, commit, goVersion string, bins []string, settings map[string]map[string]string) map[string]any {
 	var platforms []string
 	for _, b := range bins {
 		name := filepath.Base(filepath.Dir(b))
 		platforms = append(platforms, strings.TrimPrefix(name, "coyote_"+ver+"_"))
 	}
+	shared, extra := splitSettings(settings)
 	// El documento del tipo de build, en el commit exacto: no cambia nunca.
 	doc := repo + "/blob/" + commit + "/docs/reference/build.md"
 	external := map[string]any{"source": repo, "revision": commit, "target": "make dist"}
@@ -226,7 +245,7 @@ func provenance(subjects []subject, repo, ver, tag, commit, goVersion string, bi
 			"buildDefinition": map[string]any{
 				"buildType":            doc,
 				"externalParameters":   external,
-				"internalParameters":   map[string]any{"go": goVersion, "platforms": platforms, "settings": common(settings)},
+				"internalParameters":   map[string]any{"go": goVersion, "platforms": platforms, "settings": shared, "platformSettings": extra},
 				"resolvedDependencies": []map[string]any{{"uri": uri, "digest": map[string]string{"gitCommit": commit}}},
 			},
 			"runDetails": map[string]any{
@@ -237,14 +256,52 @@ func provenance(subjects []subject, repo, ver, tag, commit, goVersion string, bi
 	}
 }
 
-// common son las opciones del build que valen para todas las plataformas:
-// todas menos GOOS y GOARCH.
-func common(settings []debug.BuildSetting) map[string]string {
-	out := map[string]string{}
-	for _, st := range settings {
-		if st.Key != "GOOS" && st.Key != "GOARCH" {
-			out[st.Key] = st.Value
+// splitSettings separa las opciones del build en las que valen igual para
+// todas las plataformas y, por plataforma, las que difieren o solo tiene
+// alguna: GOAMD64 solo existe en amd64 y GOARM64 en arm64. GOOS y GOARCH son
+// la plataforma misma, no una opción.
+func splitSettings(byPlatform map[string]map[string]string) (shared map[string]string, extra map[string]map[string]string) {
+	shared, extra = map[string]string{}, map[string]map[string]string{}
+	keys := map[string]bool{}
+	for _, st := range byPlatform {
+		for k := range st {
+			if k != "GOOS" && k != "GOARCH" {
+				keys[k] = true
+			}
 		}
 	}
+	names := sortedKeys(byPlatform)
+	for k := range keys {
+		value, same := "", true
+		for i, name := range names {
+			v, ok := byPlatform[name][k]
+			if !ok || i > 0 && v != value {
+				same = false
+				break
+			}
+			value = v
+		}
+		if same {
+			shared[k] = value
+			continue
+		}
+		for name, st := range byPlatform {
+			if v, ok := st[k]; ok {
+				if extra[name] == nil {
+					extra[name] = map[string]string{}
+				}
+				extra[name][k] = v
+			}
+		}
+	}
+	return shared, extra
+}
+
+func sortedKeys[V any](m map[string]V) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
 	return out
 }
