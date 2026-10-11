@@ -7,12 +7,15 @@ package golden
 import (
 	"bufio"
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"math"
 	"path"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/Emmanuel93/coyote/internal/fsx"
@@ -102,19 +105,32 @@ func contentKey(q Question) string {
 	return strings.ToLower(strings.Join(strings.Fields(q.Q), " ")) + "\x00" + q.Scope + "\x00" + strings.Join(exp, "\x00")
 }
 
-// Score es la medida de una pregunta que guarda la línea base.
+// Score es la medida de una pregunta que guarda la línea base, con la huella
+// de su contenido: una pregunta reescrita con el mismo id no se compara con
+// la vieja.
 type Score struct {
 	ID       string  `json:"id"`
+	Hash     string  `json:"hash"`
 	Recall   float64 `json:"recall"`
 	RR       float64 `json:"rr"`
 	Coverage float64 `json:"coverage"`
 }
 
+// Hash es la huella del contenido de una pregunta: texto, ámbito, fuentes y k.
+func Hash(q Question) string {
+	sum := sha256.Sum256([]byte(contentKey(q) + "\x00" + strconv.Itoa(q.K)))
+	return hex.EncodeToString(sum[:8])
+}
+
 // Scores reduce los resultados a lo que guarda la línea base.
-func Scores(rs []Result) []Score {
+func Scores(qs []Question, rs []Result) []Score {
+	hash := map[string]string{}
+	for _, q := range qs {
+		hash[q.ID] = Hash(q)
+	}
 	out := make([]Score, 0, len(rs))
 	for _, r := range rs {
-		out = append(out, Score{r.ID, r.Recall, r.RR, r.Coverage})
+		out = append(out, Score{r.ID, hash[r.ID], r.Recall, r.RR, r.Coverage})
 	}
 	return out
 }

@@ -56,6 +56,12 @@ func TestEvalConLineaBase(t *testing.T) {
 	if r = run(t, root, "", "eval"); r.code != 1 || !strings.Contains(r.stdout, "✗ recall@k bajó de 100.0 a 50.0") {
 		t.Errorf("una pregunta nueva no tapa la regresión: %d\n%s", r.code, r.stdout)
 	}
+	// Reescribir una pregunta con el mismo id tampoco: se mide de nuevo.
+	write(t, root, "evals/golden.v1.jsonl", `{"id":"g1","q":"¿cuándo se confirma un pedido?","expect":["ctx:pedidos"]}`+"\n"+
+		`{"id":"g2","q":"¿qué pasa al capturar el pago?","expect":["ctx:pedidos"]}`+"\n")
+	if r = run(t, root, "", "eval"); r.code != 1 || !strings.Contains(r.stdout, "cambiaron 1 preguntas de la línea base (g2)") {
+		t.Errorf("pregunta reescrita: %d\n%s", r.code, r.stdout)
+	}
 	// Una copia de otra pregunta no entra al golden.
 	write(t, root, "evals/golden.v1.jsonl", `{"id":"g1","q":"¿cuándo se confirma un pedido?","expect":["ctx:pedidos"]}`+"\n"+
 		`{"id":"g9","q":"¿Cuándo  se confirma un pedido?","expect":["ctx:pedidos"]}`+"\n")

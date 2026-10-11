@@ -90,6 +90,7 @@ type Problem struct {
 	File   string
 	LineNo int
 	Err    error
+	Text   string // la línea tal cual, para la huella de la auditoría
 }
 
 // ReadAll recorre el ledger completo, en orden cronológico.
@@ -118,7 +119,7 @@ func (l Ledger) ReadAll() ([]Entry, []Problem, error) {
 		// ajeno no se lee (se informa como problema).
 		info, err := os.Lstat(p)
 		if err != nil || !info.Mode().IsRegular() || info.Size() > maxFile {
-			probs = append(probs, Problem{p, 0, fmt.Errorf("no es un archivo regular del ledger o es demasiado grande")})
+			probs = append(probs, Problem{p, 0, fmt.Errorf("no es un archivo regular del ledger o es demasiado grande"), ""})
 			return nil
 		}
 		data, err := fsx.ReadCapped(p, fsx.MaxText)
@@ -132,7 +133,7 @@ func (l Ledger) ReadAll() ([]Entry, []Problem, error) {
 			}
 			ln, err := ccf.Parse(s)
 			if err != nil {
-				probs = append(probs, Problem{p, i + 1, err})
+				probs = append(probs, Problem{p, i + 1, err, s})
 				continue
 			}
 			entries = append(entries, Entry{p, i + 1, ln})

@@ -483,8 +483,13 @@ var shellProtected = []struct {
 func (ps Paths) protectedIn(cmd string, readOnly bool, cwd string) (string, bool) {
 	check := func(segs [][]string, data bool) (string, bool) {
 		sps := ps.resolveSegs(segs, cwd)
-		if !readOnly && !data && ledgerWrite(segs, sps) {
-			return "el ledger, que solo crece por coyote", true
+		if !readOnly && !data {
+			if ledgerTouch(segs, sps) {
+				return "el ledger, que solo crece por coyote", true
+			}
+			if why, ok := parentTouch(segs, sps); ok {
+				return why, true
+			}
 		}
 		for i, seg := range segs {
 			line := sps[i].line

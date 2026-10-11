@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/Emmanuel93/coyote/internal/fsx"
+	"github.com/Emmanuel93/coyote/internal/glob"
 	"github.com/Emmanuel93/coyote/internal/product"
 	"github.com/Emmanuel93/coyote/internal/project"
 	"github.com/Emmanuel93/coyote/internal/secrets"
@@ -134,21 +135,25 @@ func secretsList(a *app, args []string) error {
 	if walkErr != nil {
 		return walkErr
 	}
-	if rs.err != nil {
-		return fail(1, "%v", rs.err)
-	}
 	sort.Slice(list, func(i, j int) bool { return list[i].Path < list[j].Path })
+	// La lista sale igual; sin las reglas de un proyecto no está completa.
+	done := func() error {
+		if rs.err != nil {
+			return fail(1, "%v", rs.err)
+		}
+		return nil
+	}
 	if *asJSON {
 		if list == nil {
 			list = []secretEntry{}
 		}
 		b, _ := json.MarshalIndent(list, "", "  ")
 		fmt.Fprintln(a.stdout, string(b))
-		return nil
+		return done()
 	}
 	if len(list) == 0 {
 		fmt.Fprintln(a.stdout, "No hay archivos de secretos en el proyecto.")
-		return nil
+		return done()
 	}
 	w := table(a.stdout)
 	for _, e := range list {
@@ -163,7 +168,7 @@ func secretsList(a *app, args []string) error {
 		fmt.Fprintf(a.stdout, "(el proyecto tiene más de %d archivos: la lista puede estar incompleta)\n", secretsListLimit)
 	}
 	fmt.Fprintln(a.stdout, "Solo nombres: un agente no lee los valores; los pone la persona.")
-	return nil
+	return done()
 }
 
 func secretsScan(a *app, args []string) error {
@@ -187,6 +192,7 @@ func secretsScan(a *app, args []string) error {
 		return fail(1, "%v", err)
 	}
 	var found []secrets.Finding
+	var rulesErr error
 	switch {
 	case *staged || *rng != "":
 		// Las rutas de git son relativas a la raíz del repo; cada una lleva las
@@ -203,9 +209,7 @@ func secretsScan(a *app, args []string) error {
 			}
 			rs := newRuleSet(top)
 			found = scanAdded(files, rs.For, func(p string) (string, bool) { return product.IndexText(dir, p) })
-			if rs.err != nil {
-				return fail(1, "%v", rs.err)
-			}
+			rulesErr = rs.err
 			break
 		}
 		files, right, err := product.AddedText(dir, *rng)
@@ -214,9 +218,7 @@ func secretsScan(a *app, args []string) error {
 		}
 		rs := newRuleSet(top)
 		found = scanAdded(files, rs.For, func(p string) (string, bool) { return product.FileAt(dir, right, p) })
-		if rs.err != nil {
-			return fail(1, "%v", rs.err)
-		}
+		rulesErr = rs.err
 	default:
 		if root != "" {
 			dir = root
@@ -232,9 +234,7 @@ func secretsScan(a *app, args []string) error {
 		// raíz de un monorepo, un proyecto en una subcarpeta aplica las suyas.
 		rs := newRuleSet(dir)
 		found = scanTracked(dir, files, rs.For)
-		if rs.err != nil {
-			return fail(1, "%v", rs.err)
-		}
+		rulesErr = rs.err
 	}
 	if *asJSON {
 		if found == nil {
@@ -244,6 +244,11 @@ func secretsScan(a *app, args []string) error {
 		fmt.Fprintln(a.stdout, string(b))
 	} else if !*hook || len(found) > 0 {
 		printSecretFindings(a, found, *hook)
+	}
+	if rulesErr != nil {
+		// Lo que se encontró ya se mostró; sin las reglas de un proyecto el
+		// escaneo no está completo y no puede dar el visto bueno.
+		return fail(1, "%v", rulesErr)
 	}
 	if len(found) > 0 {
 		return fail(1, "")
@@ -287,32 +292,105 @@ func newRuleSet(top string) *ruleSet {
 }
 
 // For devuelve las reglas para una ruta relativa a la raíz del repo y la
-// ruta relativa al proyecto.
+// ruta relativa al proyecto. Las reglas son las del proyecto más cercano,
+// más los archivos que declaran como secretos los proyectos que lo
+// contienen (un proyecto anidado no tapa las del de afuera); una dispensa
+// vale solo si la dan todos. Un proyecto dentro de dependencias (vendor,
+// node_modules) no cuenta. Un project.yaml que no se puede leer queda en err,
+// con su ruta, y sus archivos se revisan con las reglas de siempre.
 func (r *ruleSet) For(gitPath string) (secrets.Rules, string) {
 	abs := filepath.Join(r.top, filepath.FromSlash(gitPath))
-	dir := filepath.Dir(abs)
-	root, ok := r.roots[dir]
-	if !ok {
-		root, _ = project.FindRoot(dir)
-		r.roots[dir] = root
-	}
-	if root == "" {
+	chain := r.chain(filepath.Dir(abs))
+	if len(chain) == 0 {
 		return secrets.Rules{}, gitPath
 	}
+	relTo := func(root string) (string, bool) {
+		rel, err := filepath.Rel(root, abs)
+		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return "", false
+		}
+		return filepath.ToSlash(rel), true
+	}
+	near, ok := relTo(chain[0])
+	if !ok {
+		return secrets.Rules{}, gitPath
+	}
+	base := r.load(chain[0])
+	rules := secrets.Rules{Files: append([]string(nil), base.Files...), Allow: base.Allow}
+	for _, outer := range chain[1:] {
+		rel, ok := relTo(outer)
+		if !ok {
+			continue
+		}
+		o := r.load(outer)
+		if glob.Any(o.Files, rel) {
+			rules.Files = append(rules.Files, near)
+		}
+		if rules.Allowed(near) && !o.Allowed(rel) {
+			rules.Allow = nil
+		}
+	}
+	return rules, near
+}
+
+// chain son los proyectos que contienen dir, del más cercano al de afuera,
+// dentro del repo y fuera de las dependencias.
+func (r *ruleSet) chain(dir string) []string {
+	var out []string
+	for d := dir; ; {
+		root, ok := r.roots[d]
+		if !ok {
+			root, _ = project.FindRoot(d)
+			r.roots[d] = root
+		}
+		if root == "" || !within(r.top, root) {
+			return out
+		}
+		if !dependency(r.top, root) {
+			out = append(out, root)
+		}
+		parent := filepath.Dir(root)
+		if parent == root {
+			return out
+		}
+		d = parent
+	}
+}
+
+// load lee las reglas de secretos de un proyecto, una vez.
+func (r *ruleSet) load(root string) secrets.Rules {
 	rules, ok := r.rules[root]
 	if !ok {
 		if cfg, err := project.Load(root); err == nil {
 			rules = cfg.Secrets
 		} else if r.err == nil {
-			r.err = fmt.Errorf("%v; sin las reglas de secretos de ese proyecto no se revisa nada", err)
+			rel, _ := filepath.Rel(r.top, root)
+			r.err = fmt.Errorf("%s: %v; sus archivos se revisaron con las reglas de siempre, sin las del proyecto", filepath.ToSlash(filepath.Join(rel, project.ConfigPath)), err)
 		}
 		r.rules[root] = rules
 	}
-	rel, err := filepath.Rel(root, abs)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return secrets.Rules{}, gitPath
+	return rules
+}
+
+// within dice si p está dentro de top (o es top).
+func within(top, p string) bool {
+	rel, err := filepath.Rel(top, p)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// dependency dice si un proyecto vive dentro de las dependencias de otro
+// (vendor, node_modules, third_party): no es un proyecto de este repo.
+func dependency(top, root string) bool {
+	rel, err := filepath.Rel(top, root)
+	if err != nil {
+		return false
 	}
-	return rules, filepath.ToSlash(rel)
+	for _, part := range strings.Split(filepath.ToSlash(rel), "/") {
+		if part == "vendor" || part == "node_modules" || part == "third_party" {
+			return true
+		}
+	}
+	return false
 }
 
 // scanAdded revisa lo que agrega un cambio: los archivos de secretos nuevos

@@ -109,20 +109,27 @@ func cmdEval(a *app, args []string) error {
 			return fail(2, "la línea base se midió con --budget %d; mide igual o actualízala", base.Budget)
 		}
 		now := map[string]golden.Score{}
-		for _, sc := range golden.Scores(results) {
+		for _, sc := range golden.Scores(qs, results) {
 			now[sc.ID] = sc
 		}
-		var gone []string
+		var gone, changed []string
 		var was, is []golden.Score
 		for _, b := range base.Results {
 			sc, ok := now[b.ID]
-			if !ok {
+			switch {
+			case !ok:
 				gone = append(gone, b.ID)
+				continue
+			case sc.Hash != b.Hash:
+				changed = append(changed, b.ID)
 				continue
 			}
 			was, is = append(was, b), append(is, sc)
 		}
-		regressions = golden.Regression(golden.Average(was), golden.Average(is), evalTolerance)
+		if len(changed) > 0 {
+			regressions = append(regressions, fmt.Sprintf("cambiaron %d preguntas de la línea base (%s): una pregunta reescrita se mide de nuevo con --update-baseline, y eso se revisa en el PR", len(changed), strings.Join(changed, ", ")))
+		}
+		regressions = append(regressions, golden.Regression(golden.Average(was), golden.Average(is), evalTolerance)...)
 		switch {
 		case len(gone) > 0:
 			regressions = append(regressions, fmt.Sprintf("faltan %d preguntas de la línea base (%s): quitarlas se revisa en el PR con --update-baseline", len(gone), strings.Join(gone, ", ")))
@@ -135,7 +142,7 @@ func cmdEval(a *app, args []string) error {
 		if err := fsx.NoSymlinks(root, brel); err != nil {
 			return fail(1, "%v", err)
 		}
-		nb := evalBaseline{Golden: grel, Budget: *budget, Summary: sum, Results: golden.Scores(results), Updated: a.now().Format("2006-01-02")}
+		nb := evalBaseline{Golden: grel, Budget: *budget, Summary: sum, Results: golden.Scores(qs, results), Updated: a.now().Format("2006-01-02")}
 		data, _ := json.MarshalIndent(nb, "", "  ")
 		bp := filepath.Join(root, filepath.FromSlash(brel))
 		if err := os.MkdirAll(filepath.Dir(bp), 0o755); err != nil {

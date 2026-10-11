@@ -8,180 +8,210 @@
   "results": [
     {
       "id": "g01",
+      "hash": "9d8cdb5f28983370",
       "recall": 0.5,
       "rr": 0.3333333333333333,
       "coverage": 1
     },
     {
       "id": "g02",
+      "hash": "7c904587fe9a9e16",
       "recall": 1,
       "rr": 0.5,
       "coverage": 1
     },
     {
       "id": "g03",
+      "hash": "5ae024461e862cf5",
       "recall": 1,
       "rr": 1,
       "coverage": 1
     },
     {
       "id": "g04",
+      "hash": "263389a97a4bc753",
       "recall": 1,
       "rr": 0.5,
       "coverage": 1
     },
     {
       "id": "g05",
+      "hash": "5956c83577e89415",
       "recall": 1,
       "rr": 1,
       "coverage": 1
     },
     {
       "id": "g06",
+      "hash": "fb1a780e2d794118",
       "recall": 1,
       "rr": 0.5,
       "coverage": 1
     },
     {
       "id": "g07",
+      "hash": "811373c4cc38f504",
       "recall": 0.5,
       "rr": 1,
       "coverage": 1
     },
     {
       "id": "g08",
+      "hash": "2296d4fffca78de2",
       "recall": 0,
       "rr": 0,
       "coverage": 0
     },
     {
       "id": "g09",
+      "hash": "ef08949a10d3274a",
       "recall": 1,
       "rr": 1,
       "coverage": 1
     },
     {
       "id": "g10",
+      "hash": "12f280023bc85c2d",
       "recall": 1,
       "rr": 0.3333333333333333,
       "coverage": 1
     },
     {
       "id": "g11",
+      "hash": "2aee58478aa51b8a",
       "recall": 1,
       "rr": 0.5,
       "coverage": 1
     },
     {
       "id": "g12",
+      "hash": "d23283af4e352f7d",
       "recall": 1,
       "rr": 1,
       "coverage": 1
     },
     {
       "id": "g13",
+      "hash": "99e06145030014b2",
       "recall": 1,
       "rr": 0.5,
       "coverage": 1
     },
     {
       "id": "g14",
+      "hash": "94b6b1b65972e311",
       "recall": 1,
       "rr": 0.3333333333333333,
       "coverage": 1
     },
     {
       "id": "g15",
+      "hash": "ba9696f3347c0f34",
       "recall": 0.5,
       "rr": 1,
       "coverage": 1
     },
     {
       "id": "g16",
+      "hash": "e047630a7a5189dd",
       "recall": 1,
       "rr": 0.5,
       "coverage": 1
     },
     {
       "id": "g17",
+      "hash": "f4715d1bedf62b99",
       "recall": 1,
       "rr": 0.5,
       "coverage": 1
     },
     {
       "id": "g18",
+      "hash": "79ee71016ce29037",
       "recall": 0.5,
       "rr": 1,
       "coverage": 1
     },
     {
       "id": "g19",
+      "hash": "ff3674915dbe4648",
       "recall": 1,
       "rr": 1,
       "coverage": 1
     },
     {
       "id": "g20",
+      "hash": "845cb058aed40614",
       "recall": 0.5,
       "rr": 1,
       "coverage": 1
     },
     {
       "id": "g21",
+      "hash": "7e14602340103396",
       "recall": 1,
       "rr": 0.5,
       "coverage": 1
     },
     {
       "id": "g22",
+      "hash": "926fba8b9e7c2013",
       "recall": 1,
       "rr": 0.3333333333333333,
       "coverage": 1
     },
     {
       "id": "g23",
+      "hash": "5c5de19a4ab5b5e6",
       "recall": 1,
       "rr": 0.5,
       "coverage": 1
     },
     {
       "id": "g24",
+      "hash": "d90df8e30b25ea7a",
       "recall": 1,
       "rr": 0.5,
       "coverage": 1
     },
     {
       "id": "g25",
+      "hash": "a2fbc80e497d939f",
       "recall": 0,
       "rr": 0,
       "coverage": 0
     },
     {
       "id": "g26",
+      "hash": "1b4c5c9854017da8",
       "recall": 1,
       "rr": 1,
       "coverage": 1
     },
     {
       "id": "g27",
+      "hash": "029d654cd74df1cb",
       "recall": 1,
       "rr": 1,
       "coverage": 1
     },
     {
       "id": "g28",
+      "hash": "cf5f5165376aef8e",
       "recall": 1,
       "rr": 1,
       "coverage": 1
     },
     {
       "id": "g29",
+      "hash": "37317ec4cc54b7c6",
       "recall": 1,
       "rr": 1,
       "coverage": 1
     },
     {
       "id": "g30",
+      "hash": "aae9e9d6e6084a73",
       "recall": 1,
       "rr": 0.5,
       "coverage": 1

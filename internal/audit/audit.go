@@ -251,7 +251,7 @@ func Build(in Input) *Report {
 		}
 		h, herr := readHistory(in)
 		r.Checks = append(r.Checks, checkAppendOnly(in, h, herr), checkBackdated(in, h, herr), checkActors(in, period))
-		c, commits, signed := checkCommits(in)
+		c, commits, signed := checkCommits(in, h, herr)
 		r.Checks = append(r.Checks, c)
 		r.Commits, r.Signed = commits, signed
 	} else {
@@ -297,6 +297,19 @@ func linkApprovals(entries []ledger.Entry, list []Approval) (map[string]link, ma
 	ordered := append([]ledger.Entry(nil), entries...)
 	sort.SliceStable(ordered, func(i, j int) bool { return ordered[i].Line.TS.Before(ordered[j].Line.TS) })
 	links, claimed, recordedBy := map[string]link{}, map[string]string{}, map[string]string{}
+	// Primero los eventos que citan su registro; después, por el gate que
+	// nombran, los de las personas y al final los de los agentes: un agente
+	// que registra antes no le quita su registro a la persona.
+	pass := func(e ledger.Entry) int {
+		switch {
+		case len(refs(e.Line.Refs, "apr:")) > 0:
+			return 0
+		case usage.Agent(e.Line.Actor) == "" || usage.Agent(e.Line.Actor) == "-":
+			return 1
+		}
+		return 2
+	}
+	sort.SliceStable(ordered, func(i, j int) bool { return pass(ordered[i]) < pass(ordered[j]) })
 	for _, e := range ordered {
 		l := e.Line
 		if l.Type != "apr" && l.Type != "rej" {
@@ -326,10 +339,11 @@ func linkApprovals(entries []ledger.Entry, list []Approval) (map[string]link, ma
 				}
 			}
 		} else {
-			// Por el gate que nombra: el primer registro libre que coincide. Un
-			// gate rechazado y después aprobado tiene dos registros.
+			// Por el gate que nombra: el registro libre que coincide y tiene la
+			// fecha más cercana. Un gate rechazado y después aprobado tiene dos.
 			first, _, _ := strings.Cut(strings.TrimSpace(l.What), " ")
 			var whys []string
+			best, bestGap := Approval{}, time.Duration(-1)
 			for _, a := range list {
 				if a.Gate == "" || a.Gate != first {
 					continue
@@ -342,10 +356,18 @@ func linkApprovals(entries []ledger.Entry, list []Approval) (map[string]link, ma
 					whys = append(whys, a.ID+" ya respalda el evento del "+at)
 					continue
 				}
-				claim(a)
-				break
+				d, _ := time.Parse("2006-01-02", a.Date)
+				gap := l.TS.Sub(d)
+				if gap < 0 {
+					gap = -gap
+				}
+				if bestGap < 0 || gap < bestGap {
+					best, bestGap = a, gap
+				}
 			}
-			if len(lk.ids) == 0 {
+			if bestGap >= 0 {
+				claim(best)
+			} else {
 				lk.why = whys
 			}
 		}
@@ -376,41 +398,47 @@ func mismatch(l ccf.Line, a Approval) string {
 	return ""
 }
 
-// ledgerSum es la huella del ledger hasta el fin del periodo: las líneas
-// con fecha anterior a To, tal como están en HEAD (o en el disco, sin git).
-// Regenerar un mes ya auditado da la misma huella, salvo que ese mes o uno
-// anterior se haya reescrito o le hayan llegado líneas con fecha pasada.
+// ledgerSum es la huella de lo que el reporte leyó del ledger hasta el fin
+// del periodo: cada línea válida con fecha anterior a To y cada línea
+// inválida de un archivo de un día anterior a To, con su texto. Regenerar un
+// mes ya auditado da la misma huella, salvo que ese mes o uno anterior se
+// haya reescrito o le hayan llegado líneas con fecha pasada.
 func ledgerSum(in Input) string {
-	h := sha256.New()
-	add := func(file string, n int, text string) {
-		if l, err := ccf.Parse(text); err == nil && l.TS.Before(in.To) {
-			fmt.Fprintf(h, "%s:%d %s\n", file, n, text)
-		}
-	}
-	if in.Git != nil {
-		if out, err := in.Git("-c", "core.quotePath=false", "ls-tree", "-r", "-z", "--name-only", "HEAD", "--", ledgerDir); err == nil {
-			files := strings.Split(strings.TrimSuffix(out, "\x00"), "\x00")
-			sort.Strings(files)
-			for _, f := range files {
-				if f == "" {
-					continue
-				}
-				blob, err := in.Git("cat-file", "blob", "HEAD:./"+f)
-				if err != nil {
-					fmt.Fprintf(h, "%s: ilegible\n", f)
-					continue
-				}
-				for i, line := range strings.Split(blob, "\n") {
-					add(f, i+1, line)
-				}
-			}
-			return hex.EncodeToString(h.Sum(nil))
-		}
-	}
+	type row struct{ file, text string }
+	var rows []row
 	for _, e := range in.Entries {
-		add(filepath.Base(e.File), e.LineNo, e.Line.String())
+		if e.Line.TS.Before(in.To) {
+			rows = append(rows, row{rel(in.Root, e.File), e.Line.String()})
+		}
+	}
+	for _, p := range in.Problems {
+		if day, ok := fileDay(p.File); !ok || day.Before(in.To) {
+			rows = append(rows, row{rel(in.Root, p.File), "inválida: " + p.Text})
+		}
+	}
+	sort.SliceStable(rows, func(i, j int) bool {
+		if rows[i].file != rows[j].file {
+			return rows[i].file < rows[j].file
+		}
+		return rows[i].text < rows[j].text
+	})
+	h := sha256.New()
+	for _, r := range rows {
+		fmt.Fprintf(h, "%s %s\n", r.file, r.text)
 	}
 	return hex.EncodeToString(h.Sum(nil))
+}
+
+// fileDay saca el día de un archivo del ledger (coyote/ledger/AAAA/MM/DD-x.ccf).
+func fileDay(p string) (time.Time, bool) {
+	p = filepath.ToSlash(p)
+	parts := strings.Split(p, "/")
+	if len(parts) < 3 {
+		return time.Time{}, false
+	}
+	day, _, _ := strings.Cut(parts[len(parts)-1], "-")
+	t, err := time.Parse("2006/01/02", parts[len(parts)-3]+"/"+parts[len(parts)-2]+"/"+day)
+	return t, err == nil
 }
 
 func inPeriod(ts string, from, to time.Time) bool {

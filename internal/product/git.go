@@ -73,7 +73,9 @@ func gitEnv() []string {
 		}
 		env = append(env, kv)
 	}
-	return append(env, "GIT_OPTIONAL_LOCKS=0", "GIT_TERMINAL_PROMPT=0", "GIT_NO_REPLACE_OBJECTS=1",
+	// Sin objetos de reemplazo ni injertos (.git/info/grafts): la historia es
+	// la que guardan los commits.
+	return append(env, "GIT_OPTIONAL_LOCKS=0", "GIT_TERMINAL_PROMPT=0", "GIT_NO_REPLACE_OBJECTS=1", "GIT_GRAFT_FILE=/dev/null",
 		"GIT_NO_LAZY_FETCH=1", "GIT_PAGER=cat", "GIT_ASKPASS=/bin/false", "SSH_ASKPASS=/bin/false")
 }
 

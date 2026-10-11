@@ -12,6 +12,7 @@ import (
 	"github.com/Emmanuel93/coyote/internal/ci"
 	"github.com/Emmanuel93/coyote/internal/fsx"
 	"github.com/Emmanuel93/coyote/internal/github"
+	"github.com/Emmanuel93/coyote/internal/glob"
 	"github.com/Emmanuel93/coyote/internal/infra"
 	"github.com/Emmanuel93/coyote/internal/inject"
 	"github.com/Emmanuel93/coyote/internal/product"
@@ -395,6 +396,14 @@ type baseRules struct {
 }
 
 func (b *baseRules) For(f string) (secrets.Rules, string) {
+	// Los proyectos que contienen f, del más cercano al de afuera, como en
+	// secrets scan: un proyecto anidado no tapa los secretos que declara el
+	// de afuera, y una dispensa vale solo si la dan todos.
+	type proj struct {
+		prefix string
+		rules  secrets.Rules
+	}
+	var chain []proj
 	for d := path.Dir(f); ; d = path.Dir(d) {
 		prefix := ""
 		if d != "." && d != "/" {
@@ -402,7 +411,7 @@ func (b *baseRules) For(f string) (secrets.Rules, string) {
 		}
 		r, seen := b.cache[prefix]
 		if !seen {
-			if text, ok := product.FileAt(b.dir, b.base, prefix+project.ConfigPath); ok {
+			if text, ok := product.FileAt(b.dir, b.base, prefix+project.ConfigPath); ok && !dependency("/", "/"+prefix) {
 				rules := secrets.Rules{}
 				if cfg, err := project.Parse([]byte(text), b.name); err == nil {
 					rules = cfg.Secrets
@@ -414,12 +423,27 @@ func (b *baseRules) For(f string) (secrets.Rules, string) {
 			b.cache[prefix] = r
 		}
 		if r != nil {
-			return *r, strings.TrimPrefix(f, prefix)
+			chain = append(chain, proj{prefix, *r})
 		}
 		if prefix == "" {
-			return secrets.Rules{}, f
+			break
 		}
 	}
+	if len(chain) == 0 {
+		return secrets.Rules{}, f
+	}
+	near := strings.TrimPrefix(f, chain[0].prefix)
+	rules := secrets.Rules{Files: append([]string(nil), chain[0].rules.Files...), Allow: chain[0].rules.Allow}
+	for _, outer := range chain[1:] {
+		rel := strings.TrimPrefix(f, outer.prefix)
+		if glob.Any(outer.rules.Files, rel) {
+			rules.Files = append(rules.Files, near)
+		}
+		if rules.Allowed(near) && !outer.rules.Allowed(rel) {
+			rules.Allow = nil
+		}
+	}
+	return rules, near
 }
 
 // sloRisks compara cada archivo de SLOs que toca el PR con el de la base y

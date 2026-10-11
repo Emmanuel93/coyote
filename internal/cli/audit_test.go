@@ -291,3 +291,116 @@ func TestAuditSegundaRevision(t *testing.T) {
 		t.Errorf("la huella del mes pasado cambió con un evento de este mes: %s → %s", before, after)
 	}
 }
+
+// TestAuditTerceraRevision: tercera revisión adversarial de v1.0. Lo que
+// llega por un merge cuenta cuando llega; un archivo sin salto final no es
+// una reescritura; la huella es la de lo que el reporte leyó; los injertos no
+// esconden la historia.
+func TestAuditTerceraRevision(t *testing.T) {
+	base := setup(t)
+	nuevo := func(name string) string {
+		t.Helper()
+		must(t, run(t, base, "", "init", name, "--purpose", "API de pedidos de la tienda demo"), 0, "init "+name)
+		root := filepath.Join(base, name)
+		git(t, root, "add", "-A")
+		git(t, root, "commit", "-qm", "chore: adopta coyote")
+		return root
+	}
+	at := func(root string, date time.Time, args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
+		cmd.Env = append(os.Environ(), "GIT_COMMITTER_DATE="+date.Format(time.RFC3339), "GIT_AUTHOR_DATE="+date.Format(time.RFC3339))
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	now := time.Now().UTC()
+	lastMonth := now.AddDate(0, -1, 0)
+
+	// Una aprobación de un agente con fecha del mes pasado, dentro de un merge.
+	root := nuevo("merge")
+	git(t, root, "checkout", "-q", "-b", "lado")
+	git(t, root, "commit", "-q", "--allow-empty", "-m", "chore: lado")
+	git(t, root, "checkout", "-q", "main")
+	git(t, root, "merge", "-q", "--no-ff", "--no-commit", "lado")
+	must(t, run(t, root, "", "record", "apr", "G4 aprobado: release 1.1", "--agent", "coyote-scribe", "--ts", lastMonth.Format(time.RFC3339)), 0, "record")
+	git(t, root, "add", "-A")
+	git(t, root, "commit", "-qm", "merge: lado")
+	if r := run(t, root, "", "audit"); !strings.Contains(r.stdout, "cae en un mes anterior") {
+		t.Errorf("la aprobación dentro del merge:\n%s", r.stdout)
+	}
+
+	// Una rama con fechas del mes pasado que se integra hoy: cuenta hoy.
+	root = nuevo("rama")
+	git(t, root, "checkout", "-q", "-b", "vieja")
+	must(t, run(t, root, "", "record", "apr", "G4 aprobado: release 1.1", "--agent", "coyote-scribe", "--ts", lastMonth.Format(time.RFC3339)), 0, "record")
+	git(t, root, "add", "-A")
+	at(root, lastMonth.Add(30*time.Minute), "commit", "-qm", "feat: algo", "-m", aiTrailer, "--no-verify")
+	git(t, root, "checkout", "-q", "main")
+	git(t, root, "merge", "-q", "--no-ff", "vieja", "-m", "merge: vieja")
+	r := run(t, root, "", "audit")
+	for _, want := range []string{"cae en un mes anterior", "| commits del periodo sin atribución a IA (R15) | falla |"} {
+		if !strings.Contains(r.stdout, want) {
+			t.Errorf("rama vieja integrada hoy: falta %q\n%s", want, r.stdout)
+		}
+	}
+
+	// Un commit con fecha futura se avisa.
+	root = nuevo("futuro")
+	at(root, now.AddDate(0, 5, 0), "commit", "-q", "--allow-empty", "-m", "chore: futuro")
+	if r := run(t, root, "", "audit"); !strings.Contains(r.stdout, "fecha futura") {
+		t.Errorf("fecha futura:\n%s", r.stdout)
+	}
+
+	// Un archivo del ledger sin salto final, y después una línea con coyote.
+	root = nuevo("salto")
+	files, _ := filepath.Glob(filepath.Join(root, "coyote", "ledger", "*", "*", "*.ccf"))
+	text := strings.TrimRight(readFile(t, files[0]), "\n") + "\n" + now.Format("2006-01-02T15:04Z") + "|@ana|-|salto|feat|-|a mano|-|-|-|ok"
+	if err := os.WriteFile(files[0], []byte(text), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, root, "commit", "-qam", "chore: a mano")
+	must(t, run(t, root, "", "record", "feat", "alta de pedidos"), 0, "record")
+	git(t, root, "commit", "-qam", "chore: registro")
+	if r := run(t, root, "", "audit"); strings.Contains(r.stdout, "| el ledger solo agrega líneas | falla |") {
+		t.Errorf("agregar el salto final no es una reescritura:\n%s", r.stdout)
+	}
+
+	// La huella es la misma con la línea con commit o sin él.
+	root = nuevo("huella")
+	sum := func() string {
+		t.Helper()
+		var rep struct {
+			Sum string `json:"ledger_sha256"`
+		}
+		r := run(t, root, "", "audit", "--json")
+		if err := json.Unmarshal([]byte(r.stdout), &rep); err != nil {
+			t.Fatalf("--json: %v\n%s", err, r.stdout)
+		}
+		return rep.Sum
+	}
+	must(t, run(t, root, "", "record", "feat", "algo"), 0, "record")
+	before := sum()
+	git(t, root, "commit", "-qam", "chore: registro")
+	if after := sum(); after != before {
+		t.Errorf("la huella cambió al hacer commit del mismo contenido")
+	}
+
+	// Un injerto no esconde un commit que borra una línea.
+	root = nuevo("injerto")
+	must(t, run(t, root, "", "record", "fix", "corrige totales"), 0, "record")
+	git(t, root, "commit", "-qam", "chore: registro")
+	files, _ = filepath.Glob(filepath.Join(root, "coyote", "ledger", "*", "*", "*.ccf"))
+	if err := os.WriteFile(files[0], []byte(strings.Replace(readFile(t, files[0]), "corrige totales", "otra cosa", 1)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, root, "commit", "-qam", "chore: borra")
+	x := strings.TrimSpace(git(t, root, "rev-parse", "HEAD"))
+	orphan := strings.TrimSpace(git(t, root, "commit-tree", x+"^{tree}", "-m", "raíz falsa"))
+	if err := os.WriteFile(filepath.Join(root, ".git", "info", "grafts"), []byte(x+" "+orphan+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if r := run(t, root, "", "audit"); !strings.Contains(r.stdout, "| el ledger solo agrega líneas | falla |") {
+		t.Errorf("un injerto escondió la reescritura:\n%s", r.stdout)
+	}
+}

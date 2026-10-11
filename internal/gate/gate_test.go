@@ -446,8 +446,8 @@ func TestRutasDesdeLaCarpetaDelIDE(t *testing.T) {
 		}
 	}
 	// Leer, preparar para un commit o copiar desde el ledger no es escribirlo.
-	for _, c := range []string{"git add coyote/ledger/2026/10/11-ana.ccf src/main.go", "awk -F'|' '{print $3}' coyote/ledger/2026/10/11-ana.ccf",
-		"python3 scripts/costos.py coyote/ledger", "git diff main -- coyote/ledger > /tmp/ledger.diff", "cp coyote/ledger/2026/10/11-ana.ccf /tmp/"} {
+	for _, c := range []string{"git add coyote/ledger/2026/10/11-ana.ccf src/main.go", "less coyote/ledger/2026/10/11-ana.ccf",
+		"git log -p -- coyote/ledger | less", "git diff main -- coyote/ledger > /tmp/ledger.diff", "cp coyote/ledger/2026/10/11-ana.ccf /tmp/"} {
 		if d := ps.Evaluate(claude(t, "Bash", map[string]any{"command": c}, root)); d.Verdict == Block {
 			t.Errorf("%q no escribe el ledger: %s", c, d.Reason)
 		}
@@ -455,5 +455,41 @@ func TestRutasDesdeLaCarpetaDelIDE(t *testing.T) {
 	// El subcomando de git no es una ruta: git config después de cd .git no lee .git/config.
 	if d := ps.Evaluate(claude(t, "Bash", map[string]any{"command": "cd .git && git config --get user.name"}, root)); d.Verdict == Block {
 		t.Errorf("git config --get no lee .git/config: %s", d.Reason)
+	}
+}
+
+// TestTerceraRevisionDelGate: tercera revisión adversarial de v1.0. Todo lo
+// que nombra el ledger con efectos se bloquea, salvo leerlo, prepararlo con
+// git o copiarlo hacia otro lugar; una redirección pegada no se esconde como
+// dato; mover, borrar o reescribir la carpeta que contiene lo protegido
+// también lo toca.
+func TestTerceraRevisionDelGate(t *testing.T) {
+	ps, root, _ := testPaths(t)
+	for _, d := range []string{"coyote/ledger/2026/10", "coyote/approvals", ".claude"} {
+		if err := os.MkdirAll(filepath.Join(root, filepath.FromSlash(d)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f := "coyote/ledger/2026/10/11-ana.ccf"
+	blocked := []string{
+		"cat /tmp/x>>" + f, ":> " + f, "exec 3>> " + f + "; echo x >&3", "find coyote/ledger -name '*.ccf' -delete",
+		"ls coyote/ledger/2026/10/*.ccf | xargs rm", "busybox rm -rf coyote/ledger", "tar -C coyote/ledger -xf /tmp/e.tar",
+		"sort /tmp/x | sponge " + f, "ex -sc '1d|x' " + f, "vim -c '1d|wq' " + f, "gzip " + f,
+		`python3 -c "open('` + f + `','w')"`, `node -e "require('fs').writeFileSync('` + f + `','')"`,
+		"sed 's/a/b/w " + f + "' /tmp/x", "awk -F'|' '{print $3}' " + f, "git diff --output=" + f,
+		"echo x>.claude/settings.json", "echo '{}'>coyote/approvals/P-0099.json", "printf x>coyote/project.yaml",
+		"mv coyote c && cp /tmp/x c/approvals/", "mv .claude cl && echo '{}' > cl/settings.json", "tar -xf /tmp/e.tar -C coyote",
+		"ls | xargs -I{} cp /tmp/x {}/approvals/", "find coyote -name project.yaml -exec sed -i s/manual/autonomous/ {} +", "rm -rf coyote",
+	}
+	for _, c := range blocked {
+		if d := ps.Evaluate(claude(t, "Bash", map[string]any{"command": c}, root)); d.Verdict != Block {
+			t.Errorf("%q debería bloquearse siempre: %s (%s)", c, d.Verdict, d.Reason)
+		}
+	}
+	for _, c := range []string{"cp -r coyote /tmp/respaldo", "tar -czf /tmp/r.tgz coyote", "git status 2>&1 | tail -3", "make check 2>/dev/null",
+		`git ls-files | xargs grep -n "project.yaml"`} {
+		if d := ps.Evaluate(claude(t, "Bash", map[string]any{"command": c}, root)); d.Verdict == Block {
+			t.Errorf("%q no toca lo protegido: %s", c, d.Reason)
+		}
 	}
 }

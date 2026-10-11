@@ -38,7 +38,8 @@ install:
 	go install -trimpath -ldflags "$(LDFLAGS)" ./cmd/coyote
 
 # Binarios, SBOM CycloneDX de cada uno y procedencia SLSA Build L1 (ADR-0027).
-# Todo sale del commit: se compila en un clon limpio de HEAD, así que ni
+# Todo sale del commit: se compila en un clon limpio de HEAD, sin la
+# configuración de git de quien compila (core.autocrlf cambiaría los bytes), así que ni
 # los cambios sin commit, ni skip-worktree, ni un archivo ignorado entran al
 # binario. La versión, el commit y la fecha se leen de git en la receta, y el
 # entorno de Go queda fijo: ni el entorno ni la línea de comandos los cambian.
@@ -47,12 +48,15 @@ override DIST_GOENV := CGO_ENABLED=0 GOAMD64=v1 GOARM64=v8.0 GOEXPERIMENT= GOWOR
 override PLATFORMS := darwin/arm64 darwin/amd64 linux/amd64 linux/arm64
 override PKG := github.com/Emmanuel93/coyote/internal/version
 dist:
-	@case "$(DIST)" in ""|/*|*..*|.|./|*[!A-Za-z0-9._/-]*) echo "DIST tiene que ser una carpeta relativa dentro del repo, con letras, números, . _ - y /"; exit 1;; esac
+	@case "$(DIST)" in ""|/*|*..*|.|./|.git|.git/*|*[!A-Za-z0-9._/-]*) echo "DIST tiene que ser una carpeta relativa dentro del repo, con letras, números, . _ - y /"; exit 1;; esac
+	@git check-ignore -q "$(DIST)/coyote" && test -z "$$(git ls-files -- "$(DIST)")" || { echo "DIST tiene que ser una carpeta que git ignora y sin archivos versionados (make dist la borra entera)"; exit 1; }
 	@test -z "$$(git status --porcelain --untracked-files=normal)" || { echo "make dist necesita el árbol limpio: haz commit o guarda los cambios (un release sale de un commit)"; exit 1; }
 	@rm -rf "./$(DIST)" && mkdir -p "./$(DIST)"
 	@out=$$(cd "./$(DIST)" && pwd) && head=$$(git rev-parse HEAD) && wt=$$(mktemp -d "$${TMPDIR:-/tmp}/coyote-dist.XXXXXX") && \
 	trap 'rm -rf "$$wt"' EXIT && \
-	git clone -q --shared . "$$wt/src" && cd "$$wt/src" && git checkout -q --detach "$$head" && \
+	export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 && \
+	git clone -q --shared --no-checkout . "$$wt/src" && cd "$$wt/src" && \
+	git -c core.autocrlf=false -c core.eol=lf checkout -q --detach "$$head" && \
 	ver=$$(git describe --tags --always) && commit=$$(git rev-parse --short HEAD) && full=$$(git rev-parse HEAD) && \
 	date=$$(TZ=UTC git log -1 --format=%cd --date=format-local:%Y-%m-%dT%H:%MZ) && \
 	rfc=$$(TZ=UTC git log -1 --format=%cd --date=format-local:%Y-%m-%dT%H:%M:%SZ) && \

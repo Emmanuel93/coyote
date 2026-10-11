@@ -123,6 +123,12 @@ func lenientSegs(cmd string) []lseg {
 		case (c == '&' || c == '|') && in && i > 0 && r[i-1] == '>':
 			// >& y >| son redirecciones, no separadores: el destino sigue.
 			b.WriteRune(c)
+		case (c == '>' || c == '<') && in && !fdPrefix(b.String()) && !strings.HasSuffix(b.String(), ">") && !strings.HasSuffix(b.String(), "<"):
+			// x>archivo: la redirección es una palabra aparte, aunque vaya
+			// pegada a la anterior (un dato de echo no la esconde).
+			flush()
+			b.WriteRune(c)
+			in = true
 		case strings.ContainsRune(";&|\n(){}", c):
 			push()
 		default:
@@ -132,6 +138,20 @@ func lenientSegs(cmd string) []lseg {
 	}
 	push()
 	return segs
+}
+
+// fdPrefix dice si lo escrito antes de > o < es el número de un descriptor
+// (2>, 10>>) o &: forma parte de la redirección.
+func fdPrefix(s string) bool {
+	if s == "&" {
+		return true
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // braceWord dice si la llave en i abre una expansión ({a,b} o {1..3}) y no

@@ -122,12 +122,12 @@ func (ps Paths) resolveSegs(segs [][]string, cwd string) []segPaths {
 	return out
 }
 
-// redirPrefix es una redirección pegada a su destino (>x, 2>>x, &>x, >&x, >|x).
-var redirPrefix = regexp.MustCompile(`^(?:[0-9]*|&)(?:>>|>\||>&|>|<)`)
+// redirPrefix es una redirección pegada a su destino (>x, 2>>x, &>x, >&x,
+// >|x, 3<>x).
+var redirPrefix = regexp.MustCompile(`^(?:[0-9]*|&)(?:>>|>\||>&|<>|>|<)`)
 
-// redirOps son las redirecciones escritas como palabra aparte.
-var redirOps = map[string]bool{">": true, ">>": true, ">|": true, ">&": true, "&>": true, "&>>": true,
-	"1>": true, "2>": true, "1>>": true, "2>>": true}
+// redirOp es una redirección escrita como palabra aparte (>, 3>>, &>, <>).
+var redirOp = regexp.MustCompile(`^(?:[0-9]*|&)(?:>>|>\||>&|<>|>|<)$`)
 
 // cleanPath limpia una palabra con forma de ruta, también el valor de
 // --opción=ruta.
@@ -320,22 +320,35 @@ func (ps Paths) relOrAbs(abs string) string {
 }
 
 // ledgerRe nombra el ledger de un proyecto.
-var ledgerRe = regexp.MustCompile(`(?i)(^|/)coyote/ledger(/|$)`)
+var ledgerRe = regexp.MustCompile(`(?i)(^|[^a-z0-9_.-])coyote/ledger(/|$)`)
 
-// ledgerWriters escriben o borran lo que nombran.
-var ledgerWriters = map[string]bool{"rm": true, "rmdir": true, "mv": true, "tee": true, "truncate": true, "touch": true,
-	"chmod": true, "chown": true, "shred": true, "unlink": true, "install": true, "ln": true, "dd": true}
+// ledgerReaders leen lo que nombran sin escribirlo: con el ledger como
+// argumento, piden la aprobación normal.
+var ledgerReaders = map[string]bool{"cat": true, "head": true, "tail": true, "wc": true, "grep": true, "egrep": true,
+	"fgrep": true, "rg": true, "diff": true, "cmp": true, "sha256sum": true, "sha1sum": true, "md5sum": true, "shasum": true,
+	"stat": true, "ls": true, "file": true, "less": true, "more": true, "jq": true, "du": true, "cut": true, "nl": true,
+	"od": true, "strings": true, "column": true}
 
-// ledgerGitWriters son los subcomandos de git que reescriben el árbol de trabajo.
-var ledgerGitWriters = map[string]bool{"rm": true, "mv": true, "checkout": true, "restore": true, "reset": true,
-	"apply": true, "am": true, "stash": true, "clean": true, "read-tree": true, "update-index": true, "switch": true}
+// ledgerGitReaders son los subcomandos de git que no reescriben el ledger:
+// leerlo o prepararlo para un commit.
+var ledgerGitReaders = map[string]bool{"add": true, "diff": true, "log": true, "show": true, "blame": true, "status": true,
+	"ls-files": true, "grep": true, "rev-parse": true, "cat-file": true, "commit": true, "shortlog": true, "ls-tree": true}
 
-// ledgerWrite dice si un comando escribe en el ledger: una redirección hacia
-// él, un programa que escribe o borra lo que nombra, sed o perl en el lugar,
-// una copia que lo tiene de destino o git que reescribe sus archivos. Leerlo
-// o prepararlo para un commit (git add) no lo escribe y pide la aprobación
-// normal.
-func ledgerWrite(segs [][]string, sps []segPaths) bool {
+// ledgerTouch dice si un comando con efectos puede escribir en el ledger. La
+// regla va al revés que una lista de escritores, que siempre queda corta
+// (gzip, ex, sponge, python…): todo lo que lo nombra se bloquea, salvo leerlo
+// con un programa que solo lee, prepararlo o verlo con git, o copiarlo hacia
+// otro lugar. Una redirección hacia él, un programa que ejecuta lo que recibe
+// (xargs, sh -c, find -exec) o una opción que lo apunta (--output=) se
+// bloquean siempre.
+func ledgerTouch(segs [][]string, sps []segPaths) bool {
+	exec := false
+	for _, seg := range segs {
+		prog, at := mainProg(seg)
+		if executors[prog] || prog == "find" && at >= 0 && findExecs(seg[at+1:]) {
+			exec = true
+		}
+	}
 	for i, seg := range segs {
 		hits := func(j int) bool {
 			if j < 0 || j >= len(seg) {
@@ -351,66 +364,167 @@ func ledgerWrite(segs [][]string, sps []segPaths) bool {
 			}
 			return false
 		}
+		named := false
+		for j := range seg {
+			if hits(j) {
+				named = true
+			}
+		}
+		if !named {
+			continue
+		}
 		for j, w := range seg {
-			if redirOps[w] && hits(j+1) || redirPrefix.MatchString(w) && redirPrefix.FindString(w) != w && hits(j) {
+			if redirOp.MatchString(w) && hits(j+1) || redirPrefix.MatchString(w) && !redirOp.MatchString(w) && hits(j) {
 				return true
 			}
+			if strings.HasPrefix(w, "-") && hits(j) {
+				return true // una opción que apunta al ledger: --output=, -o, -t
+			}
+		}
+		if exec {
+			return true
 		}
 		prog, at := mainProg(seg)
 		if at < 0 {
-			continue
+			return true
 		}
-		any := func(from int) bool {
-			for j := from; j < len(seg); j++ {
-				if hits(j) {
-					return true
-				}
-			}
-			return false
-		}
-		args := seg[at+1:]
 		switch {
-		case ledgerWriters[prog]:
-			if any(at + 1) {
-				return true
+		case ledgerReaders[prog]:
+			continue
+		case prog == "git":
+			if sub, _ := gitSub(seg[at+1:]); ledgerGitReaders[sub] {
+				continue
 			}
-		case prog == "cp" || prog == "rsync" || prog == "scp":
+			return true
+		case prog == "cp" || prog == "rsync" || prog == "scp" || prog == "install":
+			// Copiar desde el ledger hacia otro lugar no lo escribe; el destino
+			// es el último argumento.
 			last := -1
 			for j := at + 1; j < len(seg); j++ {
-				if strings.HasPrefix(seg[j], "-t") || strings.HasPrefix(seg[j], "--target-directory") {
-					if hits(j) || seg[j] == "-t" && hits(j+1) {
-						return true
-					}
-				}
-				if !strings.HasPrefix(seg[j], "-") {
+				if !strings.HasPrefix(seg[j], "-") && !redirOp.MatchString(seg[j]) && !redirPrefix.MatchString(seg[j]) {
 					last = j
 				}
 			}
 			if hits(last) {
 				return true
 			}
-		case prog == "sed" || prog == "perl" || prog == "ruby" || prog == "gawk" || prog == "awk":
-			if inPlace(prog, args) && any(at+1) {
-				return true
-			}
-		case prog == "git":
-			if sub, off := gitSub(args); ledgerGitWriters[sub] && any(at+1+off) {
-				return true
-			}
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+// findExecs dice si find corre algo o borra lo que encuentra.
+func findExecs(args []string) bool {
+	for _, w := range args {
+		switch w {
+		case "-exec", "-execdir", "-ok", "-okdir", "-delete", "-fprint", "-fprint0", "-fprintf", "-fls":
+			return true
 		}
 	}
 	return false
 }
 
-// inPlace dice si sed, perl, ruby o awk editan el archivo en su lugar.
-func inPlace(prog string, args []string) bool {
-	for _, w := range args {
-		switch {
-		case prog == "sed" && (w == "-i" || strings.HasPrefix(w, "--in-place") || strings.HasPrefix(w, "-i") || len(w) > 1 && w[0] == '-' && w[1] != '-' && strings.ContainsRune(w, 'i')),
-			(prog == "perl" || prog == "ruby") && strings.HasPrefix(w, "-") && !strings.HasPrefix(w, "--") && strings.ContainsRune(w, 'i'),
-			(prog == "awk" || prog == "gawk") && (w == "inplace" || strings.Contains(w, "inplace")):
-			return true
+// protectedParents son carpetas que contienen lo que protege el gate: mover,
+// borrar o reescribir una de ellas lo toca aunque no lo nombre.
+var protectedParents = map[string]string{"coyote": "coyote/, con el ledger, las aprobaciones y la configuración del proyecto",
+	".claude": ".claude/, con la configuración de Claude Code", ".git": ".git/, la carpeta de git", ".coyote": ".coyote/, el estado del gate"}
+
+// fragmentRe son pedazos de rutas protegidas que un programa que ejecuta lo
+// que recibe (xargs, find -exec) puede completar al correr: {}/approvals/.
+var fragmentRe = regexp.MustCompile(`(?i)/(approvals|ledger)(/|$)|^(approvals|ledger)/|/settings(\.local)?\.json$|/project\.yaml$`)
+
+// parentTouch dice si un comando mueve, borra o reescribe una carpeta que
+// contiene lo protegido (mv coyote c, rm -rf .claude, tar -x -C coyote, find
+// coyote -exec …), o si un programa que ejecuta lo que recibe completa una
+// ruta protegida al correr.
+func parentTouch(segs [][]string, sps []segPaths) (string, bool) {
+	exec := false
+	for _, seg := range segs {
+		prog, at := mainProg(seg)
+		if prog == "xargs" || prog == "parallel" || prog == "find" && at >= 0 && findExecs(seg[at+1:]) {
+			exec = true
 		}
 	}
-	return false
+	if exec {
+		for _, seg := range segs {
+			for _, w := range seg {
+				if fragmentRe.MatchString(w) {
+					return "una ruta protegida que se completa al correr", true
+				}
+			}
+		}
+	}
+	for i, seg := range segs {
+		prog, at := mainProg(seg)
+		if at < 0 {
+			continue
+		}
+		parent := func(j int) string {
+			for _, c := range append([]string{seg[j]}, sps[i].cands[j]...) {
+				c = strings.TrimSuffix(strings.TrimPrefix(c, "./"), "/")
+				if why, ok := protectedParents[c]; ok {
+					return why
+				}
+			}
+			return ""
+		}
+		operandsAt := func() []int {
+			var out []int
+			for j := at + 1; j < len(seg); j++ {
+				if !strings.HasPrefix(seg[j], "-") {
+					out = append(out, j)
+				}
+			}
+			return out
+		}
+		ops := operandsAt()
+		switch prog {
+		case "mv", "rm", "rmdir", "shred", "chmod", "chown":
+			for _, j := range ops {
+				if why := parent(j); why != "" {
+					return why, true
+				}
+			}
+		case "cp", "rsync", "install", "ln":
+			if len(ops) > 0 {
+				if why := parent(ops[len(ops)-1]); why != "" {
+					return why, true
+				}
+			}
+		case "tar", "unzip", "bsdtar":
+			extract := prog == "unzip"
+			for j := at + 1; j < len(seg); j++ {
+				w := seg[j]
+				if w == "--extract" || w == "--get" || strings.HasPrefix(w, "-") && !strings.HasPrefix(w, "--") && strings.ContainsRune(w, 'x') ||
+					j == at+1 && !strings.HasPrefix(w, "-") && strings.ContainsRune(w, 'x') {
+					extract = true
+				}
+			}
+			if extract {
+				if d := segDir(seg); d != "" {
+					if _, ok := protectedParents[strings.TrimSuffix(strings.TrimPrefix(path.Clean(d), "./"), "/")]; ok {
+						return protectedParents[strings.TrimSuffix(strings.TrimPrefix(path.Clean(d), "./"), "/")], true
+					}
+				}
+				for j := at + 1; j < len(seg); j++ {
+					if (seg[j] == "-d" || seg[j] == "-C") && j+1 < len(seg) {
+						if why := parent(j + 1); why != "" {
+							return why, true
+						}
+					}
+				}
+			}
+		case "find":
+			if findExecs(seg[at+1:]) {
+				for _, j := range ops {
+					if why := parent(j); why != "" {
+						return why, true
+					}
+				}
+			}
+		}
+	}
+	return "", false
 }

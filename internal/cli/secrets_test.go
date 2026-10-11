@@ -568,3 +568,36 @@ func TestSecretosDesdeLaRaizDelMonorepo(t *testing.T) {
 		}
 	}
 }
+
+// TestSecretosConProyectosAnidados: tercera revisión de v1.0. Un proyecto
+// anidado no tapa los secretos que declara el de afuera; un proyecto dentro
+// de vendor no cuenta; un project.yaml roto se nombra y lo demás se reporta.
+func TestSecretosConProyectosAnidados(t *testing.T) {
+	base := setup(t)
+	must(t, run(t, base, "", "init", "mono", "--type", "backend", "--purpose", "API de pedidos de la tienda demo"), 0, "init")
+	root := filepath.Join(base, "mono")
+	cfg := readFile(t, filepath.Join(root, "coyote", "project.yaml"))
+	write(t, root, "coyote/project.yaml", cfg+"secrets:\n  files: [\"**/config/prod/*.yaml\"]\n")
+	must(t, run(t, root, "", "init", "svc", "--no-git", "--type", "backend", "--purpose", "servicio de pagos de la tienda"), 0, "init anidado")
+	write(t, root, "svc/config/prod/db.yaml", "password: corta\n")
+	write(t, root, "config/prod/db.yaml", "password: corta\n")
+	write(t, root, "vendor/github.com/acme/lib/coyote/project.yaml", "autonomy: yolo\n")
+	git(t, root, "add", "-A")
+	git(t, root, "commit", "-qm", "chore: inicio", "--no-verify")
+	r := run(t, root, "", "secrets", "scan")
+	if r.code != 1 || !strings.Contains(r.stdout, "svc/config/prod/db.yaml") || !strings.Contains(r.stdout, "  config/prod/db.yaml") {
+		t.Errorf("scan con un proyecto anidado: %d\n%s%s", r.code, r.stdout, r.stderr)
+	}
+	if strings.Contains(r.stderr, "yolo") {
+		t.Errorf("un proyecto en vendor no cuenta:\n%s", r.stderr)
+	}
+	// Un project.yaml roto fuera de las dependencias se nombra, y lo demás se reporta.
+	write(t, root, "otro/coyote/project.yaml", "autonomy: yolo\n")
+	write(t, root, "otro/.env", "TOKEN=x\n")
+	git(t, root, "add", "-A")
+	git(t, root, "commit", "-qm", "chore: otro", "--no-verify")
+	r = run(t, root, "", "secrets", "scan")
+	if r.code != 1 || !strings.Contains(r.stderr, "otro/coyote/project.yaml") || !strings.Contains(r.stdout, "svc/config/prod/db.yaml") {
+		t.Errorf("project.yaml roto: %d\n%s%s", r.code, r.stdout, r.stderr)
+	}
+}

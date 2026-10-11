@@ -216,3 +216,37 @@ func TestRespaldoSegundaRevision(t *testing.T) {
 		}
 	}
 }
+
+// TestAgenteNoLeQuitaElRegistroALaPersona: tercera revisión. Un agente que
+// registra antes que la persona el mismo gate no se queda con su registro, y
+// una cita explícita no desplaza a un vínculo por nombre que tiene otro.
+func TestAgenteNoLeQuitaElRegistroALaPersona(t *testing.T) {
+	from := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	ev := func(ts, actor, what string, refs ...string) ledger.Entry {
+		e := entry(ts, actor, "apr", what, refs, 0)
+		e.LineNo = len(ts) + len(what) + len(actor)
+		return e
+	}
+	in := Input{Project: "tienda", Root: "/p", From: from, To: from.AddDate(0, 1, 0), Now: from.AddDate(0, 0, 25),
+		Entries: []ledger.Entry{
+			ev("2026-09-10T08:59:00Z", "@ana/coyote-scribe", "G4 aprobado: despliegue a producción sin pruebas"),
+			ev("2026-09-10T09:00:00Z", "@ana", "G4 aprobado: despliegue a staging"),
+			ev("2026-09-20T09:00:00Z", "@ana", "G5 aprobado: release 1.2"),
+			ev("2026-09-20T10:00:00Z", "@ana/coyote-scribe", "G5 aprobado: release 1.2", "apr:P-0003"),
+		},
+		Approvals: []Approval{
+			{ID: "P-0002", Gate: "G4", Release: "1.1", Decision: "approved", Approver: "@ana", Date: "2026-09-10", Response: "sí, a staging"},
+			{ID: "P-0003", Gate: "G5", Release: "1.2", Decision: "approved", Approver: "@ana", Date: "2026-09-01", Response: "sí"},
+			{ID: "P-0004", Gate: "G5", Release: "1.2", Decision: "approved", Approver: "@ana", Date: "2026-09-20", Response: "sí"},
+		},
+	}
+	r := Build(in)
+	c := check(r, "aprobaciones registradas por un agente")
+	joined := strings.Join(c.Detail, "\n")
+	if c.Result != Fail || !strings.Contains(joined, "despliegue a producción sin pruebas") || !strings.Contains(joined, "registró P-0003: la respuesta") {
+		t.Errorf("el agente no se queda con el registro de la persona:\n%s", joined)
+	}
+	if c := check(r, "gates de release con su evento en el ledger"); c.Result != OK {
+		t.Errorf("cada gate tiene su evento: %+v", c)
+	}
+}
