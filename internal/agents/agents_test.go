@@ -12,8 +12,8 @@ func TestLoadToolSet(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(set.Agents) != 14 || len(set.Skills) != 8 {
-		t.Fatalf("se esperaban 14 agentes y 8 skills: %d y %d", len(set.Agents), len(set.Skills))
+	if len(set.Agents) != 14 || len(set.Skills) != 9 {
+		t.Fatalf("se esperaban 14 agentes y 9 skills: %d y %d", len(set.Agents), len(set.Skills))
 	}
 	for _, name := range []string{"coyote-sr-solution-architect", "coyote-architect", "coyote-dev", "coyote-devsecops", "coyote-sre"} {
 		if !set.Has(name) {

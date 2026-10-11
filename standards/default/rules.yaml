@@ -136,6 +136,13 @@ rules:
     check: { type: slo }
     fix: corre coyote slo rules después de cambiar coyote/slo/<servicio>.yaml y escribe el runbook que declara cada SLO
 
+  - id: R20
+    title: Todo plan de riesgo R2 o R3 parte de un PRD que una persona revisó
+    level: SHOULD
+    scope: workflow
+    why: Sin PRD, el diseño y el código optimizan lo que el agente entendió y no lo que la persona quería; el PRD fija el problema, las metas y lo que no se hace antes de gastar.
+    fix: escribe el PRD con coyote-pm (skill coyote-prd), revísalo y decláralo en el plan con prd:; coyote ws check avisa si falta
+
   - id: A1
     title: Un agente no ejecuta acciones con efectos sin aprobación humana por step, plan o concesión
     level: MUST

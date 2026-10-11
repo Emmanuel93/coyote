@@ -8,7 +8,7 @@ Los agentes y skills se definen una vez y `coyote install` los traduce al format
 
 | Fuente | Qué es |
 |--------|--------|
-| `agents/*.md` y `skills/*/SKILL.md` de la herramienta | los 14 agentes `coyote-*` y 8 skills, embebidos en el binario |
+| `agents/*.md` y `skills/*/SKILL.md` de la herramienta | los 14 agentes `coyote-*` y 9 skills, embebidos en el binario |
 | `coyote/agents/*.md` y `coyote/skills/*/SKILL.md` del proyecto | agentes y skills propios; si se llaman igual que uno de la herramienta, gana el del proyecto |
 
 ## Definición de un agente
