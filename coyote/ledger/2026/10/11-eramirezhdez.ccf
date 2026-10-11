@@ -30,3 +30,4 @@
 2026-10-11T21:28Z|@eramirezhdez/coyote-devsecops|W-0008|coyote|fix|release|fuentes del release sin el entorno de git de quien compila, opciones…|-|-|-|ok
 2026-10-11T21:41Z|@eramirezhdez/coyote-security|W-0008|coyote|fix|gate|--check como valor de otra bandera no libera install, repo add y…|-|-|-|ok
 2026-10-11T22:01Z|@eramirezhdez/coyote-security|W-0008|coyote|fix|ws|prd: estricto, la autorización cubre los archivos que lee el plan, las…|-|-|-|ok
+2026-10-11T22:08Z|@eramirezhdez/coyote-scribe|W-0008|coyote|doc|security|cuarta pasada de la revisión adversarial en specs, modelo de amenazas, build,…|-|-|-|ok

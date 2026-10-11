@@ -104,6 +104,8 @@ Dónde corre:
 
 Cada ruta de un cambio lleva las reglas del proyecto coyote que la contiene (su `coyote/project.yaml` más cercano), relativas a la carpeta de ese proyecto; fuera de un proyecto valen los nombres de siempre. Así el hook `commit-msg`, que git corre en la raíz del repo, aplica las reglas de un proyecto que vive en una subcarpeta, y un monorepo con varios proyectos aplica las de cada uno. `gate pr` toma las reglas de la rama base.
 
+Los proyectos salen de lo versionado, no de lo que haya en el árbol de trabajo: un `coyote/project.yaml` que git sigue cuenta aunque falte en el disco (un `sparse-checkout`) o no se pueda leer (un enlace roto). Entonces el escaneo, el commit y `gate pr` terminan con error nombrando ese archivo, aunque no encuentren nada: sin las reglas de un proyecto no pueden dar el visto bueno, y no siguen como si ese proyecto no existiera. Un proyecto que vive dentro de dependencias (`vendor`, `node_modules`, `third_party`) no dispensa nada, pero los archivos que declara en `secrets.files` siguen siendo archivos de secretos; un `project.yaml` roto ahí no se reporta, porque no es de este repo. Un proyecto real que se llame `apps/vendor` también cuenta si no queda dentro de las dependencias de otro.
+
 Un cuerpo de llave que se pega bajo un encabezado que ya estaba en el archivo también se detiene: en el commit se busca el encabezado en la versión nueva del archivo, y en el gate, en el archivo actual.
 
 Un archivo en UTF-16 con BOM (lo que escribe PowerShell 5) se revisa como texto, también si `.gitattributes` le pone `diff` y git lo muestra con bytes 0. La plantilla `templates/secret.yaml` de un chart de Helm no es un archivo de secretos: arma el secreto con valores que vienen de afuera.

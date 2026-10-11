@@ -13,7 +13,7 @@ coyote install --ci github [--policy warn|fail] [--coyote-ref v0.5.0] [--coyote-
 coyote install --ci github --check      # para la CI del proyecto: ¿los workflows están al día?
 ```
 
-Escribe `coyote/ci/<repo>.yml` por repo. Llevarlo a cada repo es un PR en ese repo, como `.github/workflows/coyote.yml`. El workflow:
+Escribe `coyote/ci/<repo>.yml` por repo. Llevarlo a cada repo es un PR en ese repo, como `.github/workflows/coyote.yml`. Escribirlos lo hace una persona, en su terminal, como el resto de `coyote install`: un agente no los genera, y el gate lo bloquea aunque la línea lleve `--check` como valor de otra bandera. `--check` y `--dry-run` no escriben y corren en cualquier parte. El workflow:
 
 - **Disparador.** Corre en `pull_request_target`: el workflow, la política y las reglas de riesgo salen de la rama base, así un PR no puede cambiar el chequeo que lo evalúa.
   - El código del PR se trae como dato y se lee con git de plomería: nunca se compila ni se ejecuta.
@@ -75,6 +75,7 @@ risk:
 
 - En un documento (Markdown, texto) o en una instrucción de agentes, un texto con forma de orden para un agente es R2. Las líneas seguidas se leen juntas. El reporte da la línea y la regla del clasificador, nunca el texto.
 - En cualquier otro archivo solo se buscan caracteres ocultos. Los controles de dirección del texto son R3: lo que se revisa no es lo que corre (Trojan Source). Los de ancho cero y las etiquetas Unicode son R2.
+- Se revisan las líneas que agrega el parche. Lo que git lista sin hunks (un archivo que la rama base marca `-diff` en `.gitattributes`, uno que git ve como binario, uno vacío) y un texto en UTF-16 se leen completos en la revisión nueva, ya decodificados: marcar una ruta `-diff` no esconde nada. Un archivo que no es texto de verdad, o que pesa más de 2 MB, no se revisa (límite declarado).
 - Cambiar o borrar líneas existentes de `coyote/ledger/` es R3. Se compara contra el merge-base y byte por byte, así lo que la base agregó después no cuenta y recodificar el archivo (UTF-16, otro fin de línea) no pasa por "solo agrega". También es R3 un archivo del ledger que no es UTF-8 sin BOM o que no es un archivo (un symlink, un submódulo, una carpeta). Agregar líneas no cambia el riesgo.
 
 **Plan de Terraform.** En un repo de infraestructura, el pipeline puede generar el plan y pasarlo con `--plan plan.json`: su riesgo se suma al del PR y el comentario lleva la tabla de recursos, sin valores (docs/specs/infra-v1.md). Generarlo necesita credenciales de la nube en el pipeline; coyote no las pide.
