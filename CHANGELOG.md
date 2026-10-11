@@ -24,10 +24,10 @@ Los cambios de cada versión de coyote. Desde 1.0 sigue versionado semántico, c
 
 ### Al actualizar
 
-- Lo que sigue a `--` en un comando de coyote es siempre un argumento, nunca una bandera.
+- Lo que sigue a `--` en un comando de coyote es siempre un argumento; una bandera del comando después de `--` es un error de uso.
 - Regenera el workflow de cada repo del producto con `coyote install --ci github`: ahora compila coyote con su versión.
-- Si ya tenías una línea base de `coyote eval`, vuelve a fijarla con `--update-baseline`: ahora guarda las preguntas medidas y se mide sin los eventos del ledger. El golden y la línea base viven en `evals/`.
-- `make dist` necesita el árbol limpio y empieza con la carpeta vacía.
+- Si ya tenías una línea base de `coyote eval`, vuelve a fijarla con `--update-baseline`: ahora guarda la medida de cada pregunta y se mide sin los eventos del ledger. El golden y la línea base viven en `evals/`.
+- `make dist` necesita el árbol limpio, compila en un clon de HEAD y empieza con la carpeta vacía.
 - Los enlaces guardados de `coyote web` dejan de servir: la URL nueva sale al arrancar.
 - Si una entrada de `CONTEXT.coyote.md` tiene forma de orden, `generate agents` falla hasta que la reescribas como un hecho.
 - Los PRs que tocan las instrucciones de los agentes ahora piden la aprobación de un dueño.
@@ -35,13 +35,14 @@ Los cambios de cada versión de coyote. Desde 1.0 sigue versionado semántico, c
 
 ### Seguridad
 
-- Revisión adversarial con tres revisores independientes. Sus 30 hallazgos se corrigieron, cada uno con su prueba:
-  - el gate cuenta una bandera que niega también después de `--`, limpia las rutas (`//`, `/./`, `x/..`), las resuelve después de un `cd` y bloquea escribir el ledger por el shell;
-  - `gate pr` compara el ledger byte por byte (un archivo recodificado en UTF-16 ya no pasa) y marca R3 un archivo del ledger que no es un archivo; suma más archivos de instrucciones de agentes y marca R2 el golden y la línea base;
-  - el clasificador y la salida de coyote ven las marcas invisibles que no son de formato (U+034F, selectores de variación, los del mongol), y `generate agents` pasa todo `AGENTS.md` por el clasificador;
-  - `coyote audit` ve un archivo del ledger cambiado por un symlink o un submódulo, las rutas con acentos, un renombre preparado, skip-worktree y un clon superficial; cada registro de un gate respalda un solo evento; avisa de eventos con fecha pasada, escapa el reporte y anota el commit y la huella del ledger;
-  - si `project.yaml` no se puede leer, `secrets scan`, el hook `commit-msg` y `gate pr` fallan en vez de seguir sin `secrets.files`;
-  - `make dist` construye desde git con el árbol limpio, la carpeta vacía y el entorno de Go fijo, y `distmeta` rechaza un binario que no sale de ese commit; la CI corre `coyote eval` y `make verify-dist`.
+- Revisión adversarial en dos rondas: tres revisores independientes sobre v1.0 y dos más sobre los arreglos. Sus 52 hallazgos se corrigieron con su prueba, salvo uno que queda como límite declarado (un selector de variación después de un símbolo o un dígito, que es la forma de color de un emoji):
+  - el gate cuenta una bandera que niega también después de `--`; resuelve las rutas limpias contra la carpeta del IDE, cada `cd`, `-C` o `--chdir`, los comodines y los enlaces; y bloquea escribir el ledger por el shell, no leerlo;
+  - `gate pr` compara el ledger byte por byte (un archivo recodificado en UTF-16 ya no pasa) y marca R3 un archivo del ledger que no es un archivo y el gate de un proyecto en una subcarpeta; suma más archivos de instrucciones de agentes y marca R2 el golden y la línea base;
+  - el clasificador y la salida de coyote ven las marcas invisibles que no son de formato (U+034F, selectores de variación fuera de un emoji, el blanco del braille), y `generate agents` pasa también el nombre del frontmatter por el clasificador;
+  - `coyote audit` recorre todos los commits contra cada padre (un merge `-s ours` ya no esconde líneas), lee las fechas sin `--since`, ve un symlink o un submódulo en lugar de un archivo, las rutas con acentos, un renombre preparado, skip-worktree y un clon superficial; cada registro de un gate respalda un solo evento y solo un gate respalda a un agente; avisa de eventos con fecha pasada, escapa el reporte y anota el commit y la huella del ledger hasta el periodo;
+  - si `project.yaml` no se puede leer, `secrets scan`, `secrets list`, el hook `commit-msg` y `gate pr` fallan en vez de seguir sin `secrets.files`, también desde la raíz de un monorepo;
+  - `coyote eval` compara sobre las preguntas de la línea base y rechaza preguntas repetidas;
+  - `make dist` compila en un clon limpio de HEAD, con la carpeta vacía y el entorno de Go fijo, y `distmeta` rechaza un binario que no sale de ese commit; la CI corre `coyote eval` y `make verify-dist`.
 - Fuzzing de ocho lectores: los comandos y la entrada de los hooks del gate, las líneas CCF, los documentos CCF-doc, el escape de la salida, el clasificador de órdenes y el archivo y las consultas de SLOs. 4.9 millones de entradas, sin fallas.
 - Prueba de escape del gate: 15 intentos, ninguno pasa.
 

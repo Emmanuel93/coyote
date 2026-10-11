@@ -20,7 +20,7 @@ Referencias vigentes al 2026-09-29:
 ## Decisión
 - **Reproducible.**
   - `make dist` toma la versión, la fecha y el commit de git en la propia receta, nunca del reloj, del entorno ni de la línea de comandos.
-  - Solo construye desde un árbol limpio y en una carpeta vacía: un binario viejo no entra en las sumas ni en la procedencia.
+  - Solo construye desde un árbol limpio, compila en un clon limpio de HEAD y escribe en una carpeta vacía: ni un archivo con skip-worktree o ignorado ni un binario viejo entran en el release, las sumas o la procedencia.
   - Compila con `-trimpath`, `CGO_ENABLED=0`, el entorno de Go fijo (`GOAMD64=v1`, `GOARM64=v8.0`, sin `GOEXPERIMENT`, `GOWORK=off`, `GOTOOLCHAIN=local`) y las mismas banderas en cada plataforma.
   - Dos builds del mismo commit con la misma versión de Go dan los mismos hashes. `make verify-dist` lo comprueba, y la CI lo corre en cada cambio.
 - **SBOM.** Un programa del repo (`tools/distmeta`) lee el buildinfo de cada binario y escribe un BOM CycloneDX 1.7 en JSON. El BOM trae:
