@@ -248,6 +248,7 @@ func candidates(root string) ([]string, error) {
 	}
 	md := func(p string) bool { return strings.HasSuffix(p, ".md") }
 	walk("coyote/decisions", md)
+	walk("coyote/prd", md) // el PRD del producto y el de cada feature (ADR-0028)
 	walk("coyote/workstreams", func(p string) bool { return md(p) || strings.HasSuffix(p, ".yaml") })
 	walk("coyote/ledger", func(p string) bool { return strings.HasSuffix(p, ".ccf") })
 	// Producto multi-repo: el mapa de interfaces y los documentos propuestos de cada repo.

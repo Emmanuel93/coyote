@@ -108,6 +108,7 @@ type Plan struct {
 	Owner        string            `yaml:"owner"`
 	Autonomy     string            `yaml:"autonomy"`
 	Risk         string            `yaml:"risk"`
+	PRD          string            `yaml:"prd"` // de qué PRD parte el plan (R20, ADR-0028): una ruta del proyecto o step:ID
 	BudgetUSD    float64           `yaml:"budget_usd"`
 	Reasoning    string            `yaml:"reasoning"`
 	AuthorizedBy string            `yaml:"authorized_by"`
@@ -233,6 +234,26 @@ func (p *Plan) StepRisk(s Step) string {
 		return p.Risk
 	}
 	return "R1"
+}
+
+// MaxRisk es el riesgo más alto del plan: el suyo o el de cualquiera de sus
+// pasos. Un riesgo que no es R1, R2 o R3 no cuenta.
+func (p *Plan) MaxRisk() string {
+	max := "R1"
+	for _, r := range append([]string{p.Risk}, stepRisks(p.Steps)...) {
+		if riskRe.MatchString(r) && r > max {
+			max = r
+		}
+	}
+	return max
+}
+
+func stepRisks(steps []Step) []string {
+	out := make([]string, 0, len(steps))
+	for _, s := range steps {
+		out = append(out, s.Risk)
+	}
+	return out
 }
 
 // Index devuelve la posición de un paso o -1.
@@ -461,7 +482,72 @@ func (p *Plan) Check(o CheckOptions) []Finding {
 	if p.BudgetUSD > 0 && sum > p.BudgetUSD+1e-9 {
 		add("aviso", "", "los topes de los pasos suman $%.2f, más que el del plan ($%.2f): el plan se detiene al llegar a su tope", sum, p.BudgetUSD)
 	}
+	p.checkPRD(o, add)
 	return out
+}
+
+// checkPRD revisa de dónde parte el plan (R20, ADR-0028). Que falte el PRD en
+// un plan R2 o R3 es un aviso: el plan corre, pero arranca sin saber qué se
+// construye ni para quién. Un prd: que no dice lo que quiere decir es un error,
+// igual que una entrada mal escrita. No juzga el contenido del PRD.
+func (p *Plan) checkPRD(o CheckOptions, add func(level, step, format string, a ...any)) {
+	ref := strings.TrimSpace(p.PRD)
+	if ref == "" {
+		if r := p.MaxRisk(); r != "R1" {
+			add("aviso", "", "el plan es %s y no parte de un PRD (R20): escríbelo con coyote-pm y decláralo con prd: coyote/prd/<feature>.md (o prd: step:ID si lo escribe el primer paso)", r)
+		}
+		return
+	}
+	in, err := ParseInput(ref)
+	if err == nil && in.Kind == "diff" {
+		err = errors.New("un diff no es un PRD")
+	}
+	if err != nil {
+		add("error", "", "prd %q inválido: usa una ruta del proyecto (coyote/prd/<feature>.md) o step:ID (%v)", ref, err)
+		return
+	}
+	switch in.Kind {
+	case "step":
+		j := p.Index(in.Value)
+		switch {
+		case j < 0:
+			add("error", "", "prd step:%s: ese paso no existe", in.Value)
+			return
+		case p.Steps[j].IsHuman():
+			add("error", "", "prd step:%s: es un paso de la persona y no deja artefacto; el PRD es la entrega de un agente (coyote-pm) o un archivo", in.Value)
+			return
+		case j != 0:
+			add("aviso", "", "prd step:%s no es el primer paso: los pasos anteriores corren sin PRD", in.Value)
+		}
+	case "file":
+		// Si un paso lo recibe, la revisión de sus entradas ya avisa que falta.
+		if o.Exists != nil && !o.Exists(in.Value) && !p.receives(in) {
+			add("aviso", "", "el PRD %s no existe todavía", in.Value)
+		}
+	}
+	if !p.receives(in) {
+		add("aviso", "", "ningún paso recibe el PRD como entrada: agrega %s al input del paso que lo necesita", prdInput(in))
+	}
+}
+
+// receives informa si algún paso declara la entrada.
+func (p *Plan) receives(want Input) bool {
+	for _, s := range p.Steps {
+		for _, raw := range s.Input {
+			if got, err := ParseInput(raw); err == nil && got == want {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// prdInput es la entrada que recibe un paso para leer el PRD.
+func prdInput(in Input) string {
+	if in.Kind == "step" {
+		return "step:" + in.Value
+	}
+	return in.Value
 }
 
 func contains(list []string, s string) bool {

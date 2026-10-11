@@ -16,12 +16,13 @@ const planYAML = `id: W-0007
 title: revisión de pagos
 autonomy: supervised
 risk: R2
+prd: coyote/prd/pagos.md
 budget_usd: 3
 steps:
   - id: S1
     does: revisar el impacto del cambio
     agent: coyote-reviewer
-    input: [diff:servicios=main...HEAD, docs/pagos.md]
+    input: [diff:servicios=main...HEAD, docs/pagos.md, coyote/prd/pagos.md]
     output: informe de impacto
     sections: [Hallazgos, Riesgos]
     max_usd: 1
@@ -62,6 +63,86 @@ func TestPlanValido(t *testing.T) {
 	fs := p.Check(CheckOptions{Agents: knownAgents, Project: "supervised", Exists: func(string) bool { return true }})
 	if Errors(fs) != 0 || len(fs) != 0 {
 		t.Fatalf("un plan válido no tiene hallazgos: %v", fs)
+	}
+}
+
+func TestPlanPRD(t *testing.T) {
+	const head = "id: W-0007\nautonomy: supervised\n"
+	step := func(id, agent, input string) string {
+		in := ""
+		if input != "" {
+			in = ", input: [" + input + "]"
+		}
+		return "  - { id: " + id + ", does: hacer, agent: " + agent + ", output: x, max_usd: 1" + in + " }\n"
+	}
+	human := "  - { id: H, does: la persona, agent: persona }\n"
+	cases := []struct {
+		name, yaml string
+		exists     bool
+		want       []string // "aviso ...", "error ..." o nada si no hay hallazgos
+	}{
+		{"R1 sin PRD no avisa", head + "risk: R1\nsteps:\n" + step("S1", "coyote-dev", ""), true, nil},
+		{"sin riesgo sin PRD no avisa", head + "steps:\n" + step("S1", "coyote-dev", ""), true, nil},
+		{"R2 sin PRD avisa", head + "risk: R2\nsteps:\n" + step("S1", "coyote-dev", ""), true,
+			[]string{"aviso el plan es R2 y no parte de un PRD (R20)"}},
+		{"el riesgo de un paso cuenta", head + "steps:\n  - { id: S1, does: hacer, agent: coyote-dev, output: x, max_usd: 1, risk: R3 }\n", true,
+			[]string{"aviso el plan es R3 y no parte de un PRD (R20)"}},
+		{"un riesgo inválido no cuenta como R2", head + "risk: R9\nsteps:\n" + step("S1", "coyote-dev", ""), true,
+			[]string{"error risk \"R9\" inválido"}},
+		{"un archivo que algún paso recibe", head + "risk: R2\nprd: coyote/prd/pagos.md\nsteps:\n" + step("S1", "coyote-dev", "coyote/prd/pagos.md"), true, nil},
+		{"file: delante de la ruta vale igual", head + "risk: R3\nprd: file:coyote/prd/pagos.md\nsteps:\n" + step("S1", "coyote-dev", "coyote/prd/pagos.md"), true, nil},
+		{"un archivo que no existe todavía avisa una vez", head + "risk: R2\nprd: coyote/prd/pagos.md\nsteps:\n" + step("S1", "coyote-dev", "coyote/prd/pagos.md"), false,
+			[]string{"aviso S1: la entrada coyote/prd/pagos.md no existe todavía"}},
+		{"un archivo que no existe y nadie recibe", head + "risk: R2\nprd: coyote/prd/pagos.md\nsteps:\n" + step("S1", "coyote-dev", ""), false,
+			[]string{"aviso el PRD coyote/prd/pagos.md no existe todavía", "aviso ningún paso recibe el PRD como entrada"}},
+		{"nadie recibe el archivo", head + "risk: R2\nprd: coyote/prd/pagos.md\nsteps:\n" + step("S1", "coyote-dev", "docs/otro.md"), true,
+			[]string{"aviso ningún paso recibe el PRD como entrada: agrega coyote/prd/pagos.md"}},
+		{"el primer paso lo escribe", head + "risk: R2\nprd: step:S0\nsteps:\n" + step("S0", "coyote-pm", "") + step("S1", "coyote-dev", "step:S0"), true, nil},
+		{"el paso del PRD no es el primero", head + "risk: R2\nprd: step:S1\nsteps:\n" + step("S0", "coyote-dev", "") + step("S1", "coyote-pm", "") + step("S2", "coyote-dev", "step:S1"), true,
+			[]string{"aviso prd step:S1 no es el primer paso"}},
+		{"nadie recibe la entrega del paso", head + "risk: R2\nprd: step:S0\nsteps:\n" + step("S0", "coyote-pm", "") + step("S1", "coyote-dev", ""), true,
+			[]string{"aviso ningún paso recibe el PRD como entrada: agrega step:S0"}},
+		{"el paso no existe", head + "risk: R2\nprd: step:S9\nsteps:\n" + step("S1", "coyote-pm", ""), true,
+			[]string{"error prd step:S9: ese paso no existe"}},
+		{"el paso es de la persona", head + "risk: R2\nprd: step:H\nsteps:\n" + human + step("S1", "coyote-dev", ""), true,
+			[]string{"error prd step:H: es un paso de la persona"}},
+		{"un diff no es un PRD", head + "risk: R2\nprd: diff:servicios=main...HEAD\nsteps:\n" + step("S1", "coyote-dev", ""), true,
+			[]string{"error prd \"diff:servicios=main...HEAD\" inválido"}},
+		{"una ruta que sale del proyecto", head + "risk: R2\nprd: ../prd.md\nsteps:\n" + step("S1", "coyote-dev", ""), true,
+			[]string{"error prd \"../prd.md\" inválido"}},
+		{"una ruta de git", head + "risk: R2\nprd: .GIT/prd.md\nsteps:\n" + step("S1", "coyote-dev", ""), true,
+			[]string{"error prd \".GIT/prd.md\" inválido"}},
+		{"con PRD y en R1 también se revisa", head + "risk: R1\nprd: step:S9\nsteps:\n" + step("S1", "coyote-dev", ""), true,
+			[]string{"error prd step:S9: ese paso no existe"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			p := mustParse(t, c.yaml)
+			exists := func(string) bool { return c.exists }
+			fs := p.Check(CheckOptions{Agents: map[string]bool{"coyote-dev": true, "coyote-pm": true}, Project: "supervised", Exists: exists})
+			var got []string
+			for _, f := range fs {
+				got = append(got, f.Level+" "+f.String())
+			}
+			if len(got) != len(c.want) {
+				t.Fatalf("hallazgos %q, se esperaba %q", got, c.want)
+			}
+			for i, w := range c.want {
+				if !strings.HasPrefix(got[i], w) {
+					t.Errorf("hallazgo %d: %q no empieza con %q", i, got[i], w)
+				}
+			}
+		})
+	}
+}
+
+func TestMaxRisk(t *testing.T) {
+	p := mustParse(t, "id: W-0007\nrisk: R2\nsteps:\n  - { id: S1, does: x, agent: persona, risk: R3 }\n  - { id: S2, does: x, agent: persona, risk: R9 }\n")
+	if got := p.MaxRisk(); got != "R3" {
+		t.Errorf("MaxRisk = %s, se esperaba R3", got)
+	}
+	if got := mustParse(t, "id: W-0007\nrisk: R9\n").MaxRisk(); got != "R1" {
+		t.Errorf("un riesgo inválido no sube el plan: %s", got)
 	}
 }
 

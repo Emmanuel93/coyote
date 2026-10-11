@@ -13,6 +13,7 @@ Un agente no debería leer todo el repo para tocar una parte. `get context` le e
 | `README.coyote.md` | readme | una entrada (`purpose`, `run`, `mod`…) |
 | `CONTEXT.coyote.md` | context | una entrada (`inv`, `dec`, `gap`…) con su ámbito |
 | `coyote/decisions/*.md` | adr | una sección del ADR, con su estado |
+| `coyote/prd/*.md` | doc | una sección del PRD, partida cada 150 palabras (ADR-0028) |
 | documentos citados en `docs\|…` y `README.md` | doc | una sección, partida cada 150 palabras |
 | `coyote/workstreams/**` | workstream | una sección de `close.md` o una clave de `plan.yaml` |
 | `coyote/ledger/**/*.ccf` | event | un evento |

@@ -173,12 +173,16 @@ func (a *app) wsCheck(args []string) error {
 		return err
 	}
 	if *asJSON {
-		b, _ := json.MarshalIndent(map[string]any{"id": c.plan.ID, "mode": c.mode, "findings": nonNil(findings), "errors": workstream.Errors(findings)}, "", "  ")
+		b, _ := json.MarshalIndent(map[string]any{"id": c.plan.ID, "mode": c.mode, "prd": c.plan.PRD, "findings": nonNil(findings), "errors": workstream.Errors(findings)}, "", "  ")
 		fmt.Fprintln(a.stdout, string(b))
 	} else {
 		p := c.plan
 		fmt.Fprintf(a.stdout, "%s · %s\n", p.ID, orDash(p.Title))
-		fmt.Fprintf(a.stdout, "Modo %s (plan %s, proyecto %s) · %s · %s\n\n", c.mode, orManual(p.Autonomy), orManual(c.cfg.Autonomy), budgetText(p.BudgetUSD), plural(len(p.Steps), "paso", "pasos"))
+		fmt.Fprintf(a.stdout, "Modo %s (plan %s, proyecto %s) · %s · %s\n", c.mode, orManual(p.Autonomy), orManual(c.cfg.Autonomy), budgetText(p.BudgetUSD), plural(len(p.Steps), "paso", "pasos"))
+		if prd := strings.TrimSpace(p.PRD); prd != "" {
+			fmt.Fprintf(a.stdout, "PRD: %s\n", prdText(oneLineVisible(prd)))
+		}
+		fmt.Fprintln(a.stdout)
 		tw := table(a.stdout)
 		fmt.Fprintln(tw, "  PASO\tAGENTE\tRIESGO\tTOPE\tENTRADAS\tREVISIÓN")
 		for _, s := range p.Steps {
@@ -205,6 +209,14 @@ func (a *app) wsCheck(args []string) error {
 		return fail(1, "")
 	}
 	return nil
+}
+
+// prdText dice de dónde parte el plan: un archivo o la entrega de un paso.
+func prdText(prd string) string {
+	if id, ok := strings.CutPrefix(prd, "step:"); ok {
+		return "la entrega del paso " + id
+	}
+	return prd
 }
 
 func nonNil(fs []workstream.Finding) []workstream.Finding {

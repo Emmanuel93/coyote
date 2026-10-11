@@ -8,7 +8,7 @@ coyote sigue versionado semántico desde 1.0. Este documento dice qué no cambia
 
 | Qué | Promesa |
 | --- | --- |
-| Formatos v1 | CCF, CCF-doc, `project.yaml`, `hub.yaml`, SLO v1, aprobaciones, planes y golden solo crecen con campos opcionales. Quitar un campo o cambiar su sentido es una versión nueva del formato y de coyote |
+| Formatos v1 | CCF, CCF-doc, `project.yaml`, `hub.yaml`, SLO v1, aprobaciones, planes y golden solo crecen con campos opcionales. Quitar un campo o cambiar su sentido es una versión nueva del formato y de coyote. El plan de 1.0 trae `prd:`; coyote 1.0.0-rc.1 no lo conoce y falla nombrándolo |
 | Comandos y banderas | Mantienen su nombre y su sentido. Una bandera que se retira sigue funcionando con un aviso durante al menos un minor |
 | Salidas `--json` | Solo agregan campos |
 | Códigos de salida | 0: todo bien. 1: hallazgos o fallas (lint, gate pr con `--policy fail`, audit, eval, secrets scan). 2: uso incorrecto o una decisión del gate que niega |

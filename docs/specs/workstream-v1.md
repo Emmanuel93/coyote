@@ -1,6 +1,6 @@
 # Workstreams v1 — plan, contrato por paso y motor
 
-Estado: nuevo en v0.5.0 · Implementación: `internal/workstream`, `coyote ws` · Decisión: ADR-0014
+Estado: nuevo en v0.5.0; `prd:` desde v1.0.0 · Implementación: `internal/workstream`, `coyote ws` · Decisiones: ADR-0014, ADR-0028
 
 Un workstream es una unidad de trabajo con su plan (`coyote/workstreams/W-0001-algo/plan.yaml`), sus corridas (`runs/`) y su cierre (`close.md`). El motor corre el plan paso a paso con el núcleo de `coyote run` y se detiene donde el modo lo pide.
 
@@ -11,12 +11,13 @@ id: W-0007
 title: cobros idempotentes
 autonomy: supervised          # manual | supervised | autonomous; el proyecto es el techo
 risk: R2                      # riesgo por defecto de los pasos
+prd: coyote/prd/cobros.md     # de qué PRD parte el plan (R20); o step:S1 si el primer paso lo escribe
 budget_usd: 3                 # tope del plan; autonomous lo exige
 steps:
   - id: S1
     does: revisar el diseño de cobros
     agent: coyote-reviewer
-    input: [docs/pagos.md, diff:servicios=main...HEAD]
+    input: [coyote/prd/cobros.md, docs/pagos.md, diff:servicios=main...HEAD]
     output: informe de revisión
     sections: [Hallazgos, Riesgos]   # la entrega los trae como títulos o el paso falla
     max_usd: 0.8
@@ -36,6 +37,21 @@ Contrato de cada paso (A2), que `coyote ws check` revisa:
 | `risk` | R1, R2 o R3; sube el piso de modelo del router |
 | `max_usd`, `max_turns` | topes del paso; `max_usd` es obligatorio en los pasos de agente |
 | `gate: human` | la persona revisa este paso también en `autonomous` |
+
+## El PRD del plan
+
+`prd:` dice de qué documento parte el plan (R20, ADR-0028). Vale una ruta del proyecto (`coyote/prd/cobros.md`) o `step:ID`, cuando el primer paso lo escribe y la persona lo acepta con `ws continue`. Es opcional: lo que `ws check` dice depende del riesgo.
+
+| Caso | Hallazgo |
+|------|----------|
+| plan R2 o R3 (el suyo o el de un paso) sin `prd:` | aviso (R20) |
+| `prd:` que no es una ruta del proyecto ni `step:ID`, o que es un `diff:` | error |
+| `step:ID` que no existe o que es un paso de la persona | error |
+| el archivo no existe todavía | aviso |
+| `step:ID` que no es el primer paso | aviso |
+| ningún paso lo recibe en `input` | aviso |
+
+`ws check` muestra de dónde parte el plan en la línea `PRD:` y en el campo `prd` de `--json`. El motor no agrega el PRD a los pasos por su cuenta: lo recibe el paso que lo declara en `input`. El campo es parte del plan, así que cambiarlo cambia el hash que se autoriza en `autonomous`.
 
 Un plan con errores no corre. La carpeta del workstream es `W-0001` o `W-0001-nombre`, sin espacios, porque sus rutas van al ledger. Las entradas de archivo son rutas relativas dentro del proyecto, nunca de `.git` ni de `.coyote` (en cualquier combinación de mayúsculas). Cada entrada entra en la tarea entre cercas, como dato, con un tope de unos 3000 tokens; el agente lee el resto si lo necesita.
 
@@ -119,4 +135,5 @@ Un paso que deja acciones en la cola del gate se detiene en `pend`. Cuando la pe
 
 - `--resume` con `--agent` en modo headless no se probó contra Claude Code real: si falla, `--retry` corre el paso de nuevo.
 - La revisión de un paso es la de quien corre `ws continue`: en `autonomous`, coyote avisa si no es quien autorizó el loop, pero no lo impide.
+- `prd:` comprueba que el PRD exista y esté conectado al plan, no que sea bueno ni que el plan lo cumpla.
 - Los planes de v0.1 a v0.4 de este repo se escribieron antes del contrato y no pasan `ws check` (les falta `max_usd`).
