@@ -1,6 +1,6 @@
 # Plan de ejecución — Coyote
 
-Estado: v0.7.0 aprobada en G7 (P-0007), en la rama `v0.7`; `main` sigue en v0.4.0 · v1.0 en construcción en la rama `v1.0` · actualizado 2026-09-29
+Estado: v0.7.0 aprobada en G7 (P-0007), en la rama `v0.7`; `main` sigue en v0.4.0 · v1.0 construida en la rama `v1.0`, con su reporte para G8 pendiente de tu decisión · actualizado 2026-10-10
 
 Este plan ejecuta la propuesta aprobada ("Plan de construcción — Framework Coyote"). Cada release se razona con la plantilla de cinco partes que usarán los agentes de Coyote (problema, restricciones, opciones, decisión, riesgos) y cierra con un gate humano: nada se etiqueta, se publica ni toca otros proyectos sin autorización explícita.
 
@@ -700,10 +700,10 @@ G7 autorizaría:
 | T57 | Compatibilidad 1.x | Una 1.0 es una promesa | `compatibilidad.md`, `requires` y el estándar 1.0 | Hecho: `requires` en `project.yaml` y `hub.yaml`, leído antes que el resto; `init` escribe la línea del binario; `doctor` la muestra |
 | T58 | Documentación | C6.6 | Tutorial probado, guías, referencia generada, explicación y CHANGELOG | Hecho: `TestTutorial` corre cada comando del tutorial; ocho guías; `cli.md` sale de la CLI y `make check` falla si queda vieja; generarla destapó tres textos de ayuda equivocados, ya corregidos |
 | T59 | Cadena de suministro | C6.8 | Build reproducible; SBOM y procedencia por binario; verificación documentada | Hecho: `make verify-dist` da los mismos 9 hashes en dos builds con la caché de Go vacía; SBOM CycloneDX 1.7 por binario y procedencia SLSA v1.2 Build L1 |
-| T60 | Piloto real (H8a) | C6.4 | Con tu autorización: plan `supervised`, PRs en `ws/` y `close.md`. Sin ella, pasa a v1.1 | Pendiente |
-| T61 | Verificación y G8 | Evidencia antes de la 1.0 | Pruebas, tres pasadas adversariales, retro y `docs/releases/v1.0.0.md` | Pendiente |
+| T60 | Piloto real (H8a) | C6.4 | Con tu autorización: plan `supervised`, PRs en `ws/` y `close.md`. Sin ella, pasa a v1.1 | H8a aprobado (P-0008) y kit entregado en `dist/piloto-h8a/`; no corrió. G8 decide si se espera o pasa a v1.1 |
+| T61 | Verificación y G8 | Evidencia antes de la 1.0 | Pruebas, tres pasadas adversariales, retro y `docs/releases/v1.0.0.md` | Hecho, a la espera de G8: 67 hallazgos en tres pasadas (32, 22 y 13), todos corregidos salvo un límite declarado; retro de los ocho releases (261 hallazgos); `v1.0.0-rc.1` con SBOM y procedencia |
 
-G8 autorizaría:
+G8 autorizaría (el reporte está en `docs/releases/v1.0.0.md`):
 
 1. Etiquetar `v1.0.0` y aceptar ADR-0022 a ADR-0027.
 2. Llevar `main` a v1.0.0 sin merge: puede avanzar porque las ramas de release descienden de él. El push es tuyo.
@@ -748,7 +748,7 @@ G8 autorizaría:
 | D40 evaluación del contexto | Golden y métricas sin modelo en la CI, con umbral de 2 puntos; el juez con modelo es opcional y usa tu presupuesto (ADR-0025) | La CI no gasta y una regresión se ve en el PR | Se confirma en G8 |
 | D41 compatibilidad | Semver sobre formatos, CLI y estándar, con `requires`; el gate puede negar más en cualquier versión (ADR-0026) | Una 1.0 le dice al equipo qué no va a cambiar | Se confirma en G8 |
 | D42 cadena de suministro | Build reproducible, SBOM CycloneDX 1.7 y procedencia SLSA Build L1 en `make dist`; L2 con Actions si se publica (ADR-0027) | Sin red no hay goreleaser, y un binario se verifica reconstruyéndolo | Se confirma en G8 |
-| D43 piloto real | Hito H8a con su propia autorización y presupuesto; sin él, pasa a v1.1 | Toca `fintech-services` y gasta en corridas | Confirmado en H8a (P-0008): listado de desembolsos, worktree aparte, tope de $10 |
+| D43 piloto real | Hito H8a con su propia autorización y presupuesto; sin él, pasa a v1.1 | Toca `fintech-services` y gasta en corridas | Confirmado en H8a (P-0008): listado de desembolsos, worktree aparte, tope de $10. No corrió: G8 decide si se espera |
 | D44 `coyote serve` | Queda para v1.1 si el uso lo pide (D18) | Ningún uso lo pidió | Se confirma en G8 |
 | D45 `main` | Avanza a v1.0.0 en G8, sin merge; el push es tuyo | Las ramas de release descienden de `main` | Se confirma en G8 |
 | D23 unidad de trabajo | Producto multi-repo: servicios, app y backoffice juntos, en un proyecto aparte que lee los tres (ADR-0011) | Un cambio en uno afecta a los otros (G3) | Confirmado en G4 |

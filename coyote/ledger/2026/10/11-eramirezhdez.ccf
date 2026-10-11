@@ -17,3 +17,4 @@
 2026-10-11T04:08Z|@eramirezhdez/coyote-security|W-0008|coyote|fix|security|tercera ronda: ledger bloqueado salvo lectura, redirecciones pegadas, carpetas que contienen lo…|-|-|-|ok
 2026-10-11T04:11Z|@eramirezhdez/coyote-scribe|W-0008|coyote|doc|security|tercera pasada de la revisión adversarial en specs, compatibilidad, build, modelo de…|-|-|-|ok
 2026-10-11T04:12Z|@eramirezhdez/coyote-security|W-0008|coyote|fix|ci|las reglas de riesgo por ruta no distinguen mayúsculas|-|-|-|ok
+2026-10-11T04:38Z|@eramirezhdez/coyote-scribe|W-0008|coyote|doc|release|reporte de v1.0.0 para G8, retro de los ocho releases, estado del…|-|-|-|ok

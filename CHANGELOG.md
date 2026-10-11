@@ -35,7 +35,7 @@ Los cambios de cada versión de coyote. Desde 1.0 sigue versionado semántico, c
 
 ### Seguridad
 
-- Revisión adversarial en tres pasadas: tres revisores independientes sobre v1.0 y dos pasadas de dos revisores sobre los arreglos. Sus 65 hallazgos se corrigieron con su prueba, salvo uno que queda como límite declarado (un selector de variación después de un símbolo o un dígito, que es la forma de color de un emoji):
+- Revisión adversarial en tres pasadas: tres revisores independientes sobre v1.0 y dos pasadas de dos revisores sobre los arreglos. Sus 67 hallazgos (32, 22 y 13 por pasada) se corrigieron con su prueba, salvo uno que queda como límite declarado (un selector de variación después de un símbolo o un dígito, que es la forma de color de un emoji):
   - el gate cuenta una bandera que niega también después de `--`; resuelve las rutas limpias contra la carpeta del IDE, cada `cd`, `-C` o `--chdir`, los comodines y los enlaces; ve una redirección pegada; bloquea mover o borrar la carpeta que contiene lo protegido, y todo lo que nombra el ledger con efectos, salvo leerlo;
   - `gate pr` compara el ledger byte por byte (un archivo recodificado en UTF-16 ya no pasa) y marca R3 un archivo del ledger que no es un archivo y el gate de un proyecto en una subcarpeta; suma más archivos de instrucciones de agentes y marca R2 el golden y la línea base;
   - el clasificador y la salida de coyote ven las marcas invisibles que no son de formato (U+034F, selectores de variación fuera de un emoji, el blanco del braille), y `generate agents` pasa también el nombre del frontmatter por el clasificador;

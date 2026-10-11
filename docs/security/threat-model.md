@@ -92,5 +92,5 @@ Fuera del alcance: quien ya tiene los permisos de la persona o de root en su má
   - el clasificador.
 
   El 2026-09-29 corrió 40 s por lector, unos 4.9 millones de entradas en total, sin fallas.
-- **Revisiones adversariales.** Hubo revisiones en cada release; sus hallazgos y sus correcciones están en `docs/releases/`. La de v1.0 (2026-10-10) corrió en tres pasadas: tres revisores independientes sobre la seguridad del gate, la integridad de la auditoría y el release, y después dos pasadas de dos revisores sobre los arreglos. Los 65 hallazgos se corrigieron con su prueba, salvo uno que queda abajo como límite.
+- **Revisiones adversariales.** Hubo revisiones en cada release; sus hallazgos y sus correcciones están en `docs/releases/`. La de v1.0 (2026-10-10) corrió en tres pasadas: tres revisores independientes sobre la seguridad del gate, la integridad de la auditoría y el release, y después dos pasadas de dos revisores sobre los arreglos. Los 67 hallazgos (32, 22 y 13 por pasada) se corrigieron con su prueba, salvo uno que queda abajo como límite.
 - **Calibración del clasificador.** El 2026-09-29 corrió en solo lectura sobre 304 documentos de ocho repos reales. Dio 2 marcas, las dos correctas: dos instaladores que se bajan y se corren en un solo comando, en un plan de producto. No dio falsos positivos después de ajustar una regla.
