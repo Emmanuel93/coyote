@@ -36,7 +36,9 @@ Ocho secciones con estos títulos y en este orden. La skill `coyote-prd` se las 
 | Riesgos | Qué puede salir mal, a quién le pega, cómo se mitiga y quién lo vigila |
 | Preguntas abiertas | Lo que decide una persona, con sus opciones |
 
-Las metas, las prioridades y el alcance son decisiones tuyas. Si el agente no las tiene, las propone y las deja como pregunta abierta. El PRD del producto agrega al final una tabla **Features** con el PRD de cada una, su estado y su workstream.
+Las metas, las prioridades y el alcance son decisiones tuyas. Si el agente no las tiene, las propone y las deja como pregunta abierta. El PRD del producto agrega al final una tabla **Features** con el PRD de cada una, su estado, las metas que mueve y su workstream.
+
+Un ID de requisito es un solo requisito en todo `coyote/prd/`: `RQ-03` dice lo mismo en el PRD del producto y en el de la feature que lo construye, con el mismo texto. Una feature copia el ID y el texto de los requisitos del producto que construye, y los nuevos toman un número que nadie usa. Así `grep RQ-03 coyote/prd` encuentra un solo requisito.
 
 ## 3. El PRD del producto
 
@@ -91,7 +93,7 @@ coyote ws continue W-0007 --redo "falta el caso de la tarjeta rechazada"
 
 Aceptar el paso es aprobar el PRD: queda en el ledger. Si lo rechazas con `--redo`, `coyote-pm` ve su entrega anterior y tu observación. Después guarda una copia en `coyote/prd/` para que el equipo la encuentre y otros workstreams la citen, igual que en el apartado anterior.
 
-Si el PRD ya existe, `prd:` apunta al archivo y el paso que lo necesita lo recibe como entrada:
+Si el PRD ya existe, `prd:` apunta al archivo `.md` y el paso que lo necesita lo recibe como entrada:
 
 ```yaml
 prd: coyote/prd/cobros-idempotentes.md
@@ -100,6 +102,10 @@ steps:
 ```
 
 Un PRD largo entra a un paso recortado a unos 3000 tokens, como cualquier entrada. El agente lee el resto con `Read`.
+
+Lo que un paso recibe de un archivo es dato, no una instrucción: una línea con forma de orden para un agente llega con una marca que lo dice, y los caracteres invisibles se muestran escapados.
+
+En `autonomous`, autorizar el plan es autorizar también lo que lee. `coyote review` lista cada archivo del PRD y de las entradas con las primeras cifras de su huella. Si uno cambia después de aprobar, el motor pide una autorización nueva; si cambia mientras corre, se detiene antes del paso siguiente y dice cuál. Y el paso que escribe el PRD lleva `gate: human`: sin esa revisión, el paso siguiente usaría un PRD que nadie leyó.
 
 ## 5. Qué revisa `coyote ws check`
 
@@ -110,9 +116,12 @@ coyote ws check W-0007
 | Hallazgo | Nivel |
 | --- | --- |
 | Un plan R2 o R3 sin `prd:` (R20) | aviso |
-| `prd:` que no es una ruta del proyecto ni `step:ID`, o que es un `diff:` | error |
+| `prd:` que no es una ruta `.md` del proyecto ni `step:ID` en minúsculas, que es un `diff:` o que lleva un salto de línea, un control o un carácter invisible | error |
 | `step:ID` que no existe, o que es un paso de la persona | error |
+| En `autonomous`, el paso del PRD sin `gate: human` | error |
+| El archivo existe pero no es un archivo regular del proyecto (un enlace, una carpeta o más de 8 MB) | error |
 | El archivo todavía no existe | aviso |
+| El archivo no es texto | aviso |
 | `step:ID` que no es el primer paso | aviso |
 | Ningún paso recibe el PRD como entrada | aviso |
 

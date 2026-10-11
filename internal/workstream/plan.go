@@ -19,10 +19,13 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"go.yaml.in/yaml/v3"
 
 	"github.com/Emmanuel93/coyote/internal/fsx"
+	"github.com/Emmanuel93/coyote/internal/safetext"
 )
 
 // Base es la carpeta de los workstreams, relativa a la raíz del proyecto.
@@ -267,12 +270,40 @@ func (p *Plan) Index(id string) int {
 }
 
 // AuthHash identifica la autorización de correr este plan exacto en
-// autonomous (A4): cambiar una coma del plan pide autorizarlo de nuevo.
-func (p *Plan) AuthHash(project string) string {
+// autonomous (A4): cambiar una coma del plan pide autorizarlo de nuevo. Cubre
+// también los archivos que el plan lee (Files): files da la huella de cada
+// uno, y editar el PRD o una entrada después de aprobar cambia el hash.
+func (p *Plan) AuthHash(project string, files map[string]string) string {
 	h := sha256.New()
 	fmt.Fprintf(h, "coyote-ws-autonomous\x00%s\x00%s\x00", project, p.ID)
 	h.Write(p.Raw)
+	for _, f := range p.Files() {
+		if d, ok := files[f]; ok {
+			fmt.Fprintf(h, "\x00%s\x00%s", f, d)
+		}
+	}
 	return "sha256:" + hex.EncodeToString(h.Sum(nil))
+}
+
+// Files son los archivos del proyecto que el plan lee: las entradas de
+// archivo de sus pasos y el PRD, si es un archivo. Sin repetir y en orden.
+func (p *Plan) Files() []string {
+	seen := map[string]bool{}
+	var out []string
+	add := func(raw string) {
+		if in, err := ParseInput(raw); err == nil && in.Kind == "file" && !seen[in.Value] {
+			seen[in.Value] = true
+			out = append(out, in.Value)
+		}
+	}
+	add(p.PRD)
+	for _, s := range p.Steps {
+		for _, raw := range s.Input {
+			add(raw)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 // Input es una entrada de un paso: el artefacto de un paso anterior, un
@@ -282,9 +313,35 @@ type Input struct {
 	Value string
 }
 
+// prefixes son los prefijos con significado de una entrada: se escriben en
+// minúsculas, tal cual, y una ruta no puede empezar con ellos.
+var prefixes = []string{"step:", "diff:", "file:"}
+
+// reservedPrefix devuelve el prefijo con significado con el que empieza s, en
+// cualquier combinación de mayúsculas.
+func reservedPrefix(s string) string {
+	l := strings.ToLower(s)
+	for _, p := range prefixes {
+		if strings.HasPrefix(l, p) {
+			return p
+		}
+	}
+	return ""
+}
+
 // ParseInput lee step:ID, diff:repo=RANGO, file:ruta o una ruta a secas.
+// STEP:S1 o file:step:S1 no valen como rutas: pasarían por un archivo con ese
+// nombre y le dirían a quien lee el plan otra cosa que lo que corre.
 func ParseInput(s string) (Input, error) {
 	s = strings.TrimSpace(s)
+	if p := reservedPrefix(s); p != "" && !strings.HasPrefix(s, p) {
+		return Input{}, fmt.Errorf("entrada %q: %s se escribe en minúsculas", s, p)
+	}
+	if body, ok := strings.CutPrefix(s, "file:"); ok {
+		if p := reservedPrefix(strings.TrimSpace(body)); p != "" {
+			return Input{}, fmt.Errorf("entrada %q: una ruta no empieza con %s; escribe la entrada sin file:", s, p)
+		}
+	}
 	switch {
 	case strings.HasPrefix(s, "step:"):
 		id := strings.TrimPrefix(s, "step:")
@@ -314,6 +371,9 @@ func CleanPath(p string) (string, error) {
 	if p == "" || strings.HasPrefix(p, "/") || strings.HasPrefix(p, "~") || strings.Contains(p, "\\") || filepath.IsAbs(p) {
 		return "", errors.New("usa una ruta relativa a la raíz del proyecto")
 	}
+	if !visible(p) {
+		return "", errors.New("la ruta lleva saltos de línea, controles o marcas que no se ven")
+	}
 	c := path.Clean(p)
 	if c == "." || c == ".." || strings.HasPrefix(c, "../") {
 		return "", errors.New("la ruta sale del proyecto")
@@ -325,6 +385,21 @@ func CleanPath(p string) (string, error) {
 		}
 	}
 	return c, nil
+}
+
+// visible dice si una ruta se ve como es: sin saltos de línea, controles ni
+// marcas de formato que no se ven (las que cambian la dirección del texto, las
+// de etiqueta, el espacio de ancho cero). Una ruta así redibuja la salida de
+// quien la muestra, o esconde a qué archivo apunta.
+func visible(p string) bool {
+	prev := rune(0)
+	for _, r := range p {
+		if r == utf8.RuneError || r < 0x20 || safetext.Unsafe(r) || safetext.Invisible(prev, r) || unicode.Is(unicode.Cf, r) {
+			return false
+		}
+		prev = r
+	}
+	return true
 }
 
 // Finding es un hallazgo de la revisión de un plan.
@@ -352,12 +427,35 @@ func Errors(fs []Finding) int {
 	return n
 }
 
+// InputState es lo que se sabe de un archivo de entrada.
+type InputState int
+
+// Estados de un archivo de entrada.
+const (
+	InputOK       InputState = iota // un archivo de texto que el paso puede leer
+	InputMissing                    // todavía no existe
+	InputUnusable                   // existe, pero es un enlace, una carpeta o pesa de más: el paso no lo lee
+	InputBinary                     // existe, pero no es texto: el paso lo recibe sin contenido
+)
+
 // CheckOptions es lo que la revisión necesita saber del proyecto.
 type CheckOptions struct {
-	Agents    map[string]bool       // agentes definidos en el proyecto
-	Installed map[string]bool       // instalados en Claude Code; nil no revisa
-	Exists    func(rel string) bool // archivos de entrada; nil no revisa
-	Project   string                // autonomy del proyecto (el techo)
+	Agents    map[string]bool             // agentes definidos en el proyecto
+	Installed map[string]bool             // instalados en Claude Code; nil no revisa
+	Exists    func(rel string) bool       // archivos de entrada; nil no revisa
+	Inspect   func(rel string) InputState // como Exists, pero distingue lo que no se puede leer; manda sobre Exists
+	Project   string                      // autonomy del proyecto (el techo)
+}
+
+// state dice cómo está un archivo de entrada; InputOK si no se revisa.
+func (o CheckOptions) state(rel string) InputState {
+	switch {
+	case o.Inspect != nil:
+		return o.Inspect(rel)
+	case o.Exists != nil && !o.Exists(rel):
+		return InputMissing
+	}
+	return InputOK
 }
 
 func finite(f float64) bool { return !math.IsNaN(f) && !math.IsInf(f, 0) }
@@ -473,8 +571,13 @@ func (p *Plan) Check(o CheckOptions) []Finding {
 					add("error", id, "entrada step:%s: es un paso de la persona y no deja artefacto; cita el archivo que produce", in.Value)
 				}
 			case "file":
-				if o.Exists != nil && !o.Exists(in.Value) {
+				switch o.state(in.Value) {
+				case InputMissing:
 					add("aviso", id, "la entrada %s no existe todavía", in.Value)
+				case InputUnusable:
+					add("error", id, "la entrada %s no es un archivo regular dentro del proyecto (un enlace, una carpeta o un archivo de más de 8 MB): el paso no la puede leer", in.Value)
+				case InputBinary:
+					add("aviso", id, "la entrada %s no es texto: el paso la recibe sin contenido", in.Value)
 				}
 			}
 		}
@@ -499,11 +602,14 @@ func (p *Plan) checkPRD(o CheckOptions, add func(level, step, format string, a .
 		return
 	}
 	in, err := ParseInput(ref)
-	if err == nil && in.Kind == "diff" {
+	switch {
+	case err == nil && in.Kind == "diff":
 		err = errors.New("un diff no es un PRD")
+	case err == nil && in.Kind == "file" && !strings.EqualFold(path.Ext(in.Value), ".md"):
+		err = errors.New("el PRD es un documento Markdown")
 	}
 	if err != nil {
-		add("error", "", "prd %q inválido: usa una ruta del proyecto (coyote/prd/<feature>.md) o step:ID (%v)", ref, err)
+		add("error", "", "prd %q inválido: usa una ruta .md del proyecto (coyote/prd/<feature>.md) o step:ID (%v)", ref, err)
 		return
 	}
 	switch in.Kind {
@@ -516,13 +622,25 @@ func (p *Plan) checkPRD(o CheckOptions, add func(level, step, format string, a .
 		case p.Steps[j].IsHuman():
 			add("error", "", "prd step:%s: es un paso de la persona y no deja artefacto; el PRD es la entrega de un agente (coyote-pm) o un archivo", in.Value)
 			return
-		case j != 0:
+		case p.agentBefore(j):
 			add("aviso", "", "prd step:%s no es el primer paso: los pasos anteriores corren sin PRD", in.Value)
 		}
+		// En autonomous solo se detiene el paso que pide la revisión: sin ella,
+		// el paso siguiente usaría un PRD que ninguna persona leyó (R20).
+		if mode, _ := Mode(p.Autonomy, o.Project); mode == "autonomous" && p.Steps[j].Gate != "human" {
+			add("error", "", "prd step:%s: en autonomous el PRD pasa por una persona (R20): agrega gate: human al paso %s, o corre el plan en supervised", in.Value, in.Value)
+		}
 	case "file":
-		// Si un paso lo recibe, la revisión de sus entradas ya avisa que falta.
-		if o.Exists != nil && !o.Exists(in.Value) && !p.receives(in) {
-			add("aviso", "", "el PRD %s no existe todavía", in.Value)
+		// Si un agente lo recibe, la revisión de sus entradas ya dice cómo está.
+		if !p.receives(in) {
+			switch o.state(in.Value) {
+			case InputMissing:
+				add("aviso", "", "el PRD %s no existe todavía", in.Value)
+			case InputUnusable:
+				add("error", "", "el PRD %s no es un archivo regular dentro del proyecto (un enlace, una carpeta o un archivo de más de 8 MB)", in.Value)
+			case InputBinary:
+				add("aviso", "", "el PRD %s no es texto: ningún paso podría leerlo", in.Value)
+			}
 		}
 	}
 	if !p.receives(in) {
@@ -530,9 +648,24 @@ func (p *Plan) checkPRD(o CheckOptions, add func(level, step, format string, a .
 	}
 }
 
-// receives informa si algún paso declara la entrada.
+// agentBefore informa si algún paso de agente corre antes del paso j: los de
+// la persona no leen un PRD que falta.
+func (p *Plan) agentBefore(j int) bool {
+	for _, s := range p.Steps[:j] {
+		if !s.IsHuman() {
+			return true
+		}
+	}
+	return false
+}
+
+// receives informa si algún paso de agente declara la entrada: un paso de la
+// persona no la lleva a ningún agente.
 func (p *Plan) receives(want Input) bool {
 	for _, s := range p.Steps {
+		if s.IsHuman() {
+			continue
+		}
 		for _, raw := range s.Input {
 			if got, err := ParseInput(raw); err == nil && got == want {
 				return true

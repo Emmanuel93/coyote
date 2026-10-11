@@ -35,20 +35,22 @@ Las de `producto.md`, sin cambios:
 | ID | Requisito | Prioridad | Meta |
 |----|-----------|-----------|------|
 | RQ-01 | Un pedido tiene al menos una línea y cada cantidad es un entero positivo | debe | M2 |
-| RQ-02 | El total es la suma de precio por cantidad de sus líneas, en centavos enteros | debe | M2 |
-| RQ-03 | Un pedido con un pago capturado por su total exacto queda confirmado | debe | M1 |
-| RQ-04 | Un pedido sin pago, o con un pago por otro monto, no se confirma | debe | M2 |
+| RQ-02 | Un pedido con un pago capturado por su total exacto queda confirmado sin esperar a nadie | debe | M1 |
+| RQ-03 | Un pedido sin pago, o con un pago por otro monto, no se confirma | debe | M2 |
+| RQ-05 | El total es la suma de precio por cantidad de sus líneas, en centavos enteros | debe | M2 |
+
+Los IDs son los del producto: RQ-01 a RQ-03 se copian con su texto y RQ-05 es de esta feature, con el primer número que nadie usa (RQ-04 es de otra).
 
 ## Criterios de aceptación
 
 ```gherkin
-Escenario: un pedido pagado se confirma [RQ-03]
+Escenario: un pedido pagado se confirma [RQ-02]
   Dado un pedido con dos líneas y un pago capturado por el total exacto
   Cuando se procesa la confirmación
   Entonces el pedido queda confirmado
   Y se publica el evento PedidoConfirmado
 
-Escenario: un pago por otro monto no confirma [RQ-04]
+Escenario: un pago por otro monto no confirma [RQ-03]
   Dado un pedido de 2500 centavos y un pago capturado por 2000
   Cuando se procesa la confirmación
   Entonces el pedido sigue en borrador
@@ -59,7 +61,7 @@ Escenario: un pedido sin líneas no se crea [RQ-01]
   Cuando se intenta crear
   Entonces se rechaza con el error "pedido sin líneas"
 
-Escenario: el total no usa decimales [RQ-02]
+Escenario: el total no usa decimales [RQ-05]
   Dado una línea de 3 unidades a 333 centavos
   Cuando se calcula el total
   Entonces el total es 999 centavos

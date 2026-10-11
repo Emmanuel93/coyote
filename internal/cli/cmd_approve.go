@@ -262,7 +262,7 @@ func (c *approvalCtx) detail(p approval.Proposal) string {
 	case "ws":
 		// Se autoriza el plan exacto que correrá solo: se muestra entero.
 		if plan, ok := in["plan"].(string); ok {
-			return fmt.Sprintf("  %s, en la rama %v:\n    %s", p.Path, in["branch"], strings.ReplaceAll(strings.TrimRight(plan, "\n"), "\n", "\n    "))
+			return fmt.Sprintf("  %s, en la rama %v:\n    %s%s", p.Path, in["branch"], strings.ReplaceAll(strings.TrimRight(plan, "\n"), "\n", "\n    "), readFilesText(in["files"]))
 		}
 	case "archivo":
 		oldS, okOld := in["old_string"].(string)
@@ -283,6 +283,40 @@ func (c *approvalCtx) detail(p approval.Proposal) string {
 	}
 	b, _ := json.MarshalIndent(in, "  ", "  ")
 	return "  entrada:\n  " + string(b)
+}
+
+// readFilesText lista, bajo el plan, los archivos que el motor leerá y la
+// huella de cada uno: la persona autoriza el plan y también esos contenidos, y
+// si uno cambia después la autorización deja de valer.
+func readFilesText(v any) string {
+	list, _ := v.([]any)
+	var b strings.Builder
+	for _, it := range list {
+		m, _ := it.(map[string]any)
+		path, _ := m["path"].(string)
+		digest, _ := m["digest"].(string)
+		if path == "" {
+			continue
+		}
+		if b.Len() == 0 {
+			b.WriteString("\n  archivos que lee (si uno cambia, la autorización deja de valer):")
+		}
+		fmt.Fprintf(&b, "\n    %s  %s", path, shortDigest(digest))
+	}
+	return b.String()
+}
+
+// shortDigest abrevia "sha256:<64 hex>" a sus primeros 12 dígitos; "ausente" e
+// "ilegible" quedan como están.
+func shortDigest(d string) string {
+	hex, ok := strings.CutPrefix(d, "sha256:")
+	if !ok {
+		return d
+	}
+	if len(hex) > 12 {
+		hex = hex[:12]
+	}
+	return "sha256:" + hex
 }
 
 // textDiff usa el git del sistema para mostrar un diff unificado.

@@ -32,20 +32,30 @@ No es una meta cobrar menos comisión ni cambiar de proveedor de pagos.
 
 | ID | Requisito | Prioridad | Meta |
 |----|-----------|-----------|------|
-| RQ-01 | Un pedido nuevo tiene al menos una línea y cada cantidad es un entero positivo | debe | M2 |
+| RQ-01 | Un pedido tiene al menos una línea y cada cantidad es un entero positivo | debe | M2 |
 | RQ-02 | Un pedido con un pago capturado por su total exacto queda confirmado sin esperar a nadie | debe | M1 |
 | RQ-03 | Un pedido sin pago, o con un pago por otro monto, no se confirma | debe | M2 |
 | RQ-04 | Operaciones ve por qué un pedido no se confirmó | podría | M1 |
 
 ## Criterios de aceptación
 
-El detalle de cada escenario vive en el PRD de la feature que lo construye (`alta-de-pedidos.md`). A nivel producto, el recorrido que no puede fallar:
+Aquí van los recorridos que el producto no puede romper, uno por requisito que "debe". Los bordes de cada pieza viven en el PRD de la feature que la construye (`alta-de-pedidos.md`).
 
 ```gherkin
 Escenario: un pedido pagado se confirma al instante [RQ-02]
   Dado un pedido con dos líneas y un pago capturado por el total exacto
   Cuando se procesa la confirmación
   Entonces el pedido queda confirmado
+
+Escenario: un pedido sin pago no se confirma [RQ-03]
+  Dado un pedido con dos líneas y ningún pago
+  Cuando se procesa la confirmación
+  Entonces el pedido sigue en borrador
+
+Escenario: la cantidad mínima es uno [RQ-01]
+  Dado un pedido con una sola línea de cantidad 1
+  Cuando se crea el pedido
+  Entonces se acepta
 ```
 
 ## Riesgos

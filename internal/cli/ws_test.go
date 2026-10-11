@@ -12,7 +12,8 @@ import (
 // fakeClaudeWS instala un claude simulado para el motor: cada corrida deja
 // sus argumentos y su entrada numerados, responde el texto de out y, si
 // existe el archivo propose, deja esa acción en la cola del gate como lo
-// haría el hook.
+// haría el hook; si existe mutate, lo corre con el número de la corrida antes
+// de responder (alguien edita un archivo mientras el motor trabaja).
 func fakeClaudeWS(t *testing.T, base string) (dir string, say func(text string)) {
 	t.Helper()
 	dir = filepath.Join(base, "claude-ws")
@@ -24,6 +25,7 @@ func fakeClaudeWS(t *testing.T, base string) (dir string, say func(text string))
 		"printf '%s\\n' \"$@\" > \"$d/args.$n\"\n" +
 		"cat > \"$d/stdin.$n\"\n" +
 		"if [ -f \"$d/propose\" ]; then mkdir -p .coyote/proposals && cp \"$d/propose\" .coyote/proposals/P-ws2222.json; fi\n" +
+		"if [ -f \"$d/mutate\" ]; then sh \"$d/mutate\" \"$n\"; fi\n" +
 		"cat \"$d/out\"\n"
 	bin := filepath.Join(dir, "claude")
 	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {

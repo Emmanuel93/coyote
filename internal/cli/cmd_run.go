@@ -20,6 +20,7 @@ import (
 	"github.com/Emmanuel93/coyote/internal/project"
 	"github.com/Emmanuel93/coyote/internal/router"
 	"github.com/Emmanuel93/coyote/internal/runner"
+	"github.com/Emmanuel93/coyote/internal/safetext"
 	"github.com/Emmanuel93/coyote/internal/tokens"
 	"github.com/Emmanuel93/coyote/internal/usage"
 	"github.com/Emmanuel93/coyote/internal/workstream"
@@ -410,7 +411,10 @@ func (a *app) runPrompt(root string, cfg *project.Config, sp runSpec, artifact s
 		b.WriteString("# Salida esperada\n\n" + strings.TrimSpace(sp.output) + "\n\n")
 	}
 	deliver(&b, root, artifact)
-	return b.String(), nil
+	// Nada que no se ve llega al agente: el paquete de contexto y las entradas
+	// citan lo que escribió cualquiera que abrió un PR, y las marcas de etiqueta
+	// o de ancho cero son una orden que la persona no puede leer (ADR-0023).
+	return safetext.String(b.String()), nil
 }
 
 // resumePrompt retoma la sesión de un paso que dejó acciones en la cola: la

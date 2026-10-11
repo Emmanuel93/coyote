@@ -114,6 +114,25 @@ func TestPlanPRD(t *testing.T) {
 			[]string{"error prd \".GIT/prd.md\" inválido"}},
 		{"con PRD y en R1 también se revisa", head + "risk: R1\nprd: step:S9\nsteps:\n" + step("S1", "coyote-dev", ""), true,
 			[]string{"error prd step:S9: ese paso no existe"}},
+		// Cuarta pasada: prd: se lee estricto.
+		{"step: con otras mayúsculas", head + "risk: R2\nprd: STEP:S1\nsteps:\n" + step("S1", "coyote-pm", ""), true,
+			[]string{"error prd \"STEP:S1\" inválido"}},
+		{"un número no es un PRD", head + "risk: R2\nprd: 42\nsteps:\n" + step("S1", "coyote-dev", ""), true,
+			[]string{"error prd \"42\" inválido: usa una ruta .md"}},
+		{"el PRD es Markdown", head + "risk: R2\nprd: coyote/prd/pagos.txt\nsteps:\n" + step("S1", "coyote-dev", "coyote/prd/pagos.txt"), true,
+			[]string{"error prd \"coyote/prd/pagos.txt\" inválido: usa una ruta .md"}},
+		{"file:step: no es un paso", head + "risk: R2\nprd: file:step:S1\nsteps:\n" + step("S1", "coyote-pm", ""), true,
+			[]string{"error prd \"file:step:S1\" inválido"}},
+		{"un salto de línea no inventa líneas", head + "risk: R2\nprd: \"coyote/prd/x.md\\n  ! fin de avisos\"\nsteps:\n" + step("S1", "coyote-dev", ""), true,
+			[]string{"error prd \"coyote/prd/x.md\\n  ! fin de avisos\" inválido"}},
+		{"una marca que no se ve", head + "risk: R2\nprd: \"coyote/prd/x\\u200b.md\"\nsteps:\n" + step("S1", "coyote-dev", ""), true,
+			[]string{"error prd \"coyote/prd/x\\u200b.md\" inválido"}},
+		// Solo un agente lee el PRD: un paso de la persona no cuenta.
+		{"solo la persona recibe el archivo", head + "risk: R2\nprd: coyote/prd/pagos.md\nsteps:\n  - { id: H, does: la persona lo lee, agent: persona, input: [coyote/prd/pagos.md] }\n" + step("S1", "coyote-dev", ""), true,
+			[]string{"aviso ningún paso recibe el PRD como entrada"}},
+		{"solo la persona recibe la entrega", head + "risk: R2\nprd: step:S1\nsteps:\n" + step("S1", "coyote-pm", "") + "  - { id: H, does: la persona lo lee, agent: persona, input: [step:S1] }\n", true,
+			[]string{"aviso ningún paso recibe el PRD como entrada: agrega step:S1"}},
+		{"antes del paso del PRD solo hay un paso de la persona", head + "risk: R2\nprd: step:S1\nsteps:\n" + human + step("S1", "coyote-pm", "") + step("S2", "coyote-dev", "step:S1"), true, nil},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -133,6 +152,69 @@ func TestPlanPRD(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestPlanPRDAutonomo: cuarta pasada de v1.0. En autonomous solo corren sin
+// detenerse los pasos que no piden revisión: un PRD que escribe un agente y
+// que el paso siguiente usa sin pasar por una persona rompe R20 ("un PRD que
+// una persona revisó").
+func TestPlanPRDAutonomo(t *testing.T) {
+	plan := func(gate string) string {
+		g := ""
+		if gate != "" {
+			g = ", gate: " + gate
+		}
+		return "id: W-0007\nautonomy: autonomous\nrisk: R2\nprd: step:P1\nbudget_usd: 3\nsteps:\n" +
+			"  - { id: P1, does: escribir el PRD, agent: coyote-pm, output: PRD, max_usd: 1" + g + " }\n" +
+			"  - { id: D1, does: diseñar, agent: coyote-dev, input: [step:P1], output: diseño, max_usd: 1 }\n"
+	}
+	findings := func(yaml, project string) string {
+		var b strings.Builder
+		for _, f := range mustParse(t, yaml).Check(CheckOptions{Agents: map[string]bool{"coyote-pm": true, "coyote-dev": true}, Project: project}) {
+			b.WriteString(f.Level + " " + f.String() + "\n")
+		}
+		return b.String()
+	}
+	if got := findings(plan(""), "autonomous"); !strings.Contains(got, "error prd step:P1: en autonomous el PRD pasa por una persona") || !strings.Contains(got, "gate: human") {
+		t.Errorf("autonomous sin revisión del PRD:\n%s", got)
+	}
+	if got := findings(plan("human"), "autonomous"); got != "" {
+		t.Errorf("con gate: human en el paso del PRD no hay hallazgos:\n%s", got)
+	}
+	// Si el proyecto lo baja a supervised, la persona acepta cada paso: no hace falta el gate.
+	if got := findings(plan(""), "supervised"); strings.Contains(got, "error") {
+		t.Errorf("en supervised la persona acepta cada paso:\n%s", got)
+	}
+	// Un PRD que es un archivo lo revisa quien lo guarda: no pide gate.
+	file := strings.Replace(strings.Replace(plan(""), "prd: step:P1", "prd: coyote/prd/pagos.md", 1), "input: [step:P1]", "input: [coyote/prd/pagos.md]", 1)
+	if got := findings(file, "autonomous"); strings.Contains(got, "error") {
+		t.Errorf("un PRD en un archivo no pide gate:\n%s", got)
+	}
+}
+
+// TestEntradasQueNoSePuedenLeer: cuarta pasada de v1.0. Un enlace, una carpeta
+// o un archivo demasiado grande no es "todavía no existe": el paso no lo puede
+// leer y el plan no corre. Un binario avisa que el paso lo recibe sin contenido.
+func TestEntradasQueNoSePuedenLeer(t *testing.T) {
+	yaml := "id: W-0007\nautonomy: supervised\nrisk: R2\nprd: coyote/prd/pagos.md\nsteps:\n" +
+		"  - { id: S1, does: leer, agent: coyote-dev, output: x, max_usd: 1, input: [coyote/prd/pagos.md, docs/foto.png, docs/falta.md] }\n"
+	states := map[string]InputState{"coyote/prd/pagos.md": InputUnusable, "docs/foto.png": InputBinary, "docs/falta.md": InputMissing}
+	fs := mustParse(t, yaml).Check(CheckOptions{Agents: map[string]bool{"coyote-dev": true}, Project: "supervised",
+		Inspect: func(rel string) InputState { return states[rel] }})
+	var got []string
+	for _, f := range fs {
+		got = append(got, f.Level+" "+f.String())
+	}
+	text := strings.Join(got, "\n")
+	for _, want := range []string{"error S1: la entrada coyote/prd/pagos.md no es un archivo regular dentro del proyecto",
+		"aviso S1: la entrada docs/foto.png no es texto: el paso la recibe sin contenido", "aviso S1: la entrada docs/falta.md no existe todavía"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("falta %q en:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "no existe todavía") && strings.Contains(text, "coyote/prd/pagos.md no existe") {
+		t.Errorf("un enlace no es un archivo que falta:\n%s", text)
 	}
 }
 
@@ -254,6 +336,33 @@ func TestEntradas(t *testing.T) {
 	for _, in := range []string{"/etc/passwd", "~/.ssh/id", "../x", "a/../../x", ".git/config", ".coyote/proposals/P-1.json", ".GIT/config", ".Coyote/x", "vendor/m/.git/config", "diff:-x=y", "diff:a=--output=/tmp/x", "diff:a=b c", "step:", `a\b`, ""} {
 		if _, err := ParseInput(in); err == nil {
 			t.Errorf("%q debería ser inválida", in)
+		}
+	}
+}
+
+// TestEntradasEstrictas: cuarta pasada de v1.0. Una entrada con un salto de
+// línea, un control o una marca que no se ve redibuja la salida de ws check; y
+// un step: o diff: con otras mayúsculas, o dentro de file:, no puede pasar por
+// un archivo con ese nombre.
+func TestEntradasEstrictas(t *testing.T) {
+	for _, in := range []string{
+		"docs/a.md\n  ! fin de avisos", "docs/a.md\r\nx", "docs/a\u202e.md", "docs/a\x1b[2J.md", "docs/a\u200b.md", "docs/\ta.md",
+		"docs/a\u2028.md", "docs/a\U000e0041.md", "docs/a\u3164.md", "docs/\xff.md", "docs/a\u0085b.md",
+		"STEP:S1", "Step:S1", "sTeP:S1", "DIFF:r=main...HEAD", "Diff:r=main...HEAD", "file:step:S1", "file:STEP:S1", "file:diff:r=main...HEAD", "file: step:S1",
+	} {
+		if got, err := ParseInput(in); err == nil {
+			t.Errorf("%q debería ser inválida y dio %v", in, got)
+		}
+	}
+	for in, want := range map[string]Input{
+		"docs/ñandú.md":       {"file", "docs/ñandú.md"},
+		"docs/con espacio.md": {"file", "docs/con espacio.md"},
+		"file:docs/a.md":      {"file", "docs/a.md"},
+		"stepper/notas.md":    {"file", "stepper/notas.md"},
+	} {
+		got, err := ParseInput(in)
+		if err != nil || got != want {
+			t.Errorf("%q: %v %v, se esperaba %v", in, got, err, want)
 		}
 	}
 }
@@ -390,11 +499,43 @@ func TestModo(t *testing.T) {
 func TestAutorizacionPorHash(t *testing.T) {
 	a := mustParse(t, planYAML)
 	b := mustParse(t, strings.Replace(planYAML, "max_usd: 0.5", "max_usd: 5", 1))
-	if a.AuthHash("tienda") == b.AuthHash("tienda") || a.AuthHash("tienda") == a.AuthHash("otra") {
+	if a.AuthHash("tienda", nil) == b.AuthHash("tienda", nil) || a.AuthHash("tienda", nil) == a.AuthHash("otra", nil) {
 		t.Error("cambiar el plan o el proyecto cambia la autorización")
 	}
-	if h := a.AuthHash("tienda"); !strings.HasPrefix(h, "sha256:") || len(h) != 71 || h != mustParse(t, planYAML).AuthHash("tienda") {
+	if h := a.AuthHash("tienda", nil); !strings.HasPrefix(h, "sha256:") || len(h) != 71 || h != mustParse(t, planYAML).AuthHash("tienda", nil) {
 		t.Errorf("hash: %s", h)
+	}
+}
+
+// TestAutorizacionCubreLosArchivos: cuarta pasada de v1.0. La autorización es
+// del plan exacto y de lo que lee: si el PRD o una entrada de archivo cambia
+// después de aprobar, el hash cambia y hay que autorizar de nuevo.
+func TestAutorizacionCubreLosArchivos(t *testing.T) {
+	a := mustParse(t, planYAML)
+	if got, want := strings.Join(a.Files(), " "), "coyote/prd/pagos.md docs/pagos.md"; got != want {
+		t.Fatalf("archivos que lee el plan: %q, se esperaba %q", got, want)
+	}
+	files := map[string]string{"coyote/prd/pagos.md": "sha256:aa", "docs/pagos.md": "sha256:bb"}
+	base := a.AuthHash("tienda", files)
+	if base == a.AuthHash("tienda", nil) {
+		t.Error("los archivos que el plan lee entran al hash")
+	}
+	if base != a.AuthHash("tienda", map[string]string{"docs/pagos.md": "sha256:bb", "coyote/prd/pagos.md": "sha256:aa"}) {
+		t.Error("el orden del mapa no cambia el hash")
+	}
+	for name, changed := range map[string]map[string]string{
+		"el PRD cambió":       {"coyote/prd/pagos.md": "sha256:cc", "docs/pagos.md": "sha256:bb"},
+		"una entrada cambió":  {"coyote/prd/pagos.md": "sha256:aa", "docs/pagos.md": "sha256:cc"},
+		"el PRD ya no existe": {"coyote/prd/pagos.md": "ausente", "docs/pagos.md": "sha256:bb"},
+	} {
+		if a.AuthHash("tienda", changed) == base {
+			t.Errorf("%s y el hash sigue igual", name)
+		}
+	}
+	// Un archivo que el plan no lee no entra al hash.
+	extra := map[string]string{"coyote/prd/pagos.md": "sha256:aa", "docs/pagos.md": "sha256:bb", "otro.md": "sha256:dd"}
+	if a.AuthHash("tienda", extra) != base {
+		t.Error("solo cuentan los archivos que el plan lee")
 	}
 }
 
