@@ -15,6 +15,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"sort"
 	"strings"
 )
@@ -38,15 +39,27 @@ func run(args []string, stdout io.Writer) error {
 	date := fl.String("date", "", "fecha del commit, RFC 3339")
 	repo := fl.String("repo", "https://github.com/Emmanuel93/coyote", "repo del código")
 	goVersion := fl.String("go", "", "versión de Go del build")
+	platforms := fl.String("platforms", "", "plataformas del release, GOOS/GOARCH separadas por espacios")
 	if err := fl.Parse(args); err != nil {
 		return err
 	}
-	if *ver == "" || *commit == "" || *date == "" {
-		return fmt.Errorf("faltan -version, -commit o -date")
+	if *ver == "" || *commit == "" || *date == "" || strings.TrimSpace(*platforms) == "" {
+		return fmt.Errorf("faltan -version, -commit, -date o -platforms")
 	}
-	bins, err := filepath.Glob(filepath.Join(*dist, "coyote_"+*ver+"_*", "coyote"))
-	if err != nil || len(bins) == 0 {
-		return fmt.Errorf("no hay binarios de %s en %s", *ver, *dist)
+	// Solo los binarios de las plataformas del release, y cada uno tiene que
+	// salir de este commit, sin cambios, para su plataforma: un binario viejo
+	// que quedó en la carpeta no entra en la procedencia.
+	var bins []string
+	for _, pl := range strings.Fields(*platforms) {
+		goos, goarch, ok := strings.Cut(pl, "/")
+		if !ok {
+			return fmt.Errorf("plataforma inválida %q", pl)
+		}
+		bin := filepath.Join(*dist, "coyote_"+*ver+"_"+goos+"_"+goarch, "coyote")
+		if err := checkBinary(bin, goos, goarch, *commit); err != nil {
+			return err
+		}
+		bins = append(bins, bin)
 	}
 	sort.Strings(bins)
 	rel := func(p string) string { r, _ := filepath.Rel(*dist, p); return filepath.ToSlash(r) }
@@ -75,11 +88,39 @@ func run(args []string, stdout io.Writer) error {
 			*goVersion = info.GoVersion
 		}
 	}
-	prov := provenance(subjects, *repo, *ver, *tag, *commit, *goVersion, bins)
+	info, err := buildinfo.ReadFile(bins[0])
+	if err != nil {
+		return err
+	}
+	prov := provenance(subjects, *repo, *ver, *tag, *commit, *goVersion, bins, info.Settings)
 	if err := writeJSON(filepath.Join(*dist, "coyote_"+*ver+".provenance.json"), prov); err != nil {
 		return err
 	}
 	fmt.Fprintf(stdout, "SBOM de %d binarios y procedencia en %s\n", len(bins), *dist)
+	return nil
+}
+
+// checkBinary revisa con el buildinfo que un binario sea de esa plataforma
+// y salga del commit, con el árbol limpio.
+func checkBinary(bin, goos, goarch, commit string) error {
+	info, err := buildinfo.ReadFile(bin)
+	if err != nil {
+		return fmt.Errorf("%s: %v", bin, err)
+	}
+	got := map[string]string{}
+	for _, s := range info.Settings {
+		got[s.Key] = s.Value
+	}
+	switch {
+	case got["GOOS"] != goos || got["GOARCH"] != goarch:
+		return fmt.Errorf("%s es de %s/%s, no de %s/%s", bin, got["GOOS"], got["GOARCH"], goos, goarch)
+	case got["vcs.revision"] != commit:
+		return fmt.Errorf("%s sale del commit %q, no de %s", bin, got["vcs.revision"], commit)
+	case got["vcs.modified"] != "false":
+		return fmt.Errorf("%s se compiló con cambios sin commit", bin)
+	case got["-trimpath"] != "true" || got["CGO_ENABLED"] != "0":
+		return fmt.Errorf("%s no se compiló con -trimpath y CGO_ENABLED=0", bin)
+	}
 	return nil
 }
 
@@ -120,16 +161,12 @@ func sbom(bin, sum, ver, date string) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	settings := map[string]string{}
-	for _, s := range info.Settings {
-		settings[s.Key] = s.Value
-	}
 	mainRef := "pkg:golang/" + info.Main.Path + "@" + ver
+	// Todas las opciones del build, en el orden en que Go las registra: lo
+	// que cambia el binario (GOAMD64, -ldflags…) queda a la vista.
 	props := []map[string]string{{"name": "go", "value": info.GoVersion}}
-	for _, k := range []string{"GOOS", "GOARCH", "CGO_ENABLED", "-trimpath", "vcs.revision", "vcs.time", "vcs.modified"} {
-		if v, ok := settings[k]; ok {
-			props = append(props, map[string]string{"name": k, "value": v})
-		}
+	for _, st := range info.Settings {
+		props = append(props, map[string]string{"name": st.Key, "value": st.Value})
 	}
 	var comps []map[string]any
 	var deps []string
@@ -167,7 +204,7 @@ func sbom(bin, sum, ver, date string) (map[string]any, error) {
 
 // provenance arma el statement in-toto v1 con la procedencia SLSA. Sin firma:
 // es Build L1. Sin horas de inicio ni fin: así también es reproducible.
-func provenance(subjects []subject, repo, ver, tag, commit, goVersion string, bins []string) map[string]any {
+func provenance(subjects []subject, repo, ver, tag, commit, goVersion string, bins []string, settings []debug.BuildSetting) map[string]any {
 	var platforms []string
 	for _, b := range bins {
 		name := filepath.Base(filepath.Dir(b))
@@ -189,7 +226,7 @@ func provenance(subjects []subject, repo, ver, tag, commit, goVersion string, bi
 			"buildDefinition": map[string]any{
 				"buildType":            doc,
 				"externalParameters":   external,
-				"internalParameters":   map[string]any{"go": goVersion, "platforms": platforms, "flags": "-trimpath, CGO_ENABLED=0, fecha del commit"},
+				"internalParameters":   map[string]any{"go": goVersion, "platforms": platforms, "settings": common(settings)},
 				"resolvedDependencies": []map[string]any{{"uri": uri, "digest": map[string]string{"gitCommit": commit}}},
 			},
 			"runDetails": map[string]any{
@@ -198,4 +235,16 @@ func provenance(subjects []subject, repo, ver, tag, commit, goVersion string, bi
 			},
 		},
 	}
+}
+
+// common son las opciones del build que valen para todas las plataformas:
+// todas menos GOOS y GOARCH.
+func common(settings []debug.BuildSetting) map[string]string {
+	out := map[string]string{}
+	for _, st := range settings {
+		if st.Key != "GOOS" && st.Key != "GOARCH" {
+			out[st.Key] = st.Value
+		}
+	}
+	return out
 }

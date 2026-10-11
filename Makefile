@@ -9,9 +9,6 @@ COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
 # La fecha es la del commit, no la del reloj: dos builds del mismo commit dan
 # los mismos binarios (ADR-0027).
 DATE    ?= $(shell TZ=UTC git log -1 --format=%cd --date=format-local:%Y-%m-%dT%H:%MZ 2>/dev/null || date -u +%Y-%m-%dT%H:%MZ)
-COMMIT_FULL := $(shell git rev-parse HEAD 2>/dev/null || echo none)
-DATE_RFC    := $(shell TZ=UTC git log -1 --format=%cd --date=format-local:%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u +%Y-%m-%dT%H:%M:%SZ)
-TAG         := $(shell git describe --tags --exact-match 2>/dev/null)
 DIST    ?= dist
 PKG     := github.com/Emmanuel93/coyote/internal/version
 LDFLAGS := -s -w -X $(PKG).Version=$(VERSION) -X $(PKG).Commit=$(COMMIT) -X $(PKG).Date=$(DATE)
@@ -43,14 +40,26 @@ install:
 	go install -trimpath -ldflags "$(LDFLAGS)" ./cmd/coyote
 
 # Binarios, SBOM CycloneDX de cada uno y procedencia SLSA Build L1 (ADR-0027).
+# Todo sale del commit: la versión, el commit y la fecha se leen de git en la
+# receta, nunca del entorno ni de la línea de comandos, y el entorno de Go
+# queda fijo. Un árbol con cambios o archivos sin commit no hace un release,
+# y la carpeta empieza vacía: SHA256SUMS y la procedencia cubren solo este build.
+DIST_GOENV := CGO_ENABLED=0 GOAMD64=v1 GOARM64=v8.0 GOEXPERIMENT= GOWORK=off GOTOOLCHAIN=local GOFIPS140=off
 dist:
-	@mkdir -p $(DIST)
-	@for p in $(PLATFORMS); do \
-	  os=$${p%/*}; arch=$${p#*/}; out=$(DIST)/coyote_$(VERSION)_$${os}_$${arch}; \
+	@case "$(DIST)" in ""|/*|*..*) echo "DIST tiene que ser una carpeta relativa dentro del repo"; exit 1;; esac
+	@test -z "$$(git status --porcelain --untracked-files=normal)" || { echo "make dist necesita el árbol limpio: haz commit o guarda los cambios (un release sale de un commit)"; exit 1; }
+	@rm -rf $(DIST) && mkdir -p $(DIST)
+	@ver=$$(git describe --tags --always) && commit=$$(git rev-parse --short HEAD) && full=$$(git rev-parse HEAD) && \
+	date=$$(TZ=UTC git log -1 --format=%cd --date=format-local:%Y-%m-%dT%H:%MZ) && \
+	rfc=$$(TZ=UTC git log -1 --format=%cd --date=format-local:%Y-%m-%dT%H:%M:%SZ) && \
+	tag=$$(git describe --tags --exact-match 2>/dev/null || true) && \
+	for p in $(PLATFORMS); do \
+	  os=$${p%/*}; arch=$${p#*/}; out=$(DIST)/coyote_$${ver}_$${os}_$${arch}; \
 	  echo "$$out"; \
-	  GOOS=$$os GOARCH=$$arch CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o $$out/coyote ./cmd/coyote || exit 1; \
-	done
-	go run ./tools/distmeta -dist $(DIST) -version $(VERSION) -commit $(COMMIT_FULL) -tag "$(TAG)" -date $(DATE_RFC)
+	  env $(DIST_GOENV) GOOS=$$os GOARCH=$$arch go build -trimpath \
+	    -ldflags "-s -w -X $(PKG).Version=$$ver -X $(PKG).Commit=$$commit -X $(PKG).Date=$$date" -o $$out/coyote ./cmd/coyote || exit 1; \
+	done && \
+	env $(DIST_GOENV) go run ./tools/distmeta -dist $(DIST) -version $$ver -commit $$full -tag "$$tag" -date $$rfc -platforms "$(PLATFORMS)"
 	cd $(DIST) && { command -v sha256sum >/dev/null && sha256sum */coyote */coyote.cdx.json *.provenance.json || shasum -a 256 */coyote */coyote.cdx.json *.provenance.json; } > SHA256SUMS
 
 # Construye el release dos veces, cada una con su caché de Go vacía, y compara:

@@ -4,30 +4,54 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 )
 
-// fakeDist arma un dist con dos "binarios": copias del binario de la prueba,
-// que es un binario de Go con su buildinfo.
-func fakeDist(t *testing.T) string {
+// buildDist compila un programa mínimo, desde un repo de git propio, para
+// las plataformas pedidas: binarios de Go de verdad, con su buildinfo y su
+// commit. Devuelve la carpeta dist, el repo y su commit.
+func buildDist(t *testing.T, platforms ...string) (dist, repo, commit string) {
 	t.Helper()
-	self, err := os.ReadFile(os.Args[0])
-	if err != nil {
-		t.Fatal(err)
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git no está instalado")
 	}
-	dist := t.TempDir()
-	for _, p := range []string{"linux_amd64", "darwin_arm64"} {
-		dir := filepath.Join(dist, "coyote_v1.0.0_"+p)
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+	repo = t.TempDir()
+	gitc := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", repo, "-c", "user.name=Ana", "-c", "user.email=ana@example.com", "-c", "commit.gpgsign=false"}, args...)...)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	write := func(name, text string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(repo, name), []byte(text), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(dir, "coyote"), self, 0o755); err != nil {
-			t.Fatal(err)
+	}
+	write("go.mod", "module example.com/coyote\n\ngo 1.22\n")
+	write("main.go", "package main\n\nfunc main() {}\n")
+	gitc("init", "-q")
+	gitc("add", "-A")
+	gitc("commit", "-qm", "inicio")
+	commit = gitc("rev-parse", "HEAD")
+	dist = filepath.Join(t.TempDir(), "dist")
+	for _, p := range platforms {
+		goos, goarch, _ := strings.Cut(p, "/")
+		out := filepath.Join(dist, "coyote_v1.0.0_"+goos+"_"+goarch, "coyote")
+		cmd := exec.Command("go", "build", "-trimpath", "-o", out, ".")
+		cmd.Dir = repo
+		cmd.Env = append(os.Environ(), "GOOS="+goos, "GOARCH="+goarch, "CGO_ENABLED=0", "GOFLAGS=-mod=mod", "GOPROXY=off", "GOWORK=off")
+		if b, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("go build %s: %v\n%s", p, err, b)
 		}
 	}
-	return dist
+	return dist, repo, commit
 }
 
 func readJSON(t *testing.T, p string) map[string]any {
@@ -44,8 +68,8 @@ func readJSON(t *testing.T, p string) map[string]any {
 }
 
 func TestSBOMYProcedencia(t *testing.T) {
-	dist := fakeDist(t)
-	args := []string{"-dist", dist, "-version", "v1.0.0", "-commit", "0123456789abcdef0123456789abcdef01234567", "-tag", "v1.0.0", "-date", "2026-10-10T12:00:00Z"}
+	dist, _, commit := buildDist(t, "linux/amd64", "darwin/arm64")
+	args := []string{"-dist", dist, "-version", "v1.0.0", "-commit", commit, "-tag", "v1.0.0", "-date", "2026-10-10T12:00:00Z", "-platforms", "linux/amd64 darwin/arm64"}
 	if err := run(args, io.Discard); err != nil {
 		t.Fatal(err)
 	}
@@ -58,6 +82,12 @@ func TestSBOMYProcedencia(t *testing.T) {
 	if comp["name"] != "coyote" || comp["version"] != "v1.0.0" || meta["timestamp"] != "2026-10-10T12:00:00Z" {
 		t.Errorf("componente: %v", comp)
 	}
+	props, _ := json.Marshal(comp["properties"])
+	for _, want := range []string{`"GOAMD64"`, `"vcs.revision","value":"` + commit, `"vcs.modified","value":"false"`, `"-trimpath","value":"true"`} {
+		if !strings.Contains(string(props), want) {
+			t.Errorf("el SBOM lleva todas las opciones del build; falta %s en %s", want, props)
+		}
+	}
 	prov := readJSON(t, filepath.Join(dist, "coyote_v1.0.0.provenance.json"))
 	if prov["_type"] != "https://in-toto.io/Statement/v1" || prov["predicateType"] != "https://slsa.dev/provenance/v1" {
 		t.Fatalf("procedencia: %v", prov)
@@ -66,9 +96,13 @@ func TestSBOMYProcedencia(t *testing.T) {
 		t.Errorf("sujetos: los dos binarios y sus dos BOM, hubo %d", len(subs))
 	}
 	pred := prov["predicate"].(map[string]any)
-	ext := pred["buildDefinition"].(map[string]any)["externalParameters"].(map[string]any)
-	if ext["ref"] != "refs/tags/v1.0.0" || ext["revision"] != "0123456789abcdef0123456789abcdef01234567" {
+	def := pred["buildDefinition"].(map[string]any)
+	ext := def["externalParameters"].(map[string]any)
+	if ext["ref"] != "refs/tags/v1.0.0" || ext["revision"] != commit {
 		t.Errorf("parámetros: %v", ext)
+	}
+	if set := def["internalParameters"].(map[string]any)["settings"].(map[string]any); set["CGO_ENABLED"] != "0" || set["GOOS"] != nil {
+		t.Errorf("opciones comunes del build: %v", set)
 	}
 	if _, ok := pred["runDetails"].(map[string]any)["builder"].(map[string]any)["id"]; !ok {
 		t.Error("Build L1 pide builder.id")
@@ -82,7 +116,8 @@ func TestSBOMYProcedencia(t *testing.T) {
 		t.Error("la procedencia debe ser reproducible")
 	}
 	// Sin etiqueta no se inventa una ref.
-	if err := run([]string{"-dist", dist, "-version", "v1.0.0", "-commit", "abc", "-date", "2026-10-10T12:00:00Z"}, io.Discard); err != nil {
+	noTag := []string{"-dist", dist, "-version", "v1.0.0", "-commit", commit, "-date", "2026-10-10T12:00:00Z", "-platforms", "linux/amd64 darwin/arm64"}
+	if err := run(noTag, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	prov = readJSON(t, filepath.Join(dist, "coyote_v1.0.0.provenance.json"))
@@ -91,6 +126,53 @@ func TestSBOMYProcedencia(t *testing.T) {
 		t.Errorf("un build sin etiqueta no lleva ref: %v", ext)
 	}
 	if err := run([]string{"-dist", dist}, io.Discard); err == nil {
-		t.Error("sin versión, commit y fecha debe fallar")
+		t.Error("sin versión, commit, fecha y plataformas debe fallar")
+	}
+}
+
+// TestSoloBinariosDelCommit: revisión adversarial de v1.0. Un binario que
+// quedó en la carpeta, de otra plataforma, de otro commit o con cambios sin
+// commit no entra en la procedencia.
+func TestSoloBinariosDelCommit(t *testing.T) {
+	dist, repo, commit := buildDist(t, "linux/amd64")
+	base := []string{"-dist", dist, "-version", "v1.0.0", "-date", "2026-10-10T12:00:00Z"}
+	// Un binario viejo en otra carpeta no se toma si no es una plataforma del release.
+	old := filepath.Join(dist, "coyote_v0.9.0_linux_amd64")
+	if err := os.MkdirAll(old, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := run(append(base, "-commit", commit, "-platforms", "linux/amd64"), io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if subs := readJSON(t, filepath.Join(dist, "coyote_v1.0.0.provenance.json"))["subject"].([]any); len(subs) != 2 {
+		t.Errorf("solo el binario de la plataforma y su BOM: %d sujetos", len(subs))
+	}
+	// Una carpeta de windows con un binario de linux.
+	win := filepath.Join(dist, "coyote_v1.0.0_windows_amd64")
+	if err := os.MkdirAll(win, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(filepath.Join(dist, "coyote_v1.0.0_linux_amd64", "coyote"))
+	if err := os.WriteFile(filepath.Join(win, "coyote"), data, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := run(append(base, "-commit", commit, "-platforms", "linux/amd64 windows/amd64"), io.Discard); err == nil || !strings.Contains(err.Error(), "es de linux/amd64") {
+		t.Errorf("binario de otra plataforma: %v", err)
+	}
+	if err := run(append(base, "-commit", strings.Repeat("0", 40), "-platforms", "linux/amd64"), io.Discard); err == nil || !strings.Contains(err.Error(), "sale del commit") {
+		t.Errorf("binario de otro commit: %v", err)
+	}
+	// Con cambios sin commit, el buildinfo lo dice y no hay procedencia.
+	if err := os.WriteFile(filepath.Join(repo, "main.go"), []byte("package main\n\nfunc main() { println() }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("go", "build", "-trimpath", "-o", filepath.Join(dist, "coyote_v1.0.0_linux_amd64", "coyote"), ".")
+	cmd.Dir = repo
+	cmd.Env = append(os.Environ(), "GOOS=linux", "GOARCH=amd64", "CGO_ENABLED=0", "GOFLAGS=-mod=mod", "GOPROXY=off", "GOWORK=off")
+	if b, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("go build: %v\n%s", err, b)
+	}
+	if err := run(append(base, "-commit", commit, "-platforms", "linux/amd64"), io.Discard); err == nil || !strings.Contains(err.Error(), "cambios sin commit") {
+		t.Errorf("binario de un árbol sucio: %v", err)
 	}
 }

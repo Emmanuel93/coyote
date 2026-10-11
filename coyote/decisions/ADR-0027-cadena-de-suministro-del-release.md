@@ -19,9 +19,10 @@ Referencias vigentes al 2026-09-29:
 
 ## Decisión
 - **Reproducible.**
-  - `make dist` toma la fecha y el commit de git, no del reloj.
-  - Compila con `-trimpath`, `CGO_ENABLED=0` y las mismas banderas en cada plataforma.
-  - Dos builds del mismo commit con la misma versión de Go dan los mismos hashes. Una prueba lo verifica.
+  - `make dist` toma la versión, la fecha y el commit de git en la propia receta, nunca del reloj, del entorno ni de la línea de comandos.
+  - Solo construye desde un árbol limpio y en una carpeta vacía: un binario viejo no entra en las sumas ni en la procedencia.
+  - Compila con `-trimpath`, `CGO_ENABLED=0`, el entorno de Go fijo (`GOAMD64=v1`, `GOARM64=v8.0`, sin `GOEXPERIMENT`, `GOWORK=off`, `GOTOOLCHAIN=local`) y las mismas banderas en cada plataforma.
+  - Dos builds del mismo commit con la misma versión de Go dan los mismos hashes. `make verify-dist` lo comprueba, y la CI lo corre en cada cambio.
 - **SBOM.** Un programa del repo (`tools/distmeta`) lee el buildinfo de cada binario y escribe un BOM CycloneDX 1.7 en JSON. El BOM trae:
   - coyote, con su versión y hash;
   - go-yaml, con su versión, su purl y su licencia;
@@ -31,7 +32,9 @@ Referencias vigentes al 2026-09-29:
 - **Procedencia.** El mismo programa escribe un statement in-toto v1 con `predicateType` `https://slsa.dev/provenance/v1`. Lleva:
   - como sujetos, cada archivo del release con su sha256;
   - `buildDefinition`: el tipo de build documentado, la etiqueta, el commit y el comando;
-  - `runDetails`: el builder, que es la máquina de la persona, y las horas del build.
+  - `runDetails`: el builder, que es la máquina de la persona. Sin horas de inicio ni de fin: así la procedencia también es reproducible.
+
+  Antes de escribirla, `distmeta` revisa con el buildinfo que cada binario sea de su plataforma, salga del commit y no tenga cambios sin commit. El SBOM y la procedencia llevan todas las opciones del build que registra Go.
 
   No va firmada, así que cumple Build L1.
 - **Verificación.** `docs/` explica cómo verificar un release:
