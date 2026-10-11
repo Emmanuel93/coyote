@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+
+	"github.com/Emmanuel93/coyote/internal/version"
 )
 
 // Acciones fijadas por commit: una etiqueta se puede mover, un commit no.
@@ -223,7 +225,10 @@ func GitHubWorkflow(o CIOptions) (string, error) {
 	w("          GOPROXY: \"off\"")
 	w("          GOSUMDB: \"off\"")
 	w("          CGO_ENABLED: \"0\"")
-	w("        run: go build -trimpath -o \"$RUNNER_TEMP/coyote\" ./cmd/coyote")
+	// Con su versión: así el coyote del pipeline compara requires y no lee a
+	// medias un archivo de un coyote más nuevo (ADR-0026).
+	w("        run: go build -trimpath -ldflags \"-X %s.Version=%s -X %s.Commit=$(git rev-parse --short HEAD)\" -o \"$RUNNER_TEMP/coyote\" ./cmd/coyote",
+		version.Package, o.CoyoteRef, version.Package)
 	if o.Gitleaks {
 		w("      - name: gitleaks %s en el PR, con la configuración de la rama base", GitleaksVersion)
 		w("        env:")

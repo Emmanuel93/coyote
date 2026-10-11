@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/Emmanuel93/coyote/internal/install"
+	"github.com/Emmanuel93/coyote/internal/version"
 )
 
 // Secretos de prueba armados por partes (R18 del propio repo).
@@ -491,5 +492,44 @@ func TestGitleaksDeVerdadSinConfig(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("gitleaks no vio %s:\n%s", want, got)
 		}
+	}
+}
+
+// TestRequiresNoApagaLasReglasDeSecretos: revisión adversarial de v1.0. Si
+// el project.yaml pide un coyote más nuevo, el escáner y gate pr fallan en
+// vez de seguir sin secrets.files.
+func TestRequiresNoApagaLasReglasDeSecretos(t *testing.T) {
+	base := setup(t)
+	oldV, oldC := version.Version, version.Commit
+	version.Version, version.Commit = "v1.9.0", "abc1234"
+	t.Cleanup(func() { version.Version, version.Commit = oldV, oldC })
+	must(t, run(t, base, "", "init", "sec", "--type", "backend", "--purpose", "API de pedidos de la tienda demo"), 0, "init")
+	root := filepath.Join(base, "sec")
+	cfg := readFile(t, filepath.Join(root, "coyote", "project.yaml"))
+	cfg = strings.Replace(cfg, `requires: ">=1.9"`, `requires: ">=1.10"`, 1)
+	if !strings.Contains(cfg, `">=1.10"`) {
+		t.Fatalf("init no escribió requires:\n%s", cfg)
+	}
+	write(t, root, "coyote/project.yaml", cfg+"secrets:\n  files: [\"config/prod/*.yaml\"]\n")
+	git(t, root, "add", "-A")
+	git(t, root, "commit", "-qm", "chore: proyecto de una versión más nueva")
+	baseSHA := strings.TrimSpace(git(t, root, "rev-parse", "HEAD"))
+	write(t, root, "config/prod/otro.yaml", "db_password: hunter2-libre\n")
+	git(t, root, "add", "-A")
+	for _, args := range [][]string{{"secrets", "scan", "--staged", "--hook"}, {"secrets", "scan", "--staged"}, {"secrets", "scan"}} {
+		r := run(t, root, "", args...)
+		if r.code != 1 || !strings.Contains(r.stderr, ">=1.10") {
+			t.Errorf("%v: se esperaba código 1 con el requires (el hook solo se detiene con 1): %d\n%s%s", args, r.code, r.stdout, r.stderr)
+		}
+	}
+	git(t, root, "commit", "-qm", "feat: configuración de producción", "--no-verify")
+	headSHA := strings.TrimSpace(git(t, root, "rev-parse", "HEAD"))
+	r := run(t, root, "", "secrets", "scan", "--range", baseSHA+"..."+headSHA)
+	if r.code != 1 || !strings.Contains(r.stderr, ">=1.10") {
+		t.Errorf("scan --range: %d\n%s%s", r.code, r.stdout, r.stderr)
+	}
+	r = run(t, base, "", "gate", "pr", "--repo", "sec="+root, "--self", "sec", "--base", baseSHA, "--head", headSHA, "--event", "", "--policy", "warn")
+	if r.code != 2 || !strings.Contains(r.stderr, "rama base") {
+		t.Errorf("gate pr con la base de una versión más nueva: %d\n%s%s", r.code, r.stdout, r.stderr)
 	}
 }

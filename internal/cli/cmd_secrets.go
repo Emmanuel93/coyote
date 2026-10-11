@@ -36,17 +36,19 @@ func cmdSecrets(a *app, args []string) error {
 }
 
 // secretRules devuelve las reglas del proyecto que contiene dir, o las de
-// siempre si dir no está en un proyecto coyote.
-func secretRules(dir string) (secrets.Rules, string) {
+// siempre si dir no está en un proyecto coyote. Un project.yaml que no se
+// puede leer (por ejemplo, porque pide un coyote más nuevo) es un error: sin
+// sus secrets.files, un secreto declarado pasaría.
+func secretRules(dir string) (secrets.Rules, string, error) {
 	root, err := project.FindRoot(dir)
 	if err != nil {
-		return secrets.Rules{}, ""
+		return secrets.Rules{}, "", nil
 	}
 	cfg, err := project.Load(root)
 	if err != nil {
-		return secrets.Rules{}, root
+		return secrets.Rules{}, root, fmt.Errorf("%v; sin las reglas de secretos del proyecto no se revisa nada", err)
 	}
-	return cfg.Secrets, root
+	return cfg.Secrets, root, nil
 }
 
 // secretSkipDirs no se recorren al listar: dependencias y compilación.
@@ -73,7 +75,10 @@ func secretsList(a *app, args []string) error {
 	if err != nil {
 		return err
 	}
-	rules, root := secretRules(dir)
+	rules, root, err := secretRules(dir)
+	if err != nil {
+		return fail(1, "%v", err)
+	}
 	if root == "" {
 		root = dir
 	}
@@ -170,7 +175,10 @@ func secretsScan(a *app, args []string) error {
 	if err != nil {
 		return err
 	}
-	rules, root := secretRules(dir)
+	rules, root, err := secretRules(dir)
+	if err != nil {
+		return fail(1, "%v", err)
+	}
 	var found []secrets.Finding
 	switch {
 	case *staged || *rng != "":
@@ -186,14 +194,22 @@ func secretsScan(a *app, args []string) error {
 			if err != nil {
 				return fail(1, "%v", err)
 			}
-			found = scanAdded(files, newRuleSet(top).For, func(p string) (string, bool) { return product.IndexText(dir, p) })
+			rs := newRuleSet(top)
+			found = scanAdded(files, rs.For, func(p string) (string, bool) { return product.IndexText(dir, p) })
+			if rs.err != nil {
+				return fail(1, "%v", rs.err)
+			}
 			break
 		}
 		files, right, err := product.AddedText(dir, *rng)
 		if err != nil {
 			return fail(1, "%v", err)
 		}
-		found = scanAdded(files, newRuleSet(top).For, func(p string) (string, bool) { return product.FileAt(dir, right, p) })
+		rs := newRuleSet(top)
+		found = scanAdded(files, rs.For, func(p string) (string, bool) { return product.FileAt(dir, right, p) })
+		if rs.err != nil {
+			return fail(1, "%v", rs.err)
+		}
 	default:
 		if root != "" {
 			dir = root
@@ -249,6 +265,7 @@ type ruleSet struct {
 	top   string
 	roots map[string]string // carpeta → raíz del proyecto ("" si no hay)
 	rules map[string]secrets.Rules
+	err   error // el primer project.yaml que no se pudo leer
 }
 
 func newRuleSet(top string) *ruleSet {
@@ -272,6 +289,8 @@ func (r *ruleSet) For(gitPath string) (secrets.Rules, string) {
 	if !ok {
 		if cfg, err := project.Load(root); err == nil {
 			rules = cfg.Secrets
+		} else if r.err == nil {
+			r.err = fmt.Errorf("%v; sin las reglas de secretos de ese proyecto no se revisa nada", err)
 		}
 		r.rules[root] = rules
 	}

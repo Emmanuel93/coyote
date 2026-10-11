@@ -26,6 +26,8 @@ func TestGitHubWorkflow(t *testing.T) {
 		"--repo servicios=repos/servicios", "--repo backoffice=repos/backoffice", "--self servicios --policy warn --comment",
 		"gate pr", "--risk 'R3=services/*/src/**/pagos/**'", "--risk 'R2=**/*.graphqls'",
 		"token: ${{ secrets.COYOTE_TOOL_TOKEN || secrets.COYOTE_PRODUCT_TOKEN }}", "COYOTE_TEAMS_TOKEN: ${{ secrets.COYOTE_TEAMS_TOKEN }}",
+		// El coyote del pipeline lleva su versión: compara requires (ADR-0026).
+		"-X github.com/Emmanuel93/coyote/internal/version.Version=v0.5.0 -X github.com/Emmanuel93/coyote/internal/version.Commit=$(git rev-parse --short HEAD)",
 	} {
 		if !strings.Contains(wf, want) {
 			t.Errorf("falta %q:\n%s", want, wf)

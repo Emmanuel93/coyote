@@ -7,6 +7,9 @@ import (
 	"strings"
 )
 
+// Package es la ruta del paquete, para inyectar los valores con -ldflags -X.
+const Package = "github.com/Emmanuel93/coyote/internal/version"
+
 // Valores inyectados en el build.
 var (
 	Version = "0.1.0-dev"
@@ -66,7 +69,9 @@ func CheckRequires(constraint string) error {
 	}
 	hm, hn, ok := MajorMinor(Version)
 	if !ok {
-		return nil
+		// Un build con commit pero con una versión que no se entiende
+		// (nightly, v1) no puede decir que alcanza.
+		return fmt.Errorf("pide coyote %s y este build dice %q, que no se puede comparar: usa un build con versión vX.Y.Z (docs/reference/compatibilidad.md)", c, Version)
 	}
 	if hm < wm || hm == wm && hn < wn {
 		return fmt.Errorf("pide coyote %s y tienes %s: actualiza coyote (docs/reference/compatibilidad.md)", c, Version)

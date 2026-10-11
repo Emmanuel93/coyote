@@ -6,3 +6,4 @@
 2026-10-11T02:04Z|@eramirezhdez/coyote-security|W-0008|coyote|fix|gate|banderas que niegan cuentan tras --, coyote toma --, rutas limpias y…|-|-|-|ok
 2026-10-11T02:14Z|@eramirezhdez/coyote-security|W-0008|coyote|fix|security|ledger por bytes en gate pr, más archivos de instrucciones, marcas invisibles,…|-|-|-|ok
 2026-10-11T02:20Z|@eramirezhdez/coyote-security|W-0008|coyote|fix|audit|tipo de archivo, rutas sin comillas, árbol por HEAD, respaldo uno a…|-|-|-|ok
+2026-10-11T02:23Z|@eramirezhdez/coyote-security|W-0008|coyote|fix|compat|secretos y gate pr fallan si project.yaml no se lee, versión en…|-|-|-|ok

@@ -51,4 +51,12 @@ func TestCheckRequires(t *testing.T) {
 	if err := CheckRequires(">=9.0"); err != nil || Requires() != "" {
 		t.Errorf("un build sin versión no se compara ni escribe requires: %v %q", err, Requires())
 	}
+	// Un build con commit y una versión que no se entiende no puede decir que
+	// alcanza (revisión adversarial de v1.0).
+	for _, v := range []string{"nightly", "v1"} {
+		release(t, v)
+		if err := CheckRequires(">=1.0"); err == nil || !strings.Contains(err.Error(), "no se puede comparar") {
+			t.Errorf("%q: %v", v, err)
+		}
+	}
 }

@@ -80,7 +80,13 @@ func gatePR(a *app, args []string) error {
 	// Las reglas de secretos salen de la rama base: un PR no se dispensa a sí
 	// mismo agregando secrets.allow. Cada ruta lleva las del proyecto coyote
 	// que la contiene, también en una subcarpeta.
-	in.Secrets = scanAdded(added, baseRules(dir, p.pr.BaseSHA, p.self), func(f string) (string, bool) { return product.FileAt(dir, right, f) })
+	br := &baseRules{dir: dir, base: p.pr.BaseSHA, name: p.self, cache: map[string]*secrets.Rules{}}
+	in.Secrets = scanAdded(added, br.For, func(f string) (string, bool) { return product.FileAt(dir, right, f) })
+	if br.err != nil {
+		// Sin las reglas de la base, un secreto declarado en secrets.files
+		// pasaría: el chequeo falla en vez de seguir con las de siempre.
+		return fail(2, "coyote gate pr: %v", br.err)
+	}
 	// ADR-0023: instrucciones de agentes con cualquier mayúscula, órdenes para
 	// un agente en lo que el PR agrega a documentos y un ledger reescrito.
 	left, _, err := product.RangeSides(dir, p.pr.BaseSHA+"..."+p.pr.HeadSHA)
@@ -380,32 +386,38 @@ func codeCell(s string) string {
 
 // baseRules da, para cada ruta del repo, las reglas de secretos del proyecto
 // coyote que la contiene en la revisión base, con la ruta relativa a ese
-// proyecto; sin proyecto, las de siempre.
-func baseRules(dir, base, name string) func(string) (secrets.Rules, string) {
-	cache := map[string]*secrets.Rules{}
-	return func(f string) (secrets.Rules, string) {
-		for d := path.Dir(f); ; d = path.Dir(d) {
-			prefix := ""
-			if d != "." && d != "/" {
-				prefix = d + "/"
-			}
-			r, seen := cache[prefix]
-			if !seen {
-				if text, ok := product.FileAt(dir, base, prefix+project.ConfigPath); ok {
-					rules := secrets.Rules{}
-					if cfg, err := project.Parse([]byte(text), name); err == nil {
-						rules = cfg.Secrets
-					}
-					r = &rules
+// proyecto; sin proyecto, las de siempre. Un project.yaml de la base que no
+// se puede leer (pide un coyote más nuevo, o está roto) queda en err.
+type baseRules struct {
+	dir, base, name string
+	cache           map[string]*secrets.Rules
+	err             error
+}
+
+func (b *baseRules) For(f string) (secrets.Rules, string) {
+	for d := path.Dir(f); ; d = path.Dir(d) {
+		prefix := ""
+		if d != "." && d != "/" {
+			prefix = d + "/"
+		}
+		r, seen := b.cache[prefix]
+		if !seen {
+			if text, ok := product.FileAt(b.dir, b.base, prefix+project.ConfigPath); ok {
+				rules := secrets.Rules{}
+				if cfg, err := project.Parse([]byte(text), b.name); err == nil {
+					rules = cfg.Secrets
+				} else if b.err == nil {
+					b.err = fmt.Errorf("%s%s de la rama base: %v", prefix, project.ConfigPath, err)
 				}
-				cache[prefix] = r
+				r = &rules
 			}
-			if r != nil {
-				return *r, strings.TrimPrefix(f, prefix)
-			}
-			if prefix == "" {
-				return secrets.Rules{}, f
-			}
+			b.cache[prefix] = r
+		}
+		if r != nil {
+			return *r, strings.TrimPrefix(f, prefix)
+		}
+		if prefix == "" {
+			return secrets.Rules{}, f
 		}
 	}
 }

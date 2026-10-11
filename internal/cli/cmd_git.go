@@ -167,13 +167,18 @@ func cmdCommit(a *app, args []string) error {
 	if err != nil {
 		return fail(1, "no pude revisar si el commit lleva secretos (%v); el commit no sigue", err)
 	}
-	if found := scanAdded(files, newRuleSet(top).For, func(p string) (string, bool) {
+	rs := newRuleSet(top)
+	leaks := scanAdded(files, rs.For, func(p string) (string, bool) {
 		if *all {
 			return product.WorktreeText(top, p)
 		}
 		return product.IndexText(root, p)
-	}); len(found) > 0 {
-		printSecretFindings(a, found, true)
+	})
+	if rs.err != nil {
+		return fail(1, "no pude revisar si el commit lleva secretos (%v); el commit no sigue", rs.err)
+	}
+	if len(leaks) > 0 {
+		printSecretFindings(a, leaks, true)
 		return fail(1, "R18: el commit lleva secretos; sácalos antes de hacer commit")
 	}
 	typ, scope, desc := parseConventional(subject)
