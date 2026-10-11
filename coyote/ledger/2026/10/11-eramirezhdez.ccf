@@ -12,3 +12,4 @@
 2026-10-11T03:06Z|@eramirezhdez/coyote-security|W-0008|coyote|fix|gate|rutas desde la carpeta del IDE, -C y --chdir, comodines y enlaces;…|-|-|-|ok
 2026-10-11T03:12Z|@eramirezhdez/coyote-security|W-0008|coyote|fix|audit|todos los commits contra cada padre, fechas sin --since, diffs en texto,…|-|-|-|ok
 2026-10-11T03:14Z|@eramirezhdez/coyote-devsecops|W-0008|coyote|fix|release|eval por pregunta sin copias, secretos por proyecto desde la raíz y…|-|-|-|ok
+2026-10-11T03:15Z|@eramirezhdez/coyote-devsecops|W-0008|coyote|fix|release|make dist compila desde un clon limpio de HEAD, con el commit…|-|-|-|ok
