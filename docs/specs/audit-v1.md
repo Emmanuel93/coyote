@@ -14,7 +14,7 @@ coyote audit [--month AAAA-MM] [--json] [--write]
 
 ## Qué trae el reporte
 
-- **Resumen.** Eventos, personas, agentes, costo, tope del mes y el conteo de fallas y avisos. También el commit sobre el que se armó y la huella (sha256) del ledger hasta el fin del periodo, tal como está en HEAD: regenerar un mes ya auditado da la misma huella, salvo que ese mes o uno anterior se haya reescrito o le hayan llegado líneas con fecha pasada.
+- **Resumen.** Eventos, personas, agentes, costo, tope del mes y el conteo de fallas y avisos. También el commit sobre el que se armó y la huella (sha256) de lo que leyó del ledger hasta el fin del periodo: las líneas válidas con fecha anterior al fin y las inválidas de días anteriores, con su texto. Regenerar un mes ya auditado da la misma huella, salvo que ese mes o uno anterior se haya reescrito o le hayan llegado líneas con fecha pasada.
 - **Eventos.** Por tipo y por actor, con su costo.
 - **Aprobaciones y gate.**
   - Aprobaciones y rechazos registrados.
@@ -40,7 +40,9 @@ El reporte también cuenta cuántos commits del periodo van firmados.
 
 Un evento `apr` o `rej` se vincula con los registros que cita (`apr:P-0004`), y todos tienen que respaldarlo, o, si no cita ninguno, con el primer registro libre del gate que nombra al empezar (`G4 aprobado: …`), como se registraron los primeros gates de coyote. Un registro de un gate respalda un solo evento: el primero que nombra su gate al empezar, dice su decisión (`apr` con `approved`, `rej` con `rejected`) y no es anterior a ella. La decisión de un agente solo la respalda el registro de un gate: un agente no aprueba acciones, y un registro sin gate respaldaría cualquier cosa.
 
-Los commits se leen todos y la fecha se filtra después: git deja de recorrer con `--since` en el primer commit con fecha vieja. Los diffs van en texto (`--text`), así que un `.gitattributes` con `-diff` no los esconde.
+Un commit cuenta para el mes en que llegó a la cadena de primeros padres de HEAD, no por su fecha: una rama con fechas viejas, o un commit con la fecha cambiada, cuenta cuando se integra, y lo que trae un merge se mide en el merge. La fecha de llegada no retrocede. Las verificaciones de commits revisan los que llegaron en el periodo, de cualquier rama, cada uno contra cada uno de sus padres. Los diffs van en texto (`--text`), así que un `.gitattributes` con `-diff` no los esconde, y git corre sin injertos (`info/grafts`) ni objetos de reemplazo. Una línea que solo gana su salto final, o que cambia de lugar, no cuenta como cambiada.
+
+Los vínculos de aprobación se arman en este orden: primero los eventos que citan su registro, después, por nombre, los de las personas y al final los de los agentes, cada uno con el registro libre de fecha más cercana. Así un agente que registra antes no le quita su registro a la persona.
 
 Lo que viene del ledger o de un registro sale en una sola línea, sin controles ni caracteres invisibles y, en una tabla, con las barras escapadas: un registro no puede abrir una sección del reporte. `--write` guarda el reporte escapado.
 

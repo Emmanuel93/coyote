@@ -6,7 +6,7 @@ Este documento es el `buildType` y el `builder.id` de la procedencia de cada rel
 
 ## Tipo de build: `make dist`
 
-Desde el commit de la etiqueta, sin red y con el árbol limpio (sin cambios ni archivos nuevos): si no, `make dist` no corre. Compila en un clon limpio de HEAD en una carpeta temporal, así que ni un archivo con skip-worktree ni uno ignorado entran al binario. La carpeta `dist/` empieza vacía en cada build, y `DIST` solo acepta una carpeta relativa del repo.
+Desde el commit de la etiqueta, sin red y con el árbol limpio (sin cambios ni archivos nuevos): si no, `make dist` no corre. Compila en un clon limpio de HEAD en una carpeta temporal, sin la configuración de git de quien compila (un `core.autocrlf` cambiaría los bytes), así que ni un archivo con skip-worktree ni uno ignorado entran al binario. La carpeta `dist/` empieza vacía en cada build, y `DIST` solo acepta una carpeta relativa del repo que git ignora y sin archivos versionados.
 
 - Go con la versión que registra la procedencia, `-trimpath`, `CGO_ENABLED=0` y el entorno fijo: `GOAMD64=v1`, `GOARM64=v8.0`, sin `GOEXPERIMENT`, `GOWORK=off`, `GOTOOLCHAIN=local`, `GOENV=off` y `GOFLAGS=-mod=mod`. Ni el entorno ni la línea de comandos de `make` los cambian.
 - La versión, el commit y la fecha salen de git dentro de la receta y van por `-ldflags`; el entorno no los cambia. La fecha es la del commit, no la del reloj.

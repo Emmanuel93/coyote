@@ -42,11 +42,12 @@ Los bloqueos revisan el comando como lo correría el shell, segmento por segment
 - **Rutas.** Una ruta se reconoce también:
   - limpia: `coyote//approvals`, `.claude/./settings.json`, `coyote/x/../ledger`;
   - contra la carpeta del IDE (el `cwd` del hook) y la de cada `cd`, `pushd` o `popd` anterior del mismo comando, y contra la de `-C`, `--chdir`, `--work-tree` o `--directory` en su segmento: `cd coyote && cp x approvals/` y `git -C coyote rm -r ledger` tocan lo protegido;
-  - en el valor de una opción (`--target-directory=x`, `-tx`, `of=x`) y en una redirección pegada (`>x`, `>&x`, `>|x`);
+  - en el valor de una opción (`--target-directory=x`, `-tx`, `of=x`) y en una redirección, también pegada a la palabra anterior (`x>archivo`, `>&x`, `>|x`, `3>>x`);
   - con los comodines que el shell expandiría en ese momento (`coyote/led*`) y a través de un enlace, ya exista o lo cree el mismo comando con `ln -s`.
 
   Una carpeta que llega al correr (`cd $DIR`, `cd ~`, `cd -`, `CDPATH`, `pushd +1`) deja de resolverse, y lo que sigue pide aprobación como siempre. El subcomando de un programa (`git config`) no se lee como ruta.
-- **Ledger.** Escribir en `coyote/ledger/` por el shell se bloquea siempre: una redirección hacia él, un programa que escribe o borra lo que nombra (`rm`, `mv`, `tee`, `truncate`, `dd of=`…), `sed`, `perl` o `awk` en el lugar, una copia que lo tiene de destino o git que reescribe sus archivos (`checkout`, `restore`, `rm`…). Leerlo o prepararlo para un commit (`git add`) pide la aprobación normal.
+- **Ledger.** Un comando con efectos que nombra `coyote/ledger/` se bloquea siempre, salvo leerlo con un programa que solo lee (`cat`, `grep`, `less`…), verlo o prepararlo con git (`add`, `diff`, `log`, `show`, `commit`…) o copiarlo hacia otro lugar; esos piden la aprobación normal. Una redirección hacia él, una opción que lo apunta (`--output=`) o un programa que ejecuta lo que recibe (`xargs`, `sh -c`, `find -exec`, `python`) se bloquean siempre. Para leerlo, `coyote log`, `cat` y `grep` pasan libres.
+- **Carpetas que contienen lo protegido.** Mover, borrar o reescribir `coyote/`, `.claude/`, `.git/` o `.coyote/` (`mv coyote c`, `rm -rf .claude`, `tar -x -C coyote`, `find coyote … -exec`, una copia que las tiene de destino) se bloquea siempre. Con `xargs` o `find -exec`, un pedazo de ruta protegida que se completa al correr (`{}/approvals/`) basta.
 - **`--`.** En los comandos de coyote, una bandera que niega (`--write`, `--update-baseline`, `--record`, `--scripts`, `--canary`) cuenta también después de `--`; una que libera (`--check`, `--stdout`) deja de contar si hay un `--`. Desde 1.0, coyote toma como argumentos todo lo que sigue a `--`, y una bandera del comando después de `--` es un error de uso.
 
 ### Comandos de solo lectura

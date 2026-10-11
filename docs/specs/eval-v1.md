@@ -36,8 +36,8 @@ Van en puntos porcentuales, promediadas sobre las preguntas. Se miden sobre el �
 
 ## Línea base
 
-- `--update-baseline` escribe `evals/baseline.json` con las tres métricas, la medida de cada pregunta, el golden, el presupuesto y la fecha. Ese cambio se revisa en el PR: `gate pr` marca R2 el golden y la línea base.
-- Sin `--update-baseline`, `coyote eval` compara sobre las preguntas de la línea base y sale con 1 si una métrica baja más de 2 puntos o si falta en el golden una de ellas. Una pregunta nueva no cuenta hasta que se fija de nuevo la línea base, así que agregar preguntas fáciles no tapa una regresión.
+- `--update-baseline` escribe `evals/baseline.json` con las tres métricas, la medida y la huella de cada pregunta (su texto, ámbito, fuentes y `k`), el golden, el presupuesto y la fecha. Ese cambio se revisa en el PR: `gate pr` marca R2 el golden y la línea base.
+- Sin `--update-baseline`, `coyote eval` compara sobre las preguntas de la línea base y sale con 1 si una métrica baja más de 2 puntos, si falta en el golden una de ellas o si una cambió de contenido con el mismo `id`. Una pregunta nueva no cuenta hasta que se fija de nuevo la línea base, así que agregar preguntas fáciles no tapa una regresión.
 - Sin línea base, mide y sale con 1: no hay contra qué comparar.
 - Medir con otro `--budget` que el de la línea base es un error de uso.
 - En coyote, `make check` y la CI corren `coyote eval`.
