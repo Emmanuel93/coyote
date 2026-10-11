@@ -117,7 +117,11 @@ func printFindings(a *app, res *standards.Result) {
 }
 
 func standardsShow(a *app, onlyDiff bool, args []string) error {
-	fs := a.flags("standards show", "")
+	name := "standards show"
+	if onlyDiff {
+		name = "standards diff"
+	}
+	fs := a.flags(name, "")
 	if _, err := parseArgs(fs, args); err != nil {
 		return err
 	}
@@ -174,7 +178,7 @@ func standardsShow(a *app, onlyDiff bool, args []string) error {
 }
 
 func standardsExplain(a *app, args []string) error {
-	if len(args) == 0 {
+	if len(args) == 0 || args[0] == "-h" || args[0] == "--help" {
 		return fail(2, "uso: coyote standards explain <id>")
 	}
 	root, _, err := a.project()

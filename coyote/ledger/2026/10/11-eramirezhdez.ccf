@@ -2,3 +2,4 @@
 2026-10-11T00:59Z|@eramirezhdez/coyote-architect|W-0008|coyote|feat|compat|requires en project.yaml y hub.yaml, estándar 1.0 y promesa de compatibilidad de…|-|-|-|ok
 2026-10-11T01:05Z|@eramirezhdez/coyote-devsecops|W-0008|coyote|note|release|how: make dist es reproducible y escribe SBOM CycloneDX y procedencia SLSA…|doc:CONTEXT.coyote.md|-|-|ok
 2026-10-11T01:05Z|@eramirezhdez/coyote-devsecops|W-0008|coyote|feat|release|make dist reproducible con SBOM CycloneDX 1.7 y procedencia SLSA Build L1…|-|-|-|ok
+2026-10-11T01:18Z|@eramirezhdez/coyote-analyst|W-0008|coyote|doc|docs|documentación Diátaxis: tutorial probado, guías, referencia generada, explicación y CHANGELOG|-|-|-|ok

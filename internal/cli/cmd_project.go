@@ -30,7 +30,7 @@ func cmdVersion(a *app, args []string) error {
 }
 
 func cmdInit(a *app, args []string) error {
-	fs := a.flags("init", "[nombre] [--type T] [--purpose TEXTO] [--hub URL]")
+	fs := a.flags("init", "[nombre] [--type T] [--purpose TEXTO] [--hub RUTA]")
 	typ := fs.String("type", "other", "tipo: "+strings.Join(ccfdoc.ProjectTypes, ", "))
 	purpose := fs.String("purpose", "", "qué hace el repo, en una línea")
 	hub := fs.String("hub", "", "ruta del clon del hub de la organización (ADR-0018)")

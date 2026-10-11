@@ -1,0 +1,44 @@
+# Auditoría
+
+`coyote audit` arma el reporte de un mes con lo que coyote ya registra: el ledger, las decisiones de `coyote/approvals/` y la historia de git. No usa red ni modelos (ADR-0024). Es evidencia para una auditoría, no una certificación.
+
+## 1. Generarlo
+
+```sh
+coyote audit                          # el mes actual, en UTC
+coyote audit --month 2026-09          # otro mes
+coyote audit --month 2026-09 --write  # lo deja en coyote/audit/2026-09.md
+```
+
+Revisa el archivo y haz commit:
+
+```sh
+git add coyote/audit/2026-09.md
+coyote commit -m "docs(audit): reporte de septiembre de 2026"
+```
+
+`audit` sale con 1 si alguna verificación falla, así que sirve en la CI, y `--json` da el mismo reporte para otra herramienta. Para un agente, `audit` es lectura libre y `audit --write` pide aprobación.
+
+## 2. Qué trae
+
+- **Resumen:** eventos, personas, agentes y el costo contra el tope del mes.
+- **Eventos:** por tipo y por actor.
+- **Aprobaciones y gate:** quién aprobó qué, las concesiones, lo que bloqueó el gate, los planes `autonomous` y cada gate de release.
+- **Costo:** por persona, agente, modelo y workstream.
+- **Integridad:** si el registro es confiable (abajo).
+- **Controles:** qué control de ISO/IEC 42001 y del NIST AI RMF apoya cada parte.
+- **Límites:** lo que el reporte no prueba. La identidad es la que declara cada máquina, lo que un agente hizo por fuera de coyote no está y el costo es una estimación.
+
+## 3. Qué hacer con una falla o un aviso
+
+| Verificación | Qué hacer |
+| --- | --- |
+| El ledger solo agrega líneas | Un commit cambió o borró líneas: `git log -p -- coyote/ledger` dice cuál y quién. El original sigue en la historia de git. No lo restaures editando, que sería otra reescritura: agrega un evento que explique qué pasó, y la falla queda como evidencia del mes |
+| Actor, archivo y autor del commit | Una persona escribió en el archivo de otra, o un mismo autor de git registra a nombre de varias. Revisa la identidad de git de esa máquina |
+| Aprobaciones registradas por un agente | Un agente registró un `apr` o un `rej` sin la respuesta de la persona en `coyote/approvals/`. Confirma la decisión con la persona y deja su registro. Con el registro, la falla baja a aviso |
+| Gates de release con su evento en el ledger | Una decisión de `coyote/approvals/` no tiene su evento. Regístralo tarde, y dilo: `coyote record apr "G2 aprobado: v0.2.0; registro tardío" --refs apr:P-0002` |
+| Eventos con fecha futura | Una máquina tiene el reloj adelantado. Corrígelo: un evento en el futuro afloja los topes y las ventanas |
+| Líneas inválidas del ledger | Alguien editó el ledger a mano. El reporte dice el archivo y la línea |
+| Commits sin atribución a IA (R15) | Un commit del mes la lleva. Si no se ha publicado, corrige el mensaje; si ya se publicó, déjalo anotado. `coyote hooks install` evita que se repita |
+
+El detalle de cada verificación está en [audit-v1](../specs/audit-v1.md).
