@@ -37,18 +37,22 @@ var DefaultRules = []Rule{
 	{R3, []string{"**/auth/**", "**/security/**", "**/crypto/**"}, "autenticación o seguridad"},
 	{R3, []string{"**/*.tf", "**/*.tf.json", "**/*.tfvars", "**/*.tfvars.json", "**/terragrunt.hcl", "**/.terraform.lock.hcl",
 		"**/terraform/**", "**/helm/**", "**/k8s/**", "**/kubernetes/**", "**/Dockerfile", "**/docker-compose*.{yml,yaml}"}, "infraestructura"},
+	// También en un proyecto coyote de una subcarpeta (un monorepo): cada
+	// proyecto tiene su gate, su estándar y sus aprobaciones.
 	{R3, []string{".claude/**", ".cursor/**", ".codex/**", ".gemini/**", ".github/hooks/**", ".windsurf/**", ".devin/**",
-		"coyote/project.yaml", "coyote/infra.yaml", "coyote/hub.yaml", "coyote/standards/**", "coyote/approvals/**"}, "el gate o el estándar"},
+		"coyote/project.yaml", "coyote/infra.yaml", "coyote/hub.yaml", "coyote/standards/**", "coyote/approvals/**",
+		"**/.claude/**", "**/.cursor/**", "**/.codex/**", "**/.gemini/**", "**/.windsurf/**", "**/.devin/**",
+		"**/coyote/project.yaml", "**/coyote/infra.yaml", "**/coyote/hub.yaml", "**/coyote/standards/**", "**/coyote/approvals/**"}, "el gate o el estándar"},
 	{R2, []string{"**/openapi*.{yaml,yml,json}", "**/swagger*.{yaml,yml,json}", "**/asyncapi*.{yaml,yml}", "**/*.proto", "**/*.avsc", "**/*.graphql"}, "un contrato de API"},
 	{R2, []string{"go.mod", "**/pom.xml", "**/build.gradle", "**/build.gradle.kts", "**/package.json", "**/pubspec.yaml", "**/requirements*.txt", "**/pyproject.toml", "**/Cargo.toml"}, "las dependencias"},
 	{R2, []string{"**/application*.{yml,yaml,properties}", "**/bootstrap*.{yml,yaml,properties}"}, "la configuración del servicio"},
 	{R2, []string{"coyote/slo/**", "**/coyote/slo/**"}, "los SLOs y sus alertas"},
 	// Bajar la línea base o quitar preguntas del golden escondería que el
 	// contexto empeoró (ADR-0025).
-	{R2, []string{"evals/golden*.jsonl", "evals/baseline*.json", "**/evals/golden*.jsonl", "**/evals/baseline*.json"}, "el golden y la línea base que miden el contexto"},
+	{R2, []string{"evals/golden*.jsonl", "evals/baseline*.json", "**/evals/golden*.jsonl", "**/evals/baseline.json"}, "el golden y la línea base que miden el contexto"},
 	// Lo que los agentes leen como instrucción (ADR-0023); gate pr suma los
 	// mismos nombres con otras mayúsculas, que en macOS son el mismo archivo.
-	{R2, []string{"AGENTS.md", "AGENT.md", "CLAUDE.md", "CLAUDE.local.md", "GEMINI.md", "CONTEXT.coyote.md", "README.coyote.md",
+	{R2, []string{"AGENTS.md", "/AGENT.md", "CLAUDE.md", "CLAUDE.local.md", "GEMINI.md", "CONTEXT.coyote.md", "README.coyote.md",
 		".cursorrules", ".windsurfrules", ".clinerules", ".clinerules/**", ".github/copilot-instructions.md",
 		".github/instructions/**", "**/.github/instructions/**", ".github/prompts/**", "**/.github/prompts/**",
 		".github/chatmodes/**", "**/.github/chatmodes/**", ".github/agents/**", "**/.github/agents/**",

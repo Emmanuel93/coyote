@@ -33,17 +33,19 @@ func Unsafe(r rune) bool {
 
 // Invisible dice si r, después de prev, es una marca que no se ve y puede
 // esconder texto sin ser de formato: el que une grafemas (U+034F), los
-// rellenos del hangul, los selectores de variación del mongol, las vocales
-// mudas del jemer y un selector de variación que no sigue a un símbolo, un
-// ideograma o la base de una tecla (después de un emoji, U+FE0F es su forma
-// de color).
+// rellenos del hangul y del kitán, el espacio en blanco del braille, la nota
+// nula, los selectores de variación del mongol, las vocales mudas del jemer y
+// un selector de variación que no sigue a un símbolo, un signo, un
+// ideograma o la base de una tecla (después de un emoji como ⚠, ‼ o ℹ,
+// U+FE0F es su forma de color).
 func Invisible(prev, r rune) bool {
 	switch {
-	case r == 0x034f, r == 0x115f, r == 0x1160, r == 0x3164, r == 0xffa0,
+	case r == 0x034f, r == 0x115f, r == 0x1160, r == 0x3164, r == 0xffa0, r == 0x2800, r == 0x16fe4, r == 0x1d159,
 		r >= 0x180b && r <= 0x180d, r == 0x180f, r == 0x17b4, r == 0x17b5:
 		return true
 	case Selector(r):
-		return !unicode.IsSymbol(prev) && !unicode.Is(unicode.Han, prev) && !unicode.IsDigit(prev) && prev != '#' && prev != '*'
+		return !unicode.IsSymbol(prev) && !unicode.IsPunct(prev) && !unicode.Is(unicode.Han, prev) && !unicode.IsDigit(prev) &&
+			prev != '#' && prev != '*' && prev != 0x2139
 	}
 	return false
 }

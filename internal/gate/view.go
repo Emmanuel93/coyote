@@ -120,6 +120,9 @@ func lenientSegs(cmd string) []lseg {
 			}
 			b.WriteString(string(r[i : j+1]))
 			in, i = true, j
+		case (c == '&' || c == '|') && in && i > 0 && r[i-1] == '>':
+			// >& y >| son redirecciones, no separadores: el destino sigue.
+			b.WriteRune(c)
 		case strings.ContainsRune(";&|\n(){}", c):
 			push()
 		default:

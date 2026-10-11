@@ -171,6 +171,14 @@ func parseArgs(fs *flag.FlagSet, args []string) ([]string, error) {
 		}
 		rest := fs.Args()
 		if n := len(args) - len(rest); n > 0 && args[n-1] == "--" {
+			// Una bandera del comando después de "--" ya no cuenta: se avisa en
+			// vez de tomarla como texto en silencio.
+			for _, r := range rest {
+				name, _, _ := strings.Cut(strings.TrimLeft(r, "-"), "=")
+				if strings.HasPrefix(r, "-") && name != "" && fs.Lookup(name) != nil {
+					return nil, fail(2, "coyote %s: %s va antes de --; después de -- todo es texto", fs.Name(), r)
+				}
+			}
 			return append(pos, rest...), nil
 		}
 		if len(rest) == 0 {

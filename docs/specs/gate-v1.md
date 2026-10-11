@@ -39,8 +39,15 @@ Los bloqueos revisan el comando como lo correría el shell, segmento por segment
 - **Búsquedas.** `grep -r` y `diff -r` leen todo, también `.git`: sobre una carpeta que contiene una carpeta de git piden aprobación, salvo con `--exclude-dir=.git`. `rg` y `git grep` no entran a `.git` y siguen libres.
 - **Lectura.** Un comando de solo lectura puede mirar la configuración del gate (los hooks, `coyote/project.yaml`). No puede leer credenciales ni la configuración de un IDE que puede llevar tokens en el `env` de sus servidores MCP (`.claude/settings*.json`, `.codex/config.toml`, `.gemini/settings.json`, `~/.copilot/config.json`, `.devin/config*.json`, `.junie/config.json`, `managed-settings`, `~/.claude.json`, los archivos del shell); de esa configuración, `ls`, `stat` o `find` sí ven el nombre.
 - **Claves.** Las que apagan el gate (`disableAllHooks`, `core.hooksPath`, `chat.useHooks`) bloquean aunque vayan en un dato: `echo '{"disableAllHooks": true}' > x.json` se bloquea.
-- **Rutas.** Una ruta se reconoce también limpia (`coyote//approvals`, `.claude/./settings.json`, `coyote/x/../ledger`) y, después de un `cd` del mismo comando, resuelta contra esa carpeta: `cd coyote && cp x approvals/` escribe en `coyote/approvals/`. Un `cd` que llega al correr (`cd $DIR`, `cd ~`, `cd -`) deja de resolverse, y lo que sigue pide aprobación como siempre.
-- **`--`.** En los comandos de coyote, una bandera que niega (`--write`, `--update-baseline`, `--record`, `--scripts`, `--canary`) cuenta también después de `--`; una que libera (`--check`, `--stdout`) deja de contar si hay un `--`. Desde 1.0, coyote toma como argumentos todo lo que sigue a `--`.
+- **Rutas.** Una ruta se reconoce también:
+  - limpia: `coyote//approvals`, `.claude/./settings.json`, `coyote/x/../ledger`;
+  - contra la carpeta del IDE (el `cwd` del hook) y la de cada `cd`, `pushd` o `popd` anterior del mismo comando, y contra la de `-C`, `--chdir`, `--work-tree` o `--directory` en su segmento: `cd coyote && cp x approvals/` y `git -C coyote rm -r ledger` tocan lo protegido;
+  - en el valor de una opción (`--target-directory=x`, `-tx`, `of=x`) y en una redirección pegada (`>x`, `>&x`, `>|x`);
+  - con los comodines que el shell expandiría en ese momento (`coyote/led*`) y a través de un enlace, ya exista o lo cree el mismo comando con `ln -s`.
+
+  Una carpeta que llega al correr (`cd $DIR`, `cd ~`, `cd -`, `CDPATH`, `pushd +1`) deja de resolverse, y lo que sigue pide aprobación como siempre. El subcomando de un programa (`git config`) no se lee como ruta.
+- **Ledger.** Escribir en `coyote/ledger/` por el shell se bloquea siempre: una redirección hacia él, un programa que escribe o borra lo que nombra (`rm`, `mv`, `tee`, `truncate`, `dd of=`…), `sed`, `perl` o `awk` en el lugar, una copia que lo tiene de destino o git que reescribe sus archivos (`checkout`, `restore`, `rm`…). Leerlo o prepararlo para un commit (`git add`) pide la aprobación normal.
+- **`--`.** En los comandos de coyote, una bandera que niega (`--write`, `--update-baseline`, `--record`, `--scripts`, `--canary`) cuenta también después de `--`; una que libera (`--check`, `--stdout`) deja de contar si hay un `--`. Desde 1.0, coyote toma como argumentos todo lo que sigue a `--`, y una bandera del comando después de `--` es un error de uso.
 
 ### Comandos de solo lectura
 

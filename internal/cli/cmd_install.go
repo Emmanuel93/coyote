@@ -67,7 +67,10 @@ func (a *app) installPlan(root string, cfg *project.Config, ides []string) ([]in
 	}
 	md, err := agentsmd.Generate(root, st, cfg.Autonomy)
 	if err != nil {
-		return nil, err
+		// Una nota marcada no deja al proyecto sin gate: se instala igual y
+		// AGENTS.md queda como está hasta que la persona la reescriba.
+		fmt.Fprintf(a.stderr, "aviso: %v; el gate se instala igual y AGENTS.md no se toca\n", err)
+		md = ""
 	}
 	owns := true
 	if cur, err := fsx.ReadCapped(filepath.Join(root, "AGENTS.md"), 4<<20); err == nil {

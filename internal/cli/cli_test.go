@@ -828,14 +828,24 @@ func TestParseArgsDashDash(t *testing.T) {
 	a := &app{stderr: io.Discard}
 	fs := a.flags("x", "")
 	write := fs.Bool("write", false, "")
-	pos, err := parseArgs(fs, []string{"--", "x", "--write"})
-	if err != nil || *write || strings.Join(pos, " ") != "x --write" {
-		t.Fatalf("después de --: pos=%q write=%v err=%v", pos, *write, err)
+	if _, err := parseArgs(fs, []string{"--", "x", "--write"}); err == nil || *write {
+		t.Fatalf("después de --: write=%v err=%v", *write, err)
 	}
 	fs = a.flags("x", "")
 	write = fs.Bool("write", false, "")
-	pos, err = parseArgs(fs, []string{"a", "--write", "--", "-b"})
+	pos, err := parseArgs(fs, []string{"a", "--write", "--", "-b"})
 	if err != nil || !*write || strings.Join(pos, " ") != "a -b" {
 		t.Fatalf("antes de --: pos=%q write=%v err=%v", pos, *write, err)
+	}
+	// Una bandera del comando después de -- es un error de uso, no texto.
+	fs = a.flags("x", "")
+	fs.Bool("write", false, "")
+	if _, err := parseArgs(fs, []string{"--", "-503 en pagos", "--write"}); err == nil {
+		t.Fatal("una bandera después de -- debe avisar")
+	}
+	fs = a.flags("x", "")
+	fs.Bool("write", false, "")
+	if pos, err := parseArgs(fs, []string{"--", "-503 en pagos"}); err != nil || strings.Join(pos, " ") != "-503 en pagos" {
+		t.Fatalf("un texto que empieza con guion: %q %v", pos, err)
 	}
 }

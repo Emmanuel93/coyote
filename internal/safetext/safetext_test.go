@@ -63,3 +63,16 @@ func TestEscapaMarcasInvisibles(t *testing.T) {
 		}
 	}
 }
+
+// TestEmojisConSelector: el selector de un emoji cuya base es un signo o una
+// letra (ℹ, ‼, 〽) se queda; el blanco del braille sale con su código.
+func TestEmojisConSelector(t *testing.T) {
+	for _, ok := range []string{"\u2139\ufe0f info", "\u203c\ufe0f", "\u2049\ufe0f", "\u3030\ufe0f", "\u303d\ufe0f"} {
+		if got := String(ok); got != ok {
+			t.Errorf("String(%+q) = %+q", ok, got)
+		}
+	}
+	if got := String("a\u2800b"); got != `a\u2800b` {
+		t.Errorf("el blanco del braille: %+q", got)
+	}
+}

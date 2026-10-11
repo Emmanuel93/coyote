@@ -130,17 +130,33 @@ func Hidden(text string) []Finding {
 	var out []Finding
 	seen := map[string]bool{}
 	line := 1
-	prev := rune(0)
-	for _, r := range text {
+	rs := []rune(text)
+	for i, r := range rs {
 		if r == '\n' {
-			line, prev = line+1, 0
+			line++
 			continue
 		}
+		prev, next := rune(0), rune(0)
+		if i > 0 {
+			prev = rs[i-1]
+		}
+		if i+1 < len(rs) {
+			next = rs[i+1]
+		}
 		kind := hidden(r)
-		if kind == "" && safetext.Invisible(prev, r) {
+		switch {
+		case kind != "":
+		case safetext.Invisible(prev, r):
+			kind = labelZero
+		case r == 0x200c || r == 0x200d:
+			// Unen emojis y letras en persa o en lenguas índicas; entre dos
+			// letras latinas solo esconden algo.
+			if isLatin(prev) && isLatin(next) {
+				kind = labelZero
+			}
+		case unicode.Is(unicode.Cf, r):
 			kind = labelZero
 		}
-		prev = r
 		if kind != "" {
 			k := kind + "\x00" + strconv.Itoa(line)
 			if !seen[k] {
@@ -182,6 +198,9 @@ func hidden(r rune) string {
 
 const labelZero = "caracteres de ancho cero"
 
+// isLatin dice si r es una letra del alfabeto latino básico.
+func isLatin(r rune) bool { return r < 0x250 && unicode.IsLetter(r) }
+
 // normalize deja el texto en minúsculas, sin acentos ni caracteres de
 // formato, con los espacios juntos. lines da, por cada byte del resultado, la
 // línea del texto original de donde salió.
@@ -204,6 +223,9 @@ func normalize(s string) (string, []int) {
 			}
 			line++
 			continue
+		}
+		if r == 0x2800 {
+			r = ' ' // el blanco del braille separa palabras como un espacio
 		}
 		if unicode.Is(unicode.Cf, r) || hidden(r) != "" || safetext.Selector(r) || safetext.Invisible(0, r) {
 			continue // una orden partida con caracteres invisibles se lee junta
@@ -249,10 +271,14 @@ func fold(r rune) rune {
 // instrucciones, en minúsculas: en un disco que no distingue mayúsculas,
 // agents.md es AGENTS.md.
 var instructionNames = map[string]bool{
-	"agents.md": true, "agent.md": true, "claude.md": true, "claude.local.md": true, "gemini.md": true,
+	"agents.md": true, "claude.md": true, "claude.local.md": true, "gemini.md": true,
 	"context.coyote.md": true, "readme.coyote.md": true, ".cursorrules": true, ".windsurfrules": true,
 	".clinerules": true, "copilot-instructions.md": true,
 }
+
+// rootNames son instrucciones solo en la raíz del repo: AGENT.md en otra
+// carpeta suele ser un documento sobre un agente.
+var rootNames = map[string]bool{"agent.md": true}
 
 // instructionDirs son carpetas cuyos archivos los agentes leen como
 // instrucciones: las de Copilot (instrucciones, prompts, modos y agentes),
@@ -264,7 +290,7 @@ var instructionDirs = []string{".github/instructions/", ".github/prompts/", ".gi
 // agentes, sin distinguir mayúsculas.
 func InstructionFile(p string) bool {
 	lp := strings.ToLower(strings.TrimPrefix(path.Clean("/"+p), "/"))
-	if instructionNames[path.Base(lp)] {
+	if instructionNames[path.Base(lp)] || rootNames[lp] {
 		return true
 	}
 	for _, d := range instructionDirs {

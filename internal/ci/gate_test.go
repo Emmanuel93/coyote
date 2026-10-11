@@ -50,6 +50,22 @@ func TestRiesgoPorRutas(t *testing.T) {
 	if Max(R1, R3) != R3 || Max(R2, R1) != R2 || Max("", R1) != R1 {
 		t.Error("Max")
 	}
+	// Segunda revisión adversarial de v1.0: el gate de un proyecto en una
+	// subcarpeta es R3; un AGENT.md fuera de la raíz o la línea base de otro
+	// modelo no son instrucciones ni la medida de coyote.
+	for f, want := range map[string]string{
+		"services/pagos/.claude/settings.json": R3, "services/pagos/coyote/project.yaml": R3, "services/pagos/coyote/approvals/P-0099.json": R3,
+		"services/pagos/coyote/standards/rules.yaml": R3, "AGENT.md": R2, "docs/reference/AGENT.md": "", "evals/baseline.json": R2,
+		"ml/evals/baseline_resnet.json": "", "svc/evals/baseline.json": R2, "svc/evals/golden.v1.jsonl": R2,
+	} {
+		got := ""
+		if rs := PathRisks([]string{f}, DefaultRules); len(rs) > 0 {
+			got = rs[0].Risk
+		}
+		if got != want {
+			t.Errorf("%s: %q, se esperaba %q", f, got, want)
+		}
+	}
 }
 
 func TestCodeowners(t *testing.T) {

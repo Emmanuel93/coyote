@@ -9,3 +9,4 @@
 2026-10-11T02:23Z|@eramirezhdez/coyote-security|W-0008|coyote|fix|compat|secretos y gate pr fallan si project.yaml no se lee, versión en…|-|-|-|ok
 2026-10-11T02:25Z|@eramirezhdez/coyote-devsecops|W-0008|coyote|fix|release|make dist desde git con árbol limpio, carpeta vacía y entorno de…|-|-|-|ok
 2026-10-11T02:30Z|@eramirezhdez/coyote-scribe|W-0008|coyote|doc|security|guías, explicación, modelo de amenazas y CHANGELOG con lo que corrigió la…|-|-|-|ok
+2026-10-11T03:06Z|@eramirezhdez/coyote-security|W-0008|coyote|fix|gate|rutas desde la carpeta del IDE, -C y --chdir, comodines y enlaces;…|-|-|-|ok

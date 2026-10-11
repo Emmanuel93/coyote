@@ -396,3 +396,64 @@ func TestDashDashYRutasEquivalentes(t *testing.T) {
 		t.Errorf("un cd que llega al correr no puede liberar una escritura")
 	}
 }
+
+// TestRutasDesdeLaCarpetaDelIDE: segunda revisión adversarial de v1.0. La
+// carpeta del IDE (cwd), -C y --chdir, los comodines y los enlaces nombran la
+// misma ruta protegida; leer o preparar el ledger para un commit no es
+// escribirlo.
+func TestRutasDesdeLaCarpetaDelIDE(t *testing.T) {
+	ps, root, _ := testPaths(t)
+	for _, d := range []string{"coyote/ledger/2026/10", "coyote/approvals", ".claude", ".git"} {
+		if err := os.MkdirAll(filepath.Join(root, filepath.FromSlash(d)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink(filepath.Join(root, "coyote"), filepath.Join(root, "c2")); err != nil {
+		t.Fatal(err)
+	}
+	inDir := func(sub string) string { return filepath.Join(root, filepath.FromSlash(sub)) }
+	blocked := []struct{ cwd, cmd string }{
+		{inDir("coyote"), "rm -rf ledger"},
+		{inDir("coyote"), "cp /tmp/x.json approvals/P-0099.json"},
+		{inDir("coyote"), "sed -i 's/manual/autonomous/' project.yaml"},
+		{inDir(".claude"), "sed -i 's/coyote gate check/true/' settings.json"},
+		{root, "cd coyote && echo '{}' >&approvals/P-0099.json"},
+		{root, "cd coyote && cat /tmp/x.json >| approvals/P-0099.json"},
+		{root, "cd coyote && >ledger/2026/10/11-ana.ccf"},
+		{root, "cd .claude && >settings.json"},
+		{root, "cd coyote && cp --target-directory=approvals /tmp/x.json"},
+		{root, "cd coyote && cp -tapprovals /tmp/x.json"},
+		{root, "cd coyote && tar -xf /tmp/e.tar --directory=approvals"},
+		{root, "git -C coyote rm -r ledger"},
+		{root, "git --git-dir=.git --work-tree=coyote rm -r ledger"},
+		{root, "env -C coyote rm -rf ledger"},
+		{root, "env --chdir=coyote rm -rf ledger"},
+		{root, "rm -rf coyote/led*"},
+		{root, "cp /tmp/x.json coyote/appro*/"},
+		{root, "ln -s coyote c && cp /tmp/x.json c/approvals/"},
+		{root, "cp /tmp/x.json c2/approvals/"},
+		{root, "dd if=/dev/zero of=coyote/ledger/2026/10/11-ana.ccf"},
+	}
+	for _, c := range blocked {
+		if d := ps.Evaluate(claude(t, "Bash", map[string]any{"command": c.cmd}, c.cwd)); d.Verdict != Block {
+			t.Errorf("%q desde %s debería bloquearse siempre: %s (%s)", c.cmd, c.cwd, d.Verdict, d.Reason)
+		}
+	}
+	// Una carpeta que llega al correr no se resuelve: pide aprobación.
+	for _, c := range []string{"CDPATH=coyote cd approvals && cp /tmp/x.json P-0099.json", "pushd coyote && pushd /tmp && pushd +1 && cp /tmp/x.json approvals/P-0099.json"} {
+		if d := ps.Evaluate(claude(t, "Bash", map[string]any{"command": c}, root)); d.Verdict == Allow {
+			t.Errorf("%q no debería pasar sin aprobación", c)
+		}
+	}
+	// Leer, preparar para un commit o copiar desde el ledger no es escribirlo.
+	for _, c := range []string{"git add coyote/ledger/2026/10/11-ana.ccf src/main.go", "awk -F'|' '{print $3}' coyote/ledger/2026/10/11-ana.ccf",
+		"python3 scripts/costos.py coyote/ledger", "git diff main -- coyote/ledger > /tmp/ledger.diff", "cp coyote/ledger/2026/10/11-ana.ccf /tmp/"} {
+		if d := ps.Evaluate(claude(t, "Bash", map[string]any{"command": c}, root)); d.Verdict == Block {
+			t.Errorf("%q no escribe el ledger: %s", c, d.Reason)
+		}
+	}
+	// El subcomando de git no es una ruta: git config después de cd .git no lee .git/config.
+	if d := ps.Evaluate(claude(t, "Bash", map[string]any{"command": "cd .git && git config --get user.name"}, root)); d.Verdict == Block {
+		t.Errorf("git config --get no lee .git/config: %s", d.Reason)
+	}
+}
