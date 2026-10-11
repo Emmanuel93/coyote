@@ -57,6 +57,7 @@ func TestRiesgoPorRutas(t *testing.T) {
 		"services/pagos/.claude/settings.json": R3, "services/pagos/coyote/project.yaml": R3, "services/pagos/coyote/approvals/P-0099.json": R3,
 		"services/pagos/coyote/standards/rules.yaml": R3, "AGENT.md": R2, "docs/reference/AGENT.md": "", "evals/baseline.json": R2,
 		"ml/evals/baseline_resnet.json": "", "svc/evals/baseline.json": R2, "svc/evals/golden.v1.jsonl": R2,
+		".Claude/Settings.json": R3, "svc/Coyote/Approvals/P-1.json": R3, "codeowners": R3,
 	} {
 		got := ""
 		if rs := PathRisks([]string{f}, DefaultRules); len(rs) > 0 {

@@ -110,8 +110,11 @@ func PathRisks(files []string, rules []Rule) []FileRisk {
 	var out []FileRisk
 	for _, f := range files {
 		best := FileRisk{Path: f, Risk: R1}
+		// Sin distinguir mayúsculas: en macOS y Windows .Claude/settings.json
+		// es .claude/settings.json.
+		lf := strings.ToLower(f)
 		for _, r := range rules {
-			if Rank(r.Risk) > Rank(best.Risk) && glob.Any(r.Paths, f) {
+			if Rank(r.Risk) > Rank(best.Risk) && (glob.Any(r.Paths, f) || glob.Any(lower(r.Paths), lf)) {
 				best.Risk, best.Why = r.Risk, r.Why
 			}
 		}
@@ -125,5 +128,14 @@ func PathRisks(files []string, rules []Rule) []FileRisk {
 		}
 		return out[i].Path < out[j].Path
 	})
+	return out
+}
+
+// lower pasa los patrones a minúsculas.
+func lower(ps []string) []string {
+	out := make([]string, len(ps))
+	for i, p := range ps {
+		out[i] = strings.ToLower(p)
+	}
 	return out
 }
