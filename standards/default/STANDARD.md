@@ -1,4 +1,4 @@
-# Estándar Coyote — default de la herramienta v0.1.0
+# Estándar Coyote 1.0 — default de la herramienta
 
 Las palabras MUST, SHOULD y MAY se interpretan según RFC 2119. Este es el estándar que trae la herramienta; cada organización lo extiende en su hub y cada proyecto en `coyote/standards/rules.yaml`. La forma ejecutable está en `rules.yaml`: `coyote standards lint` la valida y `coyote standards explain <id>` explica cada regla.
 
@@ -42,3 +42,12 @@ El default se derivó de repos reales construidos desde el dominio: conserva lo 
 ## Cómo se ajusta
 
 Una capa superior puede agregar reglas, endurecerlas, relajarlas o desactivarlas. Relajar o desactivar exige `reason` y conviene un ADR; `until` hace que el ajuste caduque y la regla vuelva sola a su nivel original. Un proyecto también puede dispensar reglas concretas desde el frontmatter de `README.coyote.md` (`standards: { waive: [{id, reason, adr}] }`); dispensar una regla MUST exige motivo. Redefinir una regla con el mismo `id` no puede bajar su nivel y queda a la vista en `coyote standards diff`.
+
+## Estabilidad en 1.x
+
+Este es el estándar 1.0 (ADR-0026):
+
+- Los IDs de las reglas no cambian ni se reutilizan.
+- Una regla MUST nueva llega primero como SHOULD en un minor y sube a MUST en el siguiente, para que cada proyecto tenga un release de aviso.
+- Relajar una regla del default, o quitarla, es un cambio mayor.
+- Las correcciones del gate pueden negar más en cualquier versión: son de seguridad (docs/reference/compatibilidad.md).

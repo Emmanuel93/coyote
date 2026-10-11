@@ -8,14 +8,19 @@ import (
 	"strings"
 	"unicode"
 
+	"go.yaml.in/yaml/v3"
+
+	"github.com/Emmanuel93/coyote/internal/version"
 	"github.com/Emmanuel93/coyote/internal/yamlx"
 )
 
 // Conf es coyote/hub.yaml v1: lo que es de la organización y no de un
 // proyecto.
 type Conf struct {
-	Version int    `yaml:"version"`
-	Org     string `yaml:"org"`
+	Version int `yaml:"version"`
+	// Requires es la versión mínima de coyote que entiende este hub (ADR-0026).
+	Requires string `yaml:"requires,omitempty"`
+	Org      string `yaml:"org"`
 	// Admins ven los costos de todas las personas en la web (D10).
 	Admins  []string `yaml:"admins,omitempty"`
 	Budgets struct {
@@ -54,6 +59,16 @@ const MaxBudgetUSD = 1_000_000
 // escrito dejaría a la organización sin admins sin que nadie lo notara.
 func Parse(data []byte) (*Conf, error) {
 	var c Conf
+	// La versión mínima va antes que la lectura estricta: un hub de una versión
+	// más nueva dice qué coyote pide, no "clave desconocida" (ADR-0026).
+	var req struct {
+		Requires string `yaml:"requires"`
+	}
+	if yaml.Unmarshal(data, &req) == nil {
+		if err := version.CheckRequires(req.Requires); err != nil {
+			return nil, fmt.Errorf("hub.yaml %w", err)
+		}
+	}
 	if err := yamlx.Strict(data, &c); err != nil {
 		return nil, err
 	}

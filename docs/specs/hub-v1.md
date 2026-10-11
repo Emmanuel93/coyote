@@ -16,6 +16,7 @@ Crea el proyecto con `coyote/hub.yaml`, `coyote/standards/rules.yaml`, `domains/
 
 ```yaml
 version: 1
+requires: ">=1.0"            # versión mínima de coyote que entiende el archivo (ADR-0026)
 org: acme
 admins: ["@ana"]              # ven en la web los costos de todas las personas (D10)
 budgets:
@@ -28,6 +29,7 @@ projects:                     # para la vista de admins y hub status
 - `admins`: personas como en el ledger (`@usuario`); se aceptan sin arroba y se guardan en minúsculas.
 - `projects[].path`: el clon local, relativo al hub o con `~`. Es de la máquina de cada quien: un proyecto sin clon se muestra como tal, sin fallar. `repo` (owner/nombre) es informativo.
 - Una clave desconocida es un error: un `admin:` mal escrito dejaría a la organización sin admins sin que nadie lo notara.
+- `requires`: coyote lo lee antes que el resto. Un coyote más viejo que la versión pedida se detiene y dice cuál pide, en vez de fallar con "clave desconocida" (docs/reference/compatibilidad.md).
 
 ## Declararlo en un proyecto
 

@@ -1,6 +1,7 @@
 # Proyecto Coyote. Se versiona con el código; la especificación está en la herramienta.
 version: 1
-name: {{.Name}}
+{{if .Requires}}requires: "{{.Requires}}"         # versión mínima de coyote que entiende este archivo (ADR-0026)
+{{end}}name: {{.Name}}
 type: {{.Type}}
 hub: {{printf "%q" .Hub}}        # clon del hub de la organización, o { path, ref }; vacío si no hay (ADR-0018)
 language: { docs: es, code: en }

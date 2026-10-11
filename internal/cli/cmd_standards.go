@@ -15,6 +15,7 @@ import (
 	"github.com/Emmanuel93/coyote/internal/identity"
 	"github.com/Emmanuel93/coyote/internal/project"
 	"github.com/Emmanuel93/coyote/internal/standards"
+	"github.com/Emmanuel93/coyote/internal/version"
 )
 
 func cmdStandards(a *app, args []string) error {
@@ -276,6 +277,9 @@ func cmdDoctor(a *app, args []string) error {
 		return a.printDoctor(checks)
 	}
 	add("proyecto", "ok", fmt.Sprintf("%s (%s) en %s", cfg.Name, cfg.Type, root))
+	if cfg.Requires != "" {
+		add("versión de coyote", "ok", fmt.Sprintf("el proyecto pide %s; tienes %s (ADR-0026)", cfg.Requires, version.Version))
+	}
 	if gitx.IsRepo(root) {
 		add("repo git", "ok", "rama "+gitx.Branch(root))
 		person := identity.Resolve(root)

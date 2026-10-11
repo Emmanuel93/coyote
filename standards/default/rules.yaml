@@ -1,4 +1,4 @@
-# Estándar default de Coyote v0.1.0 (RFC 2119: MUST, SHOULD, MAY).
+# Estándar default de Coyote 1.0 (RFC 2119: MUST, SHOULD, MAY). Estable en 1.x (ADR-0026).
 # Cada organización lo extiende en su hub y cada proyecto en coyote/standards/rules.yaml.
 # Las reglas sin check son de proceso: las aplican los gates y los agentes, no el lint.
 version: 1

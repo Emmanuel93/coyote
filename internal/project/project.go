@@ -28,6 +28,7 @@ import (
 	"github.com/Emmanuel93/coyote/internal/ledger"
 	"github.com/Emmanuel93/coyote/internal/secrets"
 	"github.com/Emmanuel93/coyote/internal/standards"
+	"github.com/Emmanuel93/coyote/internal/version"
 	"github.com/Emmanuel93/coyote/internal/yamlx"
 )
 
@@ -53,9 +54,12 @@ type RepoRef struct {
 
 // Config es coyote/project.yaml.
 type Config struct {
-	Version int    `yaml:"version"`
-	Name    string `yaml:"name"`
-	Type    string `yaml:"type"`
+	Version int `yaml:"version"`
+	// Requires es la versión mínima de coyote que entiende este archivo
+	// (">=1.0"); un coyote más viejo lo dice en vez de leerlo a medias (ADR-0026).
+	Requires string `yaml:"requires,omitempty"`
+	Name     string `yaml:"name"`
+	Type     string `yaml:"type"`
 	// Hub es el clon del hub de la organización y la ref que rige (ADR-0018).
 	Hub hub.Ref `yaml:"hub,omitempty"`
 	// Admins ven en la web los costos de todas las personas del proyecto,
@@ -156,6 +160,16 @@ func Parse(data []byte, name string) (*Config, error) {
 	var c Config
 	if err := yamlx.Check(data); err != nil {
 		return nil, fmt.Errorf("%s: %w", ConfigPath, err)
+	}
+	// La versión mínima va antes que el resto: un campo nuevo que este coyote
+	// no conoce se ignoraría sin aviso (ADR-0026).
+	var req struct {
+		Requires string `yaml:"requires"`
+	}
+	if err := yaml.Unmarshal(data, &req); err == nil {
+		if err := version.CheckRequires(req.Requires); err != nil {
+			return nil, fmt.Errorf("%s %w", ConfigPath, err)
+		}
 	}
 	if err := yaml.Unmarshal(data, &c); err != nil {
 		return nil, fmt.Errorf("%s: %w", ConfigPath, err)
@@ -311,7 +325,7 @@ func Init(o InitOptions) (*InitResult, error) {
 		res.GitInit = true
 	}
 	data := map[string]string{"Name": o.Name, "Type": o.Type, "Hub": strings.TrimSpace(o.Hub), "User": o.User.Slug, "Org": o.Org,
-		"Date": o.Now.Format("2006-01-02"), "Purpose": strings.ReplaceAll(o.Purpose, "|", "/")}
+		"Date": o.Now.Format("2006-01-02"), "Purpose": strings.ReplaceAll(o.Purpose, "|", "/"), "Requires": version.Requires()}
 	files := []struct {
 		tmpl, dst string
 		skip      bool
