@@ -6,3 +6,7 @@
 # Cobertura y temporales de pruebas
 *.out
 *.test
+.dist-a/
+.dist-b/
+.gocache-a/
+.gocache-b/

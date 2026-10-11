@@ -699,7 +699,7 @@ G7 autorizaría:
 | T56 | Golden y evaluación | C6.2 y C6.3 | Golden de 30 preguntas; `coyote eval` en la CI con umbral; la expansión se queda solo si mejora | Hecho: la primera medida encontró 1.7 % de cobertura del paquete; con "lo más relevante" y un salto, 93.3 %. recall@5 83.3, MRR 68.9. El juez de fidelidad pasa a v1.1 |
 | T57 | Compatibilidad 1.x | Una 1.0 es una promesa | `compatibilidad.md`, `requires` y el estándar 1.0 | Hecho: `requires` en `project.yaml` y `hub.yaml`, leído antes que el resto; `init` escribe la línea del binario; `doctor` la muestra |
 | T58 | Documentación | C6.6 | Tutorial probado, guías, referencia generada, explicación y CHANGELOG | Pendiente |
-| T59 | Cadena de suministro | C6.8 | Build reproducible; SBOM y procedencia por binario; verificación documentada | Pendiente |
+| T59 | Cadena de suministro | C6.8 | Build reproducible; SBOM y procedencia por binario; verificación documentada | Hecho: `make verify-dist` da los mismos 9 hashes en dos builds con la caché de Go vacía; SBOM CycloneDX 1.7 por binario y procedencia SLSA v1.2 Build L1 |
 | T60 | Piloto real (H8a) | C6.4 | Con tu autorización: plan `supervised`, PRs en `ws/` y `close.md`. Sin ella, pasa a v1.1 | Pendiente |
 | T61 | Verificación y G8 | Evidencia antes de la 1.0 | Pruebas, tres pasadas adversariales, retro y `docs/releases/v1.0.0.md` | Pendiente |
 

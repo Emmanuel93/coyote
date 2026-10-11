@@ -66,6 +66,7 @@ CLI en Go para contexto versionado, gates humanos, estándar por capas y costo t
 - [dec] ci: gate pr: instrucciones de agentes y órdenes en documentos son R2; ledger reescrito y Trojan Source, R3 (docs/specs/ci-v1.md)
 - [dec] audit: coyote audit arma el reporte del mes desde el ledger, las aprobaciones y git; es evidencia, no certificación (ADR-0024)
 - [dec] eval: coyote eval mide el contexto con un golden sin modelos; la CI falla si algo baja más de 2 puntos (ADR-0025)
+- [how] release: make dist es reproducible y escribe SBOM CycloneDX y procedencia SLSA L1; make verify-dist lo prueba (docs/reference/build.md)
 
 ## Reglas obligatorias (MUST)
 
