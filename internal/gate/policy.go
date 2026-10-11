@@ -466,6 +466,7 @@ var shellProtected = []struct {
 	{re: regexp.MustCompile(`(?i)chat\.(use(claude)?hooks|hookfileslocations)`), why: "los hooks de VS Code", data: true},
 	{re: regexp.MustCompile(`(?i)(^|[\s/'"=~])\.claude\.json\b`), why: "la configuración global de Claude Code", cred: true, cfg: true},
 	{re: regexp.MustCompile(`(?i)coyote/approvals`), why: "los registros de aprobación"},
+	{re: regexp.MustCompile(`(?i)coyote/ledger\b`), why: "el ledger, que solo crece por coyote"},
 	{re: regexp.MustCompile(`(?i)coyote/project\.yaml`), why: "la configuración del proyecto (autonomía)"},
 	{re: regexp.MustCompile(`(?i)coyote/infra\.yaml`), why: "el inventario de la infraestructura"},
 	{re: regexp.MustCompile(`(?i)coyote/hub\.yaml`), why: "los admins y el presupuesto de la organización"},
@@ -482,8 +483,9 @@ var shellProtected = []struct {
 // configuración del gate, no credenciales.
 func (ps Paths) protectedIn(cmd string, readOnly bool) (string, bool) {
 	check := func(segs [][]string, data bool) (string, bool) {
-		for _, seg := range segs {
-			line := segText(seg)
+		lines := pathLines(segs)
+		for i, seg := range segs {
+			line := lines[i]
 			prog, _ := mainProg(seg)
 			for _, p := range shellProtected {
 				if (readOnly && (!p.cred || (p.cfg && nameOnly[prog]))) || (data && !p.data) {
@@ -507,6 +509,82 @@ func (ps Paths) protectedIn(cmd string, readOnly bool) (string, bool) {
 		return why, true
 	}
 	return check(view(cmd, false), true)
+}
+
+// pathLines arma el texto de cada segmento para buscar rutas protegidas:
+// las palabras tal cual y, además, como las vería el sistema de archivos.
+// Una ruta con // o /./ o x/.. se limpia, y después de un cd del mismo
+// comando se resuelve también contra esa carpeta: coyote//approvals o
+// cd coyote && cp x approvals/ nombran coyote/approvals. Un cd que llega al
+// correr ($DIR, ~, -) deja de resolverse.
+func pathLines(segs [][]string) []string {
+	lines := make([]string, len(segs))
+	dir, known := ".", true
+	for i, seg := range segs {
+		words := append([]string(nil), seg...)
+		prog, at := mainProg(seg)
+		if prog == "cd" || prog == "pushd" || prog == "popd" {
+			arg := ""
+			if prog != "popd" && at >= 0 {
+				for _, w := range seg[at+1:] {
+					if !strings.HasPrefix(w, "-") {
+						arg = w
+						break
+					}
+				}
+			}
+			switch {
+			case arg == "" || strings.ContainsAny(arg, "$~`"):
+				known = false
+			case path.IsAbs(arg):
+				dir, known = path.Clean(arg), true
+			default:
+				dir = path.Join(dir, arg)
+			}
+			lines[i] = segText(words)
+			continue
+		}
+		for j, w := range seg {
+			target := redirPrefix.ReplaceAllString(w, "")
+			if c := cleanWord(target); c != w {
+				words = append(words, c)
+			}
+			if known && dir != "." && j > at && target != "" && !strings.HasPrefix(target, "-") {
+				words = append(words, cleanWord(joinWord(dir, target)))
+			}
+		}
+		lines[i] = segText(words)
+	}
+	return lines
+}
+
+// redirPrefix es una redirección pegada a su destino (>x, 2>>x, &>x).
+var redirPrefix = regexp.MustCompile(`^(?:[0-9]*|&)(?:>>|>\||>|<)`)
+
+// cleanWord limpia una palabra con forma de ruta, también el valor de
+// --opción=ruta.
+func cleanWord(w string) string {
+	if !strings.Contains(w, "/") {
+		return w
+	}
+	if k, v, ok := strings.Cut(w, "="); ok && !strings.Contains(k, "/") {
+		return k + "=" + path.Clean(v)
+	}
+	return path.Clean(w)
+}
+
+// joinWord resuelve una palabra relativa contra dir.
+func joinWord(dir, w string) string {
+	if k, v, ok := strings.Cut(w, "="); ok && !strings.Contains(k, "/") {
+		if path.IsAbs(v) {
+			return w
+		}
+		return k + "=" + path.Join(dir, v)
+	}
+	if path.IsAbs(w) {
+		return w
+	}
+	return path.Join(dir, w)
 }
 
 // touchesHub dice si un comando con efectos nombra el clon del hub: su ruta

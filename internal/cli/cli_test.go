@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -819,4 +820,22 @@ func fixWebKey(t *testing.T) {
 	old := newWebKey
 	newWebKey = func() (string, error) { return webTestKey, nil }
 	t.Cleanup(func() { newWebKey = old })
+}
+
+// TestParseArgsDashDash: después de "--" todo es posicional; antes, las
+// banderas valen en cualquier lugar (revisión adversarial de v1.0).
+func TestParseArgsDashDash(t *testing.T) {
+	a := &app{stderr: io.Discard}
+	fs := a.flags("x", "")
+	write := fs.Bool("write", false, "")
+	pos, err := parseArgs(fs, []string{"--", "x", "--write"})
+	if err != nil || *write || strings.Join(pos, " ") != "x --write" {
+		t.Fatalf("después de --: pos=%q write=%v err=%v", pos, *write, err)
+	}
+	fs = a.flags("x", "")
+	write = fs.Bool("write", false, "")
+	pos, err = parseArgs(fs, []string{"a", "--write", "--", "-b"})
+	if err != nil || !*write || strings.Join(pos, " ") != "a -b" {
+		t.Fatalf("antes de --: pos=%q write=%v err=%v", pos, *write, err)
+	}
 }

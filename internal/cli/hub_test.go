@@ -159,8 +159,10 @@ func TestGateProtegeLasCarpetasDeGit(t *testing.T) {
 		{"Bash", `{"command":"cp docs/x.yaml ../acme-hub/coyote/hub.yaml"}`, "bloqueado"},
 		// git que vuelca la configuración o lee archivos fuera de git.
 		{"Bash", `{"command":"git var -l"}`, "aprobación"},
-		{"Bash", `{"command":"git diff --no-index /dev/null .git//config"}`, "aprobación"},
-		{"Bash", `{"command":"git blame --contents .git//config -- README.md"}`, "aprobación"},
+		// Desde v1.0 la ruta se limpia: .git//config es la configuración de git.
+		{"Bash", `{"command":"git diff --no-index /dev/null .git//config"}`, "bloqueado"},
+		{"Bash", `{"command":"git blame --contents .git//config -- README.md"}`, "bloqueado"},
+		{"Bash", `{"command":"git diff --no-index /dev/null x.txt"}`, "aprobación"},
 		{"Bash", `{"command":"git diff HEAD~1 -- README.md"}`, "libre"},
 	}
 	for _, c := range cases {

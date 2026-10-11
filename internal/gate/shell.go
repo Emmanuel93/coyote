@@ -299,12 +299,9 @@ func hasFlag(args []word, flags ...string) (string, bool) {
 	return "", false
 }
 
-// hasExact reconoce una bandera booleana escrita tal cual: --check=false no
-// cuenta como --check.
 // flagOn dice si una bandera booleana de Go queda prendida: la última
 // aparición manda (--check --check=false la apaga). Con "--" en los
-// argumentos no se decide: coyote vuelve a leer banderas después de un
-// argumento suelto.
+// argumentos no se decide y cuenta como apagada: libera solo lo que se ve.
 func flagOn(args []word, flags ...string) bool {
 	on := false
 	for _, a := range args {
@@ -324,18 +321,16 @@ func flagOn(args []word, flags ...string) bool {
 	return on
 }
 
-func hasExact(args []word, flags ...string) bool {
+// withoutDashDash quita los "--" de los argumentos: para buscar banderas que
+// niegan, todo cuenta.
+func withoutDashDash(args []word) []word {
+	out := make([]word, 0, len(args))
 	for _, a := range args {
-		if a.s == "--" {
-			return false
-		}
-		for _, f := range flags {
-			if a.s == f || a.s == f+"=true" {
-				return true
-			}
+		if a.s != "--" {
+			out = append(out, a)
 		}
 	}
-	return false
+	return out
 }
 
 func denyFlags(flags ...string) argCheck {
@@ -516,27 +511,34 @@ func coyoteCheck(args []word) error {
 	if len(rest) > 0 {
 		first = rest[0].s
 	}
+	// Las banderas que niegan se buscan también después de "--": un coyote
+	// anterior a 1.0 las volvía a leer ahí. Las que liberan (flagOn) no
+	// cuentan con "--".
+	all := withoutDashDash(rest)
 	switch sub {
 	case "status", "log", "get", "version", "help", "approvals", "review", "index", "propose", "-h", "--help", "-v", "--version":
 		return nil
 	case "doctor":
 		// doctor lee; pedir un canario o correrlo escriben en .coyote/gate/.
-		if first == "canary" || hasExact(rest, "--canary", "-canary") {
+		if first == "canary" {
+			return fmt.Errorf("coyote doctor con el canario escribe el estado del gate")
+		}
+		if _, ok := hasFlag(all, "--canary", "-canary"); ok {
 			return fmt.Errorf("coyote doctor con el canario escribe el estado del gate")
 		}
 		return nil
 	case "ask":
-		return denyFlags("--record", "-record")(rest)
+		return denyFlags("--record", "-record")(all)
 	case "audit":
 		// Leer el reporte es libre; dejarlo en coyote/audit/ escribe.
-		return denyFlags("--write", "-write")(rest)
+		return denyFlags("--write", "-write")(all)
 	case "eval":
 		// Medir es libre; reescribir la línea base, no.
-		return denyFlags("--update-baseline", "-update-baseline")(rest)
+		return denyFlags("--update-baseline", "-update-baseline")(all)
 	case "standards":
 		switch first {
 		case "lint":
-			return denyFlags("--scripts", "-scripts")(rest)
+			return denyFlags("--scripts", "-scripts")(all)
 		case "show", "explain", "diff", "":
 			return nil
 		}

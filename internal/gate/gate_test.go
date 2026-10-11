@@ -356,3 +356,43 @@ func TestRespond(t *testing.T) {
 		t.Errorf("Claude Code bloquea con salida 2 y el motivo en stderr: %d %q %q", code, out.String(), errb.String())
 	}
 }
+
+// TestDashDashYRutasEquivalentes: v1.0 (revisión adversarial de T61). Una
+// bandera que niega cuenta también después de "--", y una ruta protegida se
+// reconoce con // o /./, a través de x/.. y después de un cd.
+func TestDashDashYRutasEquivalentes(t *testing.T) {
+	ps, root, _ := testPaths(t)
+	needs := []string{
+		"coyote audit -- x --write", "coyote eval -- x --update-baseline", "coyote ask -- pedidos --record",
+		"coyote standards lint -- x --scripts", "coyote doctor --canary=1", "coyote doctor -- x --canary",
+		"coyote -C . audit -- --write=true",
+	}
+	for _, c := range needs {
+		if d := ps.Evaluate(claude(t, "Bash", map[string]any{"command": c}, root)); d.Verdict == Allow {
+			t.Errorf("%q pasó sin aprobación", c)
+		}
+	}
+	blocked := []string{
+		"cp /tmp/x.json coyote/./approvals/", "cp /tmp/x.json coyote//approvals/", "cp /tmp/x.json coyote/x/../approvals/",
+		"cd coyote && cp /tmp/x.json approvals/", "cd coyote && echo '{}' > approvals/P-0099.json",
+		"cd coyote; cd approvals && touch P-0099.json", "cd coyote && echo x >approvals/P-1.json",
+		"sed -i 1d coyote/ledger/2026/10/11-ana.ccf", "rm -rf coyote/ledger", "truncate -s 0 coyote/ledger/2026/10/11-ana.ccf",
+		"git rm coyote/ledger/2026/10/11-ana.ccf", "cd coyote && perl -pi -e 's/a/b/' ledger/2026/10/11-ana.ccf",
+		"echo '{}' > .claude//settings.json", "cat .claude//.credentials.json", "cp x .claude/./settings.json",
+		"coyote eval --baseline .claude//settings.json --update-baseline",
+	}
+	for _, c := range blocked {
+		if d := ps.Evaluate(claude(t, "Bash", map[string]any{"command": c}, root)); d.Verdict != Block {
+			t.Errorf("%q debería bloquearse siempre: %s (%s)", c, d.Verdict, d.Reason)
+		}
+	}
+	// Leer el ledger sigue libre, y un cd que llega al correr no inventa rutas.
+	for _, c := range []string{"cat coyote/ledger/2026/10/11-ana.ccf", "git log -p -- coyote/ledger", "grep -c gate coyote/ledger/2026/10/*.ccf", "cd coyote && ls ledger"} {
+		if d := ps.Evaluate(claude(t, "Bash", map[string]any{"command": c}, root)); d.Verdict != Allow {
+			t.Errorf("%q debería pasar: %s (%s)", c, d.Verdict, d.Reason)
+		}
+	}
+	if d := ps.Evaluate(claude(t, "Bash", map[string]any{"command": "cd $DIR && touch approvals/x"}, root)); d.Verdict == Allow {
+		t.Errorf("un cd que llega al correr no puede liberar una escritura")
+	}
+}

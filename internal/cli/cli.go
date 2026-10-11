@@ -157,6 +157,9 @@ func (a *app) flags(name, usage string) *flag.FlagSet {
 }
 
 // parseArgs permite flags antes y después de los argumentos posicionales.
+// Después de "--" todo es posicional, como en cualquier programa: el gate
+// decide sobre las banderas que ve antes de "--", y coyote no puede leer
+// otras después.
 func parseArgs(fs *flag.FlagSet, args []string) ([]string, error) {
 	var pos []string
 	for {
@@ -167,6 +170,9 @@ func parseArgs(fs *flag.FlagSet, args []string) ([]string, error) {
 			return nil, fail(2, "")
 		}
 		rest := fs.Args()
+		if n := len(args) - len(rest); n > 0 && args[n-1] == "--" {
+			return append(pos, rest...), nil
+		}
 		if len(rest) == 0 {
 			return pos, nil
 		}
