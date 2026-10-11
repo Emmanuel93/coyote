@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"path/filepath"
@@ -208,6 +209,9 @@ func secretsScan(a *app, args []string) error {
 				return fail(1, "%v", err)
 			}
 			rs := newRuleSet(top)
+			if err := trackProjects(rs); err != nil {
+				return fail(1, "%v", err)
+			}
 			found = scanAdded(files, rs.For, func(p string) (string, bool) { return product.IndexText(dir, p) })
 			rulesErr = rs.err
 			break
@@ -217,6 +221,9 @@ func secretsScan(a *app, args []string) error {
 			return fail(1, "%v", err)
 		}
 		rs := newRuleSet(top)
+		if err := trackProjects(rs); err != nil {
+			return fail(1, "%v", err)
+		}
 		found = scanAdded(files, rs.For, func(p string) (string, bool) { return product.FileAt(dir, right, p) })
 		rulesErr = rs.err
 	default:
@@ -224,6 +231,7 @@ func secretsScan(a *app, args []string) error {
 			dir = root
 		}
 		files, err := product.TrackedFiles(dir)
+		viaGit := err == nil
 		if err != nil {
 			// Fuera de git se recorren los archivos, sin dependencias ni compilación.
 			if files, err = standards.ListFiles(dir); err != nil {
@@ -233,6 +241,9 @@ func secretsScan(a *app, args []string) error {
 		// Cada archivo con las reglas del proyecto que lo contiene: desde la
 		// raíz de un monorepo, un proyecto en una subcarpeta aplica las suyas.
 		rs := newRuleSet(dir)
+		if viaGit {
+			rs.track(files)
+		}
 		found = scanTracked(dir, files, rs.For)
 		rulesErr = rs.err
 	}
@@ -277,78 +288,143 @@ func scanTracked(dir string, files []string, rulesFor func(string) (secrets.Rule
 	return out
 }
 
+// trackProjects hace que los proyectos de rs salgan de lo versionado en la
+// raíz de su repo.
+func trackProjects(rs *ruleSet) error {
+	files, err := product.TrackedFiles(rs.top)
+	if err != nil {
+		return err
+	}
+	rs.track(files)
+	return nil
+}
+
 // ruleSet da las reglas de secretos de cada ruta de git: las del proyecto
 // coyote que la contiene (su coyote/project.yaml más cercano), con la ruta
 // relativa a ese proyecto; fuera de un proyecto, las de siempre.
 type ruleSet struct {
-	top   string
-	roots map[string]string // carpeta → raíz del proyecto ("" si no hay)
-	rules map[string]secrets.Rules
-	err   error // el primer project.yaml que no se pudo leer
+	top     string
+	roots   map[string]string // carpeta → raíz del proyecto ("" si no hay)
+	rules   map[string]secrets.Rules
+	tracked map[string]bool // raíces de proyectos versionados; nil: se buscan en el árbol de trabajo
+	err     error           // el primer project.yaml que no se pudo leer
 }
 
 func newRuleSet(top string) *ruleSet {
 	return &ruleSet{top: top, roots: map[string]string{}, rules: map[string]secrets.Rules{}}
 }
 
-// For devuelve las reglas para una ruta relativa a la raíz del repo y la
-// ruta relativa al proyecto. Las reglas son las del proyecto más cercano,
-// más los archivos que declaran como secretos los proyectos que lo
-// contienen (un proyecto anidado no tapa las del de afuera); una dispensa
-// vale solo si la dan todos. Un proyecto dentro de dependencias (vendor,
-// node_modules) no cuenta. Un project.yaml que no se puede leer queda en err,
-// con su ruta, y sus archivos se revisan con las reglas de siempre.
-func (r *ruleSet) For(gitPath string) (secrets.Rules, string) {
-	abs := filepath.Join(r.top, filepath.FromSlash(gitPath))
-	chain := r.chain(filepath.Dir(abs))
-	if len(chain) == 0 {
-		return secrets.Rules{}, gitPath
-	}
-	relTo := func(root string) (string, bool) {
-		rel, err := filepath.Rel(root, abs)
-		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-			return "", false
+// track hace que los proyectos salgan de lo versionado y no de lo que haya en
+// el árbol de trabajo: un coyote/project.yaml versionado que falta o no se
+// puede leer es un error, y no un proyecto que desaparece con sus
+// secrets.files.
+func (r *ruleSet) track(files []string) {
+	r.tracked = map[string]bool{}
+	for _, f := range files {
+		if dir, ok := strings.CutSuffix(f, project.ConfigPath); ok && (dir == "" || strings.HasSuffix(dir, "/")) {
+			r.tracked[filepath.Join(r.top, filepath.FromSlash(dir))] = true
 		}
-		return filepath.ToSlash(rel), true
 	}
-	near, ok := relTo(chain[0])
-	if !ok {
-		return secrets.Rules{}, gitPath
-	}
-	base := r.load(chain[0])
-	rules := secrets.Rules{Files: append([]string(nil), base.Files...), Allow: base.Allow}
-	for _, outer := range chain[1:] {
-		rel, ok := relTo(outer)
-		if !ok {
-			continue
+}
+
+// layer es un proyecto coyote que contiene una ruta: sus reglas, la ruta
+// relativa a él y si vive dentro de dependencias (vendor, node_modules,
+// third_party).
+type layer struct {
+	rules secrets.Rules
+	rel   string
+	dep   bool
+}
+
+// mergeRules junta los proyectos que contienen una ruta, del más cercano al
+// de afuera. Las reglas son las del proyecto más cercano, más los archivos
+// que declaran como secretos los proyectos que lo contienen (un proyecto
+// anidado no tapa las del de afuera); una dispensa vale solo si la dan todos.
+// Un proyecto dentro de dependencias solo suma archivos de secretos: no
+// dispensa nada, y un archivo que declara no desaparece por estar en vendor.
+func mergeRules(gitPath string, layers []layer) (secrets.Rules, string) {
+	var own, deps []layer
+	for _, l := range layers {
+		if l.dep {
+			deps = append(deps, l)
+		} else {
+			own = append(own, l)
 		}
-		o := r.load(outer)
-		if glob.Any(o.Files, rel) {
+	}
+	rules, near := secrets.Rules{}, gitPath
+	if len(own) > 0 {
+		near = own[0].rel
+		rules = secrets.Rules{Files: append([]string(nil), own[0].rules.Files...), Allow: own[0].rules.Allow}
+		for _, outer := range own[1:] {
+			if glob.Any(outer.rules.Files, outer.rel) {
+				rules.Files = append(rules.Files, near)
+			}
+			if rules.Allowed(near) && !outer.rules.Allowed(outer.rel) {
+				rules.Allow = nil
+			}
+		}
+	}
+	for _, d := range deps {
+		if glob.Any(d.rules.Files, d.rel) {
 			rules.Files = append(rules.Files, near)
-		}
-		if rules.Allowed(near) && !o.Allowed(rel) {
-			rules.Allow = nil
 		}
 	}
 	return rules, near
 }
 
+// For devuelve las reglas para una ruta relativa a la raíz del repo y la
+// ruta relativa al proyecto. Un project.yaml que no se puede leer queda en
+// err, con su ruta, y sus archivos se revisan con las reglas de siempre.
+func (r *ruleSet) For(gitPath string) (secrets.Rules, string) {
+	abs := filepath.Join(r.top, filepath.FromSlash(gitPath))
+	var layers []layer
+	for _, c := range r.chain(filepath.Dir(abs)) {
+		rel, err := filepath.Rel(c.root, abs)
+		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			continue
+		}
+		layers = append(layers, layer{rules: r.load(c.root, c.dep), rel: filepath.ToSlash(rel), dep: c.dep})
+	}
+	return mergeRules(gitPath, layers)
+}
+
+type chained struct {
+	root string
+	dep  bool
+}
+
+// find busca el proyecto que contiene d: entre los versionados si hay
+// lista, y si no, en el árbol de trabajo.
+func (r *ruleSet) find(d string) string {
+	if r.tracked == nil {
+		root, _ := project.FindRoot(d)
+		return root
+	}
+	for ; within(r.top, d); d = filepath.Dir(d) {
+		if r.tracked[d] {
+			return d
+		}
+		if d == r.top || filepath.Dir(d) == d {
+			break
+		}
+	}
+	return ""
+}
+
 // chain son los proyectos que contienen dir, del más cercano al de afuera,
-// dentro del repo y fuera de las dependencias.
-func (r *ruleSet) chain(dir string) []string {
-	var out []string
+// dentro del repo.
+func (r *ruleSet) chain(dir string) []chained {
+	var out []chained
 	for d := dir; ; {
 		root, ok := r.roots[d]
 		if !ok {
-			root, _ = project.FindRoot(d)
+			root = r.find(d)
 			r.roots[d] = root
 		}
 		if root == "" || !within(r.top, root) {
 			return out
 		}
-		if !dependency(r.top, root) {
-			out = append(out, root)
-		}
+		out = append(out, chained{root, dependency(r.top, root)})
 		parent := filepath.Dir(root)
 		if parent == root {
 			return out
@@ -357,15 +433,23 @@ func (r *ruleSet) chain(dir string) []string {
 	}
 }
 
-// load lee las reglas de secretos de un proyecto, una vez.
-func (r *ruleSet) load(root string) secrets.Rules {
+// load lee las reglas de secretos de un proyecto, una vez. Un project.yaml
+// roto dentro de dependencias no se reporta: no es de este repo.
+func (r *ruleSet) load(root string, dep bool) secrets.Rules {
 	rules, ok := r.rules[root]
 	if !ok {
-		if cfg, err := project.Load(root); err == nil {
+		cfg, err := project.Load(root)
+		switch {
+		case err == nil:
 			rules = cfg.Secrets
-		} else if r.err == nil {
+		case dep:
+		case r.err == nil:
 			rel, _ := filepath.Rel(r.top, root)
-			r.err = fmt.Errorf("%s: %v; sus archivos se revisaron con las reglas de siempre, sin las del proyecto", filepath.ToSlash(filepath.Join(rel, project.ConfigPath)), err)
+			shown := filepath.ToSlash(filepath.Join(rel, project.ConfigPath))
+			if errors.Is(err, project.ErrNotProject) && r.tracked != nil {
+				err = errors.New("está versionado y no está en el árbol de trabajo")
+			}
+			r.err = fmt.Errorf("%s: %v; sus archivos se revisaron con las reglas de siempre, sin las del proyecto", shown, err)
 		}
 		r.rules[root] = rules
 	}
@@ -379,7 +463,8 @@ func within(top, p string) bool {
 }
 
 // dependency dice si un proyecto vive dentro de las dependencias de otro
-// (vendor, node_modules, third_party): no es un proyecto de este repo.
+// (vendor, node_modules, third_party): no es un proyecto de este repo, así
+// que solo suma los archivos de secretos que declara.
 func dependency(top, root string) bool {
 	rel, err := filepath.Rel(top, root)
 	if err != nil {

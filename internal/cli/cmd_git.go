@@ -168,6 +168,9 @@ func cmdCommit(a *app, args []string) error {
 		return fail(1, "no pude revisar si el commit lleva secretos (%v); el commit no sigue", err)
 	}
 	rs := newRuleSet(top)
+	if err := trackProjects(rs); err != nil {
+		return fail(1, "no pude revisar si el commit lleva secretos (%v); el commit no sigue", err)
+	}
 	leaks := scanAdded(files, rs.For, func(p string) (string, bool) {
 		if *all {
 			return product.WorktreeText(top, p)

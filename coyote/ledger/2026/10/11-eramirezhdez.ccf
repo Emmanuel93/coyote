@@ -26,3 +26,4 @@
 2026-10-11T20:27Z|@eramirezhdez/coyote-scribe|W-0008|coyote|doc|release|reporte de v1.0.0 con la decisión de G8, la fase del PRD…|-|-|-|ok
 2026-10-11T20:27Z|@eramirezhdez/coyote-scribe|W-0008|coyote|doc|audit|reporte de octubre de 2026 para el release candidate rc.2 de v1.0.0|-|-|-|ok
 2026-10-11T21:19Z|@eramirezhdez/coyote-security|W-0008|coyote|fix|audit|nada llega en el futuro, borrados anteriores al periodo, firmas sin ejecutar…|-|-|-|ok
+2026-10-11T21:23Z|@eramirezhdez/coyote-security|W-0008|coyote|fix|secrets|los proyectos salen de lo versionado y uno en dependencias suma archivos…|-|-|-|ok

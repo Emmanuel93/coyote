@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/Emmanuel93/coyote/internal/install"
+	"github.com/Emmanuel93/coyote/internal/secrets"
 	"github.com/Emmanuel93/coyote/internal/version"
 )
 
@@ -599,5 +600,76 @@ func TestSecretosConProyectosAnidados(t *testing.T) {
 	r = run(t, root, "", "secrets", "scan")
 	if r.code != 1 || !strings.Contains(r.stderr, "otro/coyote/project.yaml") || !strings.Contains(r.stdout, "svc/config/prod/db.yaml") {
 		t.Errorf("project.yaml roto: %d\n%s%s", r.code, r.stdout, r.stderr)
+	}
+}
+
+// TestSecretosCuartaRevision: cuarta pasada de v1.0. Los proyectos salen de
+// lo versionado, así que borrar su project.yaml del árbol de trabajo no
+// apaga sus secrets.files; y uno dentro de dependencias suma sus archivos de
+// secretos sin poder dispensar nada.
+func TestSecretosCuartaRevision(t *testing.T) {
+	base := setup(t)
+	must(t, run(t, base, "", "init", "mono", "--type", "backend", "--purpose", "API de pedidos de la tienda demo"), 0, "init")
+	root := filepath.Join(base, "mono")
+	must(t, run(t, root, "", "init", "svc", "--no-git", "--type", "backend", "--purpose", "servicio de pagos de la tienda"), 0, "init anidado")
+	cfg := readFile(t, filepath.Join(root, "svc", "coyote", "project.yaml"))
+	write(t, root, "svc/coyote/project.yaml", cfg+"secrets:\n  files: [\"secretos/*.txt\"]\n")
+	write(t, root, "svc/secretos/a.txt", "algo\n")
+	write(t, root, "third_party/lib/coyote/project.yaml", cfg+"secrets:\n  files: [\"claves/*.txt\"]\n  allow:\n    - path: \"**\"\n      reason: \"la dependencia dispensa todo lo suyo\"\n")
+	write(t, root, "third_party/lib/claves/k.txt", "uno\n")
+	write(t, root, "third_party/lib/.env", "TOKEN=x\n")
+	git(t, root, "add", "-A")
+	git(t, root, "commit", "-qm", "chore: inicio", "--no-verify")
+
+	// Un proyecto dentro de dependencias suma sus archivos y no dispensa nada.
+	r := run(t, root, "", "secrets", "scan")
+	for _, want := range []string{"svc/secretos/a.txt", "third_party/lib/claves/k.txt", "third_party/lib/.env"} {
+		if r.code != 1 || !strings.Contains(r.stdout, want) {
+			t.Errorf("falta %q (código %d):\n%s%s", want, r.code, r.stdout, r.stderr)
+		}
+	}
+
+	// Sin el project.yaml versionado en el árbol de trabajo, el escaneo no da
+	// el visto bueno: no se pierde el proyecto con sus archivos declarados.
+	if err := os.Remove(filepath.Join(root, "svc", "coyote", "project.yaml")); err != nil {
+		t.Fatal(err)
+	}
+	r = run(t, root, "", "secrets", "scan")
+	if r.code != 1 || !strings.Contains(r.stderr, "svc/coyote/project.yaml") || !strings.Contains(r.stderr, "versionado") {
+		t.Errorf("project.yaml versionado que falta: %d\n%s%s", r.code, r.stdout, r.stderr)
+	}
+	git(t, root, "checkout", "--", "svc/coyote/project.yaml")
+
+	// Lo mismo con un enlace en lugar del archivo.
+	if err := os.Remove(filepath.Join(root, "svc", "coyote", "project.yaml")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(root, "coyote", "project.yaml"), filepath.Join(root, "svc", "coyote", "project.yaml")); err != nil {
+		t.Skip("sin enlaces simbólicos")
+	}
+	r = run(t, root, "", "secrets", "scan")
+	if r.code != 1 || !strings.Contains(r.stderr, "svc/coyote/project.yaml") {
+		t.Errorf("project.yaml que es un enlace: %d\n%s%s", r.code, r.stdout, r.stderr)
+	}
+}
+
+// TestMergeRulesDependencias: las dependencias suman archivos de secretos y
+// nunca dispensas; una dispensa de adentro la veta el proyecto de afuera.
+func TestMergeRulesDependencias(t *testing.T) {
+	allow := []secrets.Allow{{Path: "**", Reason: "motivo suficiente para dispensar"}}
+	rules, near := mergeRules("lib/x/claves/k.txt", []layer{
+		{rules: secrets.Rules{Files: []string{"claves/*.txt"}, Allow: allow}, rel: "claves/k.txt", dep: true},
+		{rules: secrets.Rules{Files: []string{"lib/x/claves/*.txt"}}, rel: "lib/x/claves/k.txt"},
+	})
+	if near != "lib/x/claves/k.txt" || rules.Allowed(near) || len(rules.Allow) != 0 {
+		t.Errorf("la dependencia no dispensa: %+v %q", rules, near)
+	}
+	if _, ok := rules.Kind(near); !ok {
+		t.Errorf("el archivo que declara la dependencia es de secretos: %+v", rules)
+	}
+	// Sin otro proyecto, la ruta queda como llegó.
+	rules, near = mergeRules("lib/claves/k.txt", []layer{{rules: secrets.Rules{Files: []string{"claves/*.txt"}, Allow: allow}, rel: "claves/k.txt", dep: true}})
+	if _, ok := rules.Kind(near); !ok || near != "lib/claves/k.txt" || rules.Allowed(near) {
+		t.Errorf("solo una dependencia: %+v %q", rules, near)
 	}
 }

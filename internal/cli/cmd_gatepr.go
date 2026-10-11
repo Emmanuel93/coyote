@@ -12,7 +12,6 @@ import (
 	"github.com/Emmanuel93/coyote/internal/ci"
 	"github.com/Emmanuel93/coyote/internal/fsx"
 	"github.com/Emmanuel93/coyote/internal/github"
-	"github.com/Emmanuel93/coyote/internal/glob"
 	"github.com/Emmanuel93/coyote/internal/infra"
 	"github.com/Emmanuel93/coyote/internal/inject"
 	"github.com/Emmanuel93/coyote/internal/product"
@@ -81,7 +80,7 @@ func gatePR(a *app, args []string) error {
 	// Las reglas de secretos salen de la rama base: un PR no se dispensa a sí
 	// mismo agregando secrets.allow. Cada ruta lleva las del proyecto coyote
 	// que la contiene, también en una subcarpeta.
-	br := &baseRules{dir: dir, base: p.pr.BaseSHA, name: p.self, cache: map[string]*secrets.Rules{}}
+	br := &baseRules{dir: dir, base: p.pr.BaseSHA, name: p.self, cache: map[string]*layer{}}
 	in.Secrets = scanAdded(added, br.For, func(f string) (string, bool) { return product.FileAt(dir, right, f) })
 	if br.err != nil {
 		// Sin las reglas de la base, un secreto declarado en secrets.files
@@ -391,63 +390,45 @@ func codeCell(s string) string {
 // se puede leer (pide un coyote más nuevo, o está roto) queda en err.
 type baseRules struct {
 	dir, base, name string
-	cache           map[string]*secrets.Rules
+	cache           map[string]*layer
 	err             error
 }
 
 func (b *baseRules) For(f string) (secrets.Rules, string) {
 	// Los proyectos que contienen f, del más cercano al de afuera, como en
 	// secrets scan: un proyecto anidado no tapa los secretos que declara el
-	// de afuera, y una dispensa vale solo si la dan todos.
-	type proj struct {
-		prefix string
-		rules  secrets.Rules
-	}
-	var chain []proj
+	// de afuera, una dispensa vale solo si la dan todos y uno dentro de
+	// dependencias solo suma archivos de secretos (mergeRules).
+	var layers []layer
 	for d := path.Dir(f); ; d = path.Dir(d) {
 		prefix := ""
 		if d != "." && d != "/" {
 			prefix = d + "/"
 		}
-		r, seen := b.cache[prefix]
+		l, seen := b.cache[prefix]
 		if !seen {
-			if text, ok := product.FileAt(b.dir, b.base, prefix+project.ConfigPath); ok && !dependency("/", "/"+prefix) {
-				rules := secrets.Rules{}
+			if text, ok := product.FileAt(b.dir, b.base, prefix+project.ConfigPath); ok {
+				l = &layer{dep: dependency("/", "/"+prefix)}
 				if cfg, err := project.Parse([]byte(text), b.name); err == nil {
-					rules = cfg.Secrets
-				} else if b.err == nil {
+					l.rules = cfg.Secrets
+				} else if b.err == nil && !l.dep {
 					b.err = fmt.Errorf("%s%s de la rama base: %v", prefix, project.ConfigPath, err)
 				}
-				r = &rules
 			}
-			b.cache[prefix] = r
+			b.cache[prefix] = l
 		}
-		if r != nil {
-			chain = append(chain, proj{prefix, *r})
+		if l != nil {
+			here := *l
+			here.rel = strings.TrimPrefix(f, prefix)
+			layers = append(layers, here)
 		}
 		if prefix == "" {
 			break
 		}
 	}
-	if len(chain) == 0 {
-		return secrets.Rules{}, f
-	}
-	near := strings.TrimPrefix(f, chain[0].prefix)
-	rules := secrets.Rules{Files: append([]string(nil), chain[0].rules.Files...), Allow: chain[0].rules.Allow}
-	for _, outer := range chain[1:] {
-		rel := strings.TrimPrefix(f, outer.prefix)
-		if glob.Any(outer.rules.Files, rel) {
-			rules.Files = append(rules.Files, near)
-		}
-		if rules.Allowed(near) && !outer.rules.Allowed(rel) {
-			rules.Allow = nil
-		}
-	}
-	return rules, near
+	return mergeRules(f, layers)
 }
 
-// sloRisks compara cada archivo de SLOs que toca el PR con el de la base y
-// revisa que las reglas generadas del commit del PR salgan de su SLO.
 // newDuplicate dice si un servicio repetido pesa en este PR: x.yaml y x.yml
 // en la misma carpeta, siempre; en otra carpeta (dos proyectos de un
 // monorepo), cuando el PR agrega uno de los archivos.
@@ -466,6 +447,8 @@ func newDuplicate(dir, base, f string, hadOld bool, paths []string) bool {
 	return !hadOld
 }
 
+// sloRisks compara cada archivo de SLOs que toca el PR con el de la base y
+// revisa que las reglas generadas del commit del PR salgan de su SLO.
 func sloRisks(dir, base, head string, changed []string) []ci.FileRisk {
 	var out []ci.FileRisk
 	add := func(p, risk, why string) { out = append(out, ci.FileRisk{Path: p, Risk: risk, Why: why}) }
