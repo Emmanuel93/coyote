@@ -533,3 +533,38 @@ func TestRequiresNoApagaLasReglasDeSecretos(t *testing.T) {
 		t.Errorf("gate pr con la base de una versión más nueva: %d\n%s%s", r.code, r.stdout, r.stderr)
 	}
 }
+
+// TestSecretosDesdeLaRaizDelMonorepo: segunda revisión adversarial de v1.0.
+// Desde la raíz de un repo, secrets scan y secrets list aplican las reglas
+// del proyecto de cada subcarpeta, y fallan si su project.yaml no se lee.
+func TestSecretosDesdeLaRaizDelMonorepo(t *testing.T) {
+	base := setup(t)
+	mono := filepath.Join(base, "mono")
+	if err := os.MkdirAll(mono, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	git(t, mono, "init", "-q")
+	must(t, run(t, mono, "", "init", "svc", "--no-git", "--type", "backend", "--purpose", "API de pedidos de la tienda demo"), 0, "init")
+	root := filepath.Join(mono, "svc")
+	cfgPath := filepath.Join(root, "coyote", "project.yaml")
+	cfg := readFile(t, cfgPath)
+	write(t, root, "coyote/project.yaml", cfg+"secrets:\n  files: [\"config/prod/*.yaml\"]\n")
+	write(t, root, "config/prod/db.yaml", "password: corta\n")
+	git(t, mono, "add", "-A")
+	git(t, mono, "commit", "-qm", "chore: inicio", "--no-verify")
+	if r := run(t, mono, "", "secrets", "scan"); r.code != 1 || !strings.Contains(r.stdout, "svc/config/prod/db.yaml") {
+		t.Errorf("scan desde la raíz: %d\n%s%s", r.code, r.stdout, r.stderr)
+	}
+	if r := run(t, mono, "", "secrets", "list"); r.code != 0 || !strings.Contains(r.stdout, "svc/config/prod/db.yaml") {
+		t.Errorf("list desde la raíz: %d\n%s%s", r.code, r.stdout, r.stderr)
+	}
+	oldV, oldC := version.Version, version.Commit
+	version.Version, version.Commit = "v1.9.0", "abc1234"
+	t.Cleanup(func() { version.Version, version.Commit = oldV, oldC })
+	write(t, root, "coyote/project.yaml", strings.Replace(readFile(t, cfgPath), "version: 1\n", "version: 1\nrequires: \">=1.10\"\n", 1))
+	for _, args := range [][]string{{"secrets", "scan"}, {"secrets", "list"}} {
+		if r := run(t, mono, "", args...); r.code != 1 || !strings.Contains(r.stderr, ">=1.10") {
+			t.Errorf("%v con el proyecto de una versión más nueva: %d\n%s%s", args, r.code, r.stdout, r.stderr)
+		}
+	}
+}

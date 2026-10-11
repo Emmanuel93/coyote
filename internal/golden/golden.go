@@ -12,6 +12,7 @@ import (
 	"math"
 	"path"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/Emmanuel93/coyote/internal/fsx"
@@ -46,6 +47,7 @@ func Load(path string) ([]Question, error) {
 func Parse(path string, data []byte) ([]Question, error) {
 	var out []Question
 	seen := map[string]bool{}
+	same := map[string]string{} // contenido -> id
 	sc := bufio.NewScanner(bytes.NewReader(data))
 	sc.Buffer(make([]byte, 64<<10), 1<<20)
 	for n := 1; sc.Scan(); n++ {
@@ -59,12 +61,17 @@ func Parse(path string, data []byte) ([]Question, error) {
 		if err := dec.Decode(&q); err != nil {
 			return nil, fmt.Errorf("%s:%d: %v", path, n, err)
 		}
+		key := contentKey(q)
 		switch {
 		case q.ID == "" || strings.TrimSpace(q.Q) == "" || len(q.Expect) == 0:
 			return nil, fmt.Errorf("%s:%d: cada pregunta necesita id, q y expect", path, n)
 		case seen[q.ID]:
 			return nil, fmt.Errorf("%s:%d: id repetido %q", path, n, q.ID)
+		case same[key] != "":
+			// Copias de una pregunta que sale bien inflarían el promedio.
+			return nil, fmt.Errorf("%s:%d: %q repite la pregunta %s", path, n, q.ID, same[key])
 		}
+		same[key] = q.ID
 		for _, e := range q.Expect {
 			if _, _, ok := parseRef(e); !ok {
 				return nil, fmt.Errorf("%s:%d: referencia %q inválida; usa doc:ruta, adr:ADR-0000 o ctx:ámbito", path, n, e)
@@ -86,6 +93,48 @@ func Parse(path string, data []byte) ([]Question, error) {
 }
 
 var adrRef = regexp.MustCompile(`^ADR-[0-9]{4}$`)
+
+// contentKey es el contenido de una pregunta: el texto sin mayúsculas ni
+// espacios de más, su ámbito y sus fuentes en orden.
+func contentKey(q Question) string {
+	exp := append([]string(nil), q.Expect...)
+	sort.Strings(exp)
+	return strings.ToLower(strings.Join(strings.Fields(q.Q), " ")) + "\x00" + q.Scope + "\x00" + strings.Join(exp, "\x00")
+}
+
+// Score es la medida de una pregunta que guarda la línea base.
+type Score struct {
+	ID       string  `json:"id"`
+	Recall   float64 `json:"recall"`
+	RR       float64 `json:"rr"`
+	Coverage float64 `json:"coverage"`
+}
+
+// Scores reduce los resultados a lo que guarda la línea base.
+func Scores(rs []Result) []Score {
+	out := make([]Score, 0, len(rs))
+	for _, r := range rs {
+		out = append(out, Score{r.ID, r.Recall, r.RR, r.Coverage})
+	}
+	return out
+}
+
+// Average promedia unas medidas, en puntos porcentuales.
+func Average(ss []Score) Summary {
+	var s Summary
+	for _, x := range ss {
+		s.Recall += x.Recall
+		s.MRR += x.RR
+		s.Coverage += x.Coverage
+	}
+	if n := float64(len(ss)); n > 0 {
+		s.Questions = len(ss)
+		s.Recall = round(100 * s.Recall / n)
+		s.MRR = round(100 * s.MRR / n)
+		s.Coverage = round(100 * s.Coverage / n)
+	}
+	return s
+}
 
 // parseRef valida una referencia: doc:ruta del repo, adr:ADR-0000 o
 // ctx:ámbito. Una referencia laxa (adr:-, doc:../x) haría pasar en falso.

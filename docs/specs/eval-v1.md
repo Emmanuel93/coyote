@@ -24,7 +24,7 @@ Un archivo JSONL con una pregunta por línea. Las líneas vacías y las que empi
 | `expect` | Las fuentes esperadas: `doc:ruta` (la ruta exacta del repo), `adr:ADR-0000` (el número exacto del ADR) o `ctx:ámbito` (una entrada de `CONTEXT.coyote.md` de ese ámbito o de uno de sus subámbitos; una nota general no cuenta) |
 | `k` | Opcional: cuántos resultados de `ask` cuentan; 5 por defecto |
 
-Una clave desconocida, un `id` repetido, una referencia de otra forma (`adr:-`, `doc:../x`) o un golden sin preguntas hacen fallar la lectura. El golden y la línea base viven en `evals/` del proyecto: `--golden` es un `.jsonl` y `--baseline` un `.json` de esa carpeta, de hasta 4 MiB.
+Una clave desconocida, un `id` repetido, una pregunta que repite a otra (el mismo texto, ámbito y fuentes), una referencia de otra forma (`adr:-`, `doc:../x`) o un golden sin preguntas hacen fallar la lectura. El golden y la línea base viven en `evals/` del proyecto: `--golden` es un `.jsonl` y `--baseline` un `.json` de esa carpeta, de hasta 4 MiB.
 
 ## Métricas
 
@@ -36,8 +36,8 @@ Van en puntos porcentuales, promediadas sobre las preguntas. Se miden sobre el �
 
 ## Línea base
 
-- `--update-baseline` escribe `evals/baseline.json` con las tres métricas, los `id` de las preguntas medidas, el golden, el presupuesto y la fecha. Ese cambio se revisa en el PR: `gate pr` marca R2 el golden y la línea base.
-- Sin `--update-baseline`, `coyote eval` compara contra la línea base y sale con 1 si una métrica baja más de 2 puntos o si falta en el golden una pregunta de la línea base: quitar preguntas también se revisa en el PR.
+- `--update-baseline` escribe `evals/baseline.json` con las tres métricas, la medida de cada pregunta, el golden, el presupuesto y la fecha. Ese cambio se revisa en el PR: `gate pr` marca R2 el golden y la línea base.
+- Sin `--update-baseline`, `coyote eval` compara sobre las preguntas de la línea base y sale con 1 si una métrica baja más de 2 puntos o si falta en el golden una de ellas. Una pregunta nueva no cuenta hasta que se fija de nuevo la línea base, así que agregar preguntas fáciles no tapa una regresión.
 - Sin línea base, mide y sale con 1: no hay contra qué comparar.
 - Medir con otro `--budget` que el de la línea base es un error de uso.
 - En coyote, `make check` y la CI corren `coyote eval`.

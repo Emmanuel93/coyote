@@ -21,10 +21,11 @@ type evalBaseline struct {
 	Golden string `json:"golden"`
 	Budget int    `json:"budget"`
 	golden.Summary
-	// IDs son las preguntas medidas: quitar una del golden para esconder una
-	// regresión hace fallar a eval.
-	IDs     []string `json:"ids,omitempty"`
-	Updated string   `json:"updated"`
+	// Results es la medida de cada pregunta: eval compara sobre las preguntas
+	// de la línea base, así que quitar una o agregar copias de otra no
+	// esconde una regresión.
+	Results []golden.Score `json:"results"`
+	Updated string         `json:"updated"`
 }
 
 // evalPath resuelve una ruta de eval: el golden y la línea base son
@@ -88,6 +89,9 @@ func cmdEval(a *app, args []string) error {
 	results, sum := golden.Run(ix, cfg.Name, qs, *budget)
 	var base *evalBaseline
 	switch data, err := fsx.ReadFile(root, brel, golden.MaxFile); {
+	case *update:
+		// La línea base se reescribe: la anterior no se lee (puede ser de
+		// otra versión del formato).
 	case err == nil:
 		base = &evalBaseline{}
 		dec := json.NewDecoder(bytes.NewReader(data))
@@ -99,37 +103,39 @@ func cmdEval(a *app, args []string) error {
 		return fail(1, "%v", err)
 	}
 	var regressions []string
+	newQs := 0
 	if base != nil && !*update {
 		if base.Budget != *budget {
 			return fail(2, "la línea base se midió con --budget %d; mide igual o actualízala", base.Budget)
 		}
-		regressions = golden.Regression(base.Summary, sum, evalTolerance)
-		have := map[string]bool{}
-		for _, q := range qs {
-			have[q.ID] = true
+		now := map[string]golden.Score{}
+		for _, sc := range golden.Scores(results) {
+			now[sc.ID] = sc
 		}
 		var gone []string
-		for _, id := range base.IDs {
-			if !have[id] {
-				gone = append(gone, id)
+		var was, is []golden.Score
+		for _, b := range base.Results {
+			sc, ok := now[b.ID]
+			if !ok {
+				gone = append(gone, b.ID)
+				continue
 			}
+			was, is = append(was, b), append(is, sc)
 		}
+		regressions = golden.Regression(golden.Average(was), golden.Average(is), evalTolerance)
 		switch {
 		case len(gone) > 0:
 			regressions = append(regressions, fmt.Sprintf("faltan %d preguntas de la línea base (%s): quitarlas se revisa en el PR con --update-baseline", len(gone), strings.Join(gone, ", ")))
-		case len(base.IDs) == 0 && sum.Questions < base.Questions:
-			regressions = append(regressions, fmt.Sprintf("el golden tiene %d preguntas y la línea base, %d", sum.Questions, base.Questions))
+		case len(base.Results) == 0:
+			regressions = append(regressions, "la línea base no trae la medida de cada pregunta: fíjala de nuevo con --update-baseline")
 		}
+		newQs = len(qs) - len(is)
 	}
 	if *update {
 		if err := fsx.NoSymlinks(root, brel); err != nil {
 			return fail(1, "%v", err)
 		}
-		ids := make([]string, 0, len(qs))
-		for _, q := range qs {
-			ids = append(ids, q.ID)
-		}
-		nb := evalBaseline{Golden: grel, Budget: *budget, Summary: sum, IDs: ids, Updated: a.now().Format("2006-01-02")}
+		nb := evalBaseline{Golden: grel, Budget: *budget, Summary: sum, Results: golden.Scores(results), Updated: a.now().Format("2006-01-02")}
 		data, _ := json.MarshalIndent(nb, "", "  ")
 		bp := filepath.Join(root, filepath.FromSlash(brel))
 		if err := os.MkdirAll(filepath.Dir(bp), 0o755); err != nil {
@@ -178,6 +184,9 @@ func cmdEval(a *app, args []string) error {
 		case base == nil:
 			fmt.Fprintf(a.stdout, "sin línea base: corre coyote eval --update-baseline y hazle commit a %s\n", brel)
 		case len(regressions) == 0:
+			if newQs > 0 {
+				fmt.Fprintf(a.stdout, "  %d preguntas nuevas: no cuentan contra la línea base hasta que la fijes de nuevo\n", newQs)
+			}
 			fmt.Fprintf(a.stdout, "✓ sin regresiones frente a %s (tolerancia de %.0f puntos)\n", brel, evalTolerance)
 		default:
 			for _, r := range regressions {

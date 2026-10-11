@@ -48,6 +48,20 @@ func TestEvalConLineaBase(t *testing.T) {
 		t.Errorf("regresión:\n%s", r.stdout)
 	}
 	must(t, run(t, root, "", "eval", "--budget", "3000"), 2, "otro presupuesto que la base")
+	// Una pregunta nueva que sale bien no tapa la regresión: se compara sobre
+	// las preguntas de la línea base.
+	write(t, root, "evals/golden.v1.jsonl", `{"id":"g1","q":"¿cuándo se confirma un pedido?","expect":["ctx:pedidos"]}`+"\n"+
+		`{"id":"g2","q":"¿quién aprueba un reembolso?","expect":["ctx:reembolsos"]}`+"\n"+
+		`{"id":"g3","q":"¿qué pasa al capturar el pago de un pedido?","expect":["ctx:pedidos"]}`+"\n")
+	if r = run(t, root, "", "eval"); r.code != 1 || !strings.Contains(r.stdout, "✗ recall@k bajó de 100.0 a 50.0") {
+		t.Errorf("una pregunta nueva no tapa la regresión: %d\n%s", r.code, r.stdout)
+	}
+	// Una copia de otra pregunta no entra al golden.
+	write(t, root, "evals/golden.v1.jsonl", `{"id":"g1","q":"¿cuándo se confirma un pedido?","expect":["ctx:pedidos"]}`+"\n"+
+		`{"id":"g9","q":"¿Cuándo  se confirma un pedido?","expect":["ctx:pedidos"]}`+"\n")
+	if r = run(t, root, "", "eval"); r.code != 1 || !strings.Contains(r.stderr, "repite la pregunta g1") {
+		t.Errorf("pregunta repetida: %d\n%s%s", r.code, r.stdout, r.stderr)
+	}
 	// Quitar una pregunta del golden para esconder la regresión no pasa.
 	write(t, root, "evals/golden.v1.jsonl", `{"id":"g1","q":"¿cuándo se confirma un pedido?","expect":["ctx:pedidos"]}`+"\n")
 	r = run(t, root, "", "eval")

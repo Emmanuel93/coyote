@@ -3,39 +3,189 @@
   "budget": 2000,
   "questions": 30,
   "recall_at_k": 85,
-  "mrr": 65.6,
+  "mrr": 66.1,
   "pack_coverage": 93.3,
-  "ids": [
-    "g01",
-    "g02",
-    "g03",
-    "g04",
-    "g05",
-    "g06",
-    "g07",
-    "g08",
-    "g09",
-    "g10",
-    "g11",
-    "g12",
-    "g13",
-    "g14",
-    "g15",
-    "g16",
-    "g17",
-    "g18",
-    "g19",
-    "g20",
-    "g21",
-    "g22",
-    "g23",
-    "g24",
-    "g25",
-    "g26",
-    "g27",
-    "g28",
-    "g29",
-    "g30"
+  "results": [
+    {
+      "id": "g01",
+      "recall": 0.5,
+      "rr": 0.3333333333333333,
+      "coverage": 1
+    },
+    {
+      "id": "g02",
+      "recall": 1,
+      "rr": 0.5,
+      "coverage": 1
+    },
+    {
+      "id": "g03",
+      "recall": 1,
+      "rr": 1,
+      "coverage": 1
+    },
+    {
+      "id": "g04",
+      "recall": 1,
+      "rr": 0.5,
+      "coverage": 1
+    },
+    {
+      "id": "g05",
+      "recall": 1,
+      "rr": 1,
+      "coverage": 1
+    },
+    {
+      "id": "g06",
+      "recall": 1,
+      "rr": 0.5,
+      "coverage": 1
+    },
+    {
+      "id": "g07",
+      "recall": 0.5,
+      "rr": 1,
+      "coverage": 1
+    },
+    {
+      "id": "g08",
+      "recall": 0,
+      "rr": 0,
+      "coverage": 0
+    },
+    {
+      "id": "g09",
+      "recall": 1,
+      "rr": 1,
+      "coverage": 1
+    },
+    {
+      "id": "g10",
+      "recall": 1,
+      "rr": 0.3333333333333333,
+      "coverage": 1
+    },
+    {
+      "id": "g11",
+      "recall": 1,
+      "rr": 0.5,
+      "coverage": 1
+    },
+    {
+      "id": "g12",
+      "recall": 1,
+      "rr": 1,
+      "coverage": 1
+    },
+    {
+      "id": "g13",
+      "recall": 1,
+      "rr": 0.5,
+      "coverage": 1
+    },
+    {
+      "id": "g14",
+      "recall": 1,
+      "rr": 0.3333333333333333,
+      "coverage": 1
+    },
+    {
+      "id": "g15",
+      "recall": 0.5,
+      "rr": 1,
+      "coverage": 1
+    },
+    {
+      "id": "g16",
+      "recall": 1,
+      "rr": 0.5,
+      "coverage": 1
+    },
+    {
+      "id": "g17",
+      "recall": 1,
+      "rr": 0.5,
+      "coverage": 1
+    },
+    {
+      "id": "g18",
+      "recall": 0.5,
+      "rr": 1,
+      "coverage": 1
+    },
+    {
+      "id": "g19",
+      "recall": 1,
+      "rr": 1,
+      "coverage": 1
+    },
+    {
+      "id": "g20",
+      "recall": 0.5,
+      "rr": 1,
+      "coverage": 1
+    },
+    {
+      "id": "g21",
+      "recall": 1,
+      "rr": 0.5,
+      "coverage": 1
+    },
+    {
+      "id": "g22",
+      "recall": 1,
+      "rr": 0.3333333333333333,
+      "coverage": 1
+    },
+    {
+      "id": "g23",
+      "recall": 1,
+      "rr": 0.5,
+      "coverage": 1
+    },
+    {
+      "id": "g24",
+      "recall": 1,
+      "rr": 0.5,
+      "coverage": 1
+    },
+    {
+      "id": "g25",
+      "recall": 0,
+      "rr": 0,
+      "coverage": 0
+    },
+    {
+      "id": "g26",
+      "recall": 1,
+      "rr": 1,
+      "coverage": 1
+    },
+    {
+      "id": "g27",
+      "recall": 1,
+      "rr": 1,
+      "coverage": 1
+    },
+    {
+      "id": "g28",
+      "recall": 1,
+      "rr": 1,
+      "coverage": 1
+    },
+    {
+      "id": "g29",
+      "recall": 1,
+      "rr": 1,
+      "coverage": 1
+    },
+    {
+      "id": "g30",
+      "recall": 1,
+      "rr": 0.5,
+      "coverage": 1
+    }
   ],
   "updated": "2026-10-11"
 }

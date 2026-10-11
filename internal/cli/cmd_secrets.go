@@ -75,13 +75,15 @@ func secretsList(a *app, args []string) error {
 	if err != nil {
 		return err
 	}
-	rules, root, err := secretRules(dir)
+	_, root, err := secretRules(dir)
 	if err != nil {
 		return fail(1, "%v", err)
 	}
 	if root == "" {
 		root = dir
 	}
+	// Cada archivo con las reglas del proyecto que lo contiene.
+	rs := newRuleSet(root)
 	var list []secretEntry
 	n := 0
 	walkErr := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
@@ -103,14 +105,16 @@ func secretsList(a *app, args []string) error {
 		}
 		rel, _ := filepath.Rel(root, p)
 		rel = filepath.ToSlash(rel)
-		kind, ok := rules.Kind(rel)
+		rules, prel := rs.For(rel)
+		kind, ok := rules.Kind(prel)
 		if !ok {
 			return nil
 		}
 		// Un .pem sin llave privada (un certificado, una llave pública) no es
 		// secreto; con --no-names no se abre nada y se lista igual.
 		if !*noNames {
-			if _, ok := rules.KindAt(root, rel); !ok {
+			proj := strings.TrimSuffix(filepath.ToSlash(p), prel)
+			if _, ok := rules.KindAt(filepath.FromSlash(proj), prel); !ok {
 				return nil
 			}
 		}
@@ -129,6 +133,9 @@ func secretsList(a *app, args []string) error {
 	})
 	if walkErr != nil {
 		return walkErr
+	}
+	if rs.err != nil {
+		return fail(1, "%v", rs.err)
 	}
 	sort.Slice(list, func(i, j int) bool { return list[i].Path < list[j].Path })
 	if *asJSON {
@@ -175,7 +182,7 @@ func secretsScan(a *app, args []string) error {
 	if err != nil {
 		return err
 	}
-	rules, root, err := secretRules(dir)
+	_, root, err := secretRules(dir)
 	if err != nil {
 		return fail(1, "%v", err)
 	}
@@ -221,7 +228,13 @@ func secretsScan(a *app, args []string) error {
 				return fail(1, "%v", err)
 			}
 		}
-		found = scanTracked(dir, files, rules)
+		// Cada archivo con las reglas del proyecto que lo contiene: desde la
+		// raíz de un monorepo, un proyecto en una subcarpeta aplica las suyas.
+		rs := newRuleSet(dir)
+		found = scanTracked(dir, files, rs.For)
+		if rs.err != nil {
+			return fail(1, "%v", rs.err)
+		}
 	}
 	if *asJSON {
 		if found == nil {
@@ -239,14 +252,15 @@ func secretsScan(a *app, args []string) error {
 }
 
 // scanTracked revisa archivos versionados: su nombre y su contenido.
-func scanTracked(dir string, files []string, rules secrets.Rules) []secrets.Finding {
+func scanTracked(dir string, files []string, rulesFor func(string) (secrets.Rules, string)) []secrets.Finding {
 	var out []secrets.Finding
 	for _, f := range files {
-		if rules.Allowed(f) {
+		rules, rel := rulesFor(f)
+		if rules.Allowed(rel) {
 			continue
 		}
 		text, readable := product.WorktreeText(dir, f)
-		if kind, ok := rules.Kind(f); ok && (!readable || secrets.Confirm(kind, []byte(text))) {
+		if kind, ok := rules.Kind(rel); ok && (!readable || secrets.Confirm(kind, []byte(text))) {
 			out = append(out, secrets.Finding{Path: f, Kind: "archivo de secretos (" + kind + ")"})
 			continue
 		}
