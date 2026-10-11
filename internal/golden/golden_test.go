@@ -29,6 +29,13 @@ func TestLoad(t *testing.T) {
 		`{"id":"g1","q":"x","expect":[]}`:                                                          "necesita id",
 		`{"id":"g1","q":"x","expect":["web:a"]}`:                                                   "referencia",
 		`{"id":"g1","q":"x","expect":["doc:a"]}` + "\n" + `{"id":"g1","q":"y","expect":["doc:b"]}`: "repetido",
+		`{"id":"g1","q":"x","expect":["adr:-"]}`:                                                   "referencia",
+		`{"id":"g1","q":"x","expect":["adr:.md"]}`:                                                 "referencia",
+		`{"id":"g1","q":"x","expect":["adr:ADR-00"]}`:                                              "referencia",
+		`{"id":"g1","q":"x","expect":["doc:../fuera.md"]}`:                                         "referencia",
+		`{"id":"g1","q":"x","expect":["doc:/etc/passwd"]}`:                                         "referencia",
+		`{"id":"g1","q":"x","expect":["doc:docs//a.md"]}`:                                          "referencia",
+		"# solo un comentario\n":                                                                   "no tiene preguntas",
 	} {
 		if _, err := Load(write(t, text)); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%s: se esperaba %q, hubo %v", text, want, err)
@@ -48,6 +55,10 @@ func TestMatches(t *testing.T) {
 		{adr, "adr:ADR-0009", true}, {adr, "adr:ADR-0010", false}, {doc, "adr:ADR-0009", false},
 		{doc, "doc:docs/specs/gate-v1.md", true}, {doc, "doc:docs/specs/gate", false},
 		{ctx, "ctx:pagos", true}, {ctx, "ctx:pedidos", false}, {doc, "ctx:pagos", false},
+		// Una nota general no es la fuente de un ámbito, ni el ámbito padre la de un subámbito.
+		{index.Chunk{Kind: index.KindContext, Scope: "general"}, "ctx:pagos", false},
+		{index.Chunk{Kind: index.KindContext, Scope: "pagos"}, "ctx:pagos/cobro", false},
+		{index.Chunk{Kind: index.KindADR, Path: "coyote/decisions/ADR-00091-x.md"}, "adr:ADR-0009", false},
 	} {
 		if Matches(c.c, c.ref) != c.want {
 			t.Errorf("Matches(%s, %s) = %v", c.c.Path, c.ref, !c.want)

@@ -10,9 +10,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
-	"os"
+	"path"
+	"regexp"
 	"strings"
 
+	"github.com/Emmanuel93/coyote/internal/fsx"
 	"github.com/Emmanuel93/coyote/internal/index"
 )
 
@@ -25,13 +27,23 @@ type Question struct {
 	K      int      `json:"k,omitempty"`
 }
 
-// Load lee un golden en JSONL: una pregunta por línea; las líneas vacías y
-// las que empiezan con # se saltan.
+// MaxFile es el tope de un golden o de una línea base: miles de preguntas
+// caben de sobra, y /dev/zero no cuelga a eval.
+const MaxFile = 4 << 20
+
+// Load lee un golden en JSONL de hasta MaxFile bytes.
 func Load(path string) ([]Question, error) {
-	data, err := os.ReadFile(path)
+	data, err := fsx.ReadCapped(path, MaxFile)
 	if err != nil {
 		return nil, err
 	}
+	return Parse(path, data)
+}
+
+// Parse lee un golden en JSONL: una pregunta por línea; las líneas vacías y
+// las que empiezan con # se saltan. Un golden sin preguntas es un error: con
+// él, cualquier línea base pasaría.
+func Parse(path string, data []byte) ([]Question, error) {
 	var out []Question
 	seen := map[string]bool{}
 	sc := bufio.NewScanner(bytes.NewReader(data))
@@ -64,13 +76,45 @@ func Load(path string) ([]Question, error) {
 		seen[q.ID] = true
 		out = append(out, q)
 	}
-	return out, sc.Err()
+	if err := sc.Err(); err != nil {
+		return nil, err
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("%s no tiene preguntas", path)
+	}
+	return out, nil
 }
 
+var adrRef = regexp.MustCompile(`^ADR-[0-9]{4}$`)
+
+// parseRef valida una referencia: doc:ruta del repo, adr:ADR-0000 o
+// ctx:ámbito. Una referencia laxa (adr:-, doc:../x) haría pasar en falso.
 func parseRef(e string) (kind, val string, ok bool) {
 	kind, val, ok = strings.Cut(e, ":")
-	ok = ok && val != "" && (kind == "doc" || kind == "adr" || kind == "ctx")
+	if !ok || strings.TrimSpace(val) != val || val == "" {
+		return kind, val, false
+	}
+	switch kind {
+	case "doc":
+		clean := path.Clean(val)
+		ok = clean == val && !path.IsAbs(val) && val != "." && !strings.HasPrefix(val, "../")
+	case "adr":
+		ok = adrRef.MatchString(val)
+	case "ctx":
+		ok = !strings.ContainsAny(val, " \t")
+	default:
+		ok = false
+	}
 	return
+}
+
+// adrID es el número de un ADR por el nombre de su archivo (ADR-0009-gate.md).
+func adrID(p string) string {
+	base := path.Base(p)
+	if len(base) >= 8 && adrRef.MatchString(base[:8]) && (len(base) == 8 || base[8] == '-' || base[8] == '.') {
+		return base[:8]
+	}
+	return ""
 }
 
 // Matches dice si un fragmento es la fuente esperada.
@@ -83,9 +127,9 @@ func Matches(c index.Chunk, ref string) bool {
 	case "doc":
 		return c.Path == val
 	case "adr":
-		return c.Kind == index.KindADR && strings.Contains(c.Path, val)
+		return c.Kind == index.KindADR && adrID(c.Path) == val
 	case "ctx":
-		return c.Kind == index.KindContext && index.InScope(c.Scope, val)
+		return c.Kind == index.KindContext && index.ScopeWithin(c.Scope, val)
 	}
 	return false
 }

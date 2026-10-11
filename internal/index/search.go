@@ -124,6 +124,15 @@ func (ix *Index) Search(query string, o SearchOptions) []Hit {
 	return hits
 }
 
+// ScopeWithin informa si el ámbito de un fragmento es el pedido o uno de sus
+// subámbitos. A diferencia de InScope, los ámbitos generales no cuentan: el
+// golden pide una fuente precisa (ADR-0025).
+func ScopeWithin(chunkScope, want string) bool {
+	cs := strings.ToLower(fold.Replace(strings.TrimSpace(chunkScope)))
+	w := strings.ToLower(fold.Replace(strings.Trim(strings.TrimSpace(want), "/")))
+	return w != "" && (cs == w || strings.HasPrefix(cs, w+"/"))
+}
+
 // InScope informa si el ámbito de un fragmento cae dentro del ámbito pedido:
 // igual, o un subámbito ("pagos/reembolsos" dentro de "pagos"). Los ámbitos
 // generales ("general", "-", vacío) aplican a todo.

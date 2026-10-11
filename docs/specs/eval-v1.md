@@ -21,14 +21,14 @@ Un archivo JSONL con una pregunta por línea. Las líneas vacías y las que empi
 | `id` | Identificador único de la pregunta |
 | `q` | La pregunta, como la haría una persona o un agente |
 | `scope` | Opcional: el ámbito, como en `ask --scope` |
-| `expect` | Las fuentes esperadas: `doc:ruta`, `adr:ADR-0000` o `ctx:ámbito` (una entrada de `CONTEXT.coyote.md`) |
+| `expect` | Las fuentes esperadas: `doc:ruta` (la ruta exacta del repo), `adr:ADR-0000` (el número exacto del ADR) o `ctx:ámbito` (una entrada de `CONTEXT.coyote.md` de ese ámbito o de uno de sus subámbitos; una nota general no cuenta) |
 | `k` | Opcional: cuántos resultados de `ask` cuentan; 5 por defecto |
 
-Una clave desconocida, un `id` repetido o una referencia de otra forma hacen fallar la lectura.
+Una clave desconocida, un `id` repetido, una referencia de otra forma (`adr:-`, `doc:../x`) o un golden sin preguntas hacen fallar la lectura. El golden y la línea base viven en `evals/` del proyecto: `--golden` es un `.jsonl` y `--baseline` un `.json` de esa carpeta, de hasta 4 MiB.
 
 ## Métricas
 
-Van en puntos porcentuales, promediadas sobre las preguntas:
+Van en puntos porcentuales, promediadas sobre las preguntas. Se miden sobre el índice sin los eventos del ledger: crecen con cada commit y moverían la medida sin que cambie el contexto.
 
 - **recall@k.** Qué parte de lo esperado sale entre los k primeros resultados de `ask`.
 - **MRR.** El inverso del puesto del primer resultado esperado, entre los 10 primeros.
@@ -36,10 +36,11 @@ Van en puntos porcentuales, promediadas sobre las preguntas:
 
 ## Línea base
 
-- `--update-baseline` escribe `evals/baseline.json` con las tres métricas, el golden, el presupuesto y la fecha. Ese cambio se revisa en el PR.
-- Sin `--update-baseline`, `coyote eval` compara contra la línea base y sale con 1 si una métrica baja más de 2 puntos.
+- `--update-baseline` escribe `evals/baseline.json` con las tres métricas, los `id` de las preguntas medidas, el golden, el presupuesto y la fecha. Ese cambio se revisa en el PR: `gate pr` marca R2 el golden y la línea base.
+- Sin `--update-baseline`, `coyote eval` compara contra la línea base y sale con 1 si una métrica baja más de 2 puntos o si falta en el golden una pregunta de la línea base: quitar preguntas también se revisa en el PR.
+- Sin línea base, mide y sale con 1: no hay contra qué comparar.
 - Medir con otro `--budget` que el de la línea base es un error de uso.
-- En coyote, `make check` corre `coyote eval`.
+- En coyote, `make check` y la CI corren `coyote eval`.
 - Para un agente, `eval` es lectura libre y `eval --update-baseline` pide aprobación.
 
 ## Límites

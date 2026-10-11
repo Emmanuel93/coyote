@@ -15,6 +15,8 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+
+	"github.com/Emmanuel93/coyote/internal/safetext"
 )
 
 // Finding es un texto marcado: la regla, su descripción y la línea (desde 1)
@@ -128,12 +130,18 @@ func Hidden(text string) []Finding {
 	var out []Finding
 	seen := map[string]bool{}
 	line := 1
+	prev := rune(0)
 	for _, r := range text {
 		if r == '\n' {
-			line++
+			line, prev = line+1, 0
 			continue
 		}
-		if kind := hidden(r); kind != "" {
+		kind := hidden(r)
+		if kind == "" && safetext.Invisible(prev, r) {
+			kind = labelZero
+		}
+		prev = r
+		if kind != "" {
 			k := kind + "\x00" + strconv.Itoa(line)
 			if !seen[k] {
 				seen[k] = true
@@ -167,10 +175,12 @@ func hidden(r rune) string {
 	case r >= 0x202A && r <= 0x202E, r >= 0x2066 && r <= 0x2069, r == 0x200E, r == 0x200F, r == 0x061C:
 		return labelBidi
 	case r == 0x200B, r == 0x2060, r == 0xFEFF, r == 0x180E, r >= 0x2061 && r <= 0x2064, r == 0x3164, r == 0x115F, r == 0x1160:
-		return "caracteres de ancho cero"
+		return labelZero
 	}
 	return ""
 }
+
+const labelZero = "caracteres de ancho cero"
 
 // normalize deja el texto en minúsculas, sin acentos ni caracteres de
 // formato, con los espacios juntos. lines da, por cada byte del resultado, la
@@ -195,7 +205,7 @@ func normalize(s string) (string, []int) {
 			line++
 			continue
 		}
-		if unicode.Is(unicode.Cf, r) || hidden(r) != "" {
+		if unicode.Is(unicode.Cf, r) || hidden(r) != "" || safetext.Selector(r) || safetext.Invisible(0, r) {
 			continue // una orden partida con caracteres invisibles se lee junta
 		}
 		if unicode.IsSpace(r) {
@@ -239,9 +249,16 @@ func fold(r rune) rune {
 // instrucciones, en minúsculas: en un disco que no distingue mayúsculas,
 // agents.md es AGENTS.md.
 var instructionNames = map[string]bool{
-	"agents.md": true, "claude.md": true, "gemini.md": true, "context.coyote.md": true, "readme.coyote.md": true,
-	".cursorrules": true, ".windsurfrules": true, ".clinerules": true, "copilot-instructions.md": true,
+	"agents.md": true, "agent.md": true, "claude.md": true, "claude.local.md": true, "gemini.md": true,
+	"context.coyote.md": true, "readme.coyote.md": true, ".cursorrules": true, ".windsurfrules": true,
+	".clinerules": true, "copilot-instructions.md": true,
 }
+
+// instructionDirs son carpetas cuyos archivos los agentes leen como
+// instrucciones: las de Copilot (instrucciones, prompts, modos y agentes),
+// las reglas de Cline, el steering de Kiro y las guías de Junie.
+var instructionDirs = []string{".github/instructions/", ".github/prompts/", ".github/chatmodes/", ".github/agents/",
+	".clinerules/", ".kiro/steering/", ".junie/"}
 
 // InstructionFile informa si la ruta es un archivo de instrucciones de
 // agentes, sin distinguir mayúsculas.
@@ -250,7 +267,12 @@ func InstructionFile(p string) bool {
 	if instructionNames[path.Base(lp)] {
 		return true
 	}
-	return strings.HasPrefix(lp, ".github/instructions/") || strings.Contains(lp, "/.github/instructions/")
+	for _, d := range instructionDirs {
+		if strings.HasPrefix(lp, d) || strings.Contains(lp, "/"+d) {
+			return true
+		}
+	}
+	return false
 }
 
 // docExts son los documentos para leer: ahí una orden para un agente no tiene

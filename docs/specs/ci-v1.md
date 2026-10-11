@@ -59,7 +59,7 @@ Es la aprobación en equipo sin claves compartidas. Hace lo mismo que `ci impact
 | Riesgo | Rutas |
 |--------|-------|
 | R3 | el pipeline, las acciones propias y CODEOWNERS; `.gitattributes` y `.gitmodules`; `.gitleaks.toml` y `.gitleaksignore`, y los nombres que gitleaks salta sin mirar (cualquier ruta con `gitleaks.toml`, o que termina en `go.mod`, `go.sum` o `go.work` sin llamarse así); migraciones y SQL; `auth`, `security`, `crypto`; infraestructura (Terraform con `*.tf.json`, `*.tfvars`, `terragrunt.hcl` y `.terraform.lock.hcl`, Helm, Kubernetes, Dockerfile); la configuración del gate, de los hooks de cada IDE, del inventario (`coyote/infra.yaml`) y del estándar |
-| R2 | contratos de API (OpenAPI, AsyncAPI, proto, Avro, GraphQL); dependencias (`go.mod`, `pom.xml`, Gradle, `package.json`, `pubspec.yaml`…); configuración del servicio (`application*.yml`); los SLOs; las instrucciones de los agentes (`AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `CONTEXT.coyote.md`, `README.coyote.md`, `.github/copilot-instructions.md`, `.github/instructions/`, `.cursorrules`, `.windsurfrules`, `.clinerules`), también con otras mayúsculas |
+| R2 | contratos de API (OpenAPI, AsyncAPI, proto, Avro, GraphQL); dependencias (`go.mod`, `pom.xml`, Gradle, `package.json`, `pubspec.yaml`…); configuración del servicio (`application*.yml`); los SLOs; el golden y la línea base de `coyote eval` (`evals/golden*.jsonl`, `evals/baseline*.json`); las instrucciones de los agentes (`AGENTS.md`, `AGENT.md`, `CLAUDE.md`, `CLAUDE.local.md`, `GEMINI.md`, `CONTEXT.coyote.md`, `README.coyote.md`, `.github/copilot-instructions.md`, `.github/instructions/`, `.github/prompts/`, `.github/chatmodes/`, `.github/agents/`, `.cursorrules`, `.windsurfrules`, `.clinerules` y su carpeta, `.kiro/steering/`, `.junie/`), también con otras mayúsculas |
 
 El proyecto agrega las suyas en `coyote/project.yaml`, un archivo que ningún agente puede editar. `install --ci` las lleva a cada workflow:
 
@@ -75,7 +75,7 @@ risk:
 
 - En un documento (Markdown, texto) o en una instrucción de agentes, un texto con forma de orden para un agente es R2. Las líneas seguidas se leen juntas. El reporte da la línea y la regla del clasificador, nunca el texto.
 - En cualquier otro archivo solo se buscan caracteres ocultos. Los controles de dirección del texto son R3: lo que se revisa no es lo que corre (Trojan Source). Los de ancho cero y las etiquetas Unicode son R2.
-- Cambiar o borrar líneas existentes de `coyote/ledger/` es R3. Se compara contra el merge-base, así lo que la base agregó después no cuenta. Agregar líneas no cambia el riesgo.
+- Cambiar o borrar líneas existentes de `coyote/ledger/` es R3. Se compara contra el merge-base y byte por byte, así lo que la base agregó después no cuenta y recodificar el archivo (UTF-16, otro fin de línea) no pasa por "solo agrega". También es R3 un archivo del ledger que no es UTF-8 sin BOM o que no es un archivo (un symlink, un submódulo, una carpeta). Agregar líneas no cambia el riesgo.
 
 **Plan de Terraform.** En un repo de infraestructura, el pipeline puede generar el plan y pasarlo con `--plan plan.json`: su riesgo se suma al del PR y el comentario lleva la tabla de recursos, sin valores (docs/specs/infra-v1.md). Generarlo necesita credenciales de la nube en el pipeline; coyote no las pide.
 

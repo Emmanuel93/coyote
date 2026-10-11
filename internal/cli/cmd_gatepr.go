@@ -7,6 +7,7 @@ import (
 	"os"
 	"path"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/Emmanuel93/coyote/internal/ci"
 	"github.com/Emmanuel93/coyote/internal/fsx"
@@ -573,31 +574,59 @@ func injectionRisks(added []product.AddedFile, whole func(string) (string, bool)
 
 // ledgerRisks marca como R3 un PR que cambia o borra líneas del ledger: el
 // ledger solo agrega (docs/specs/ccf-v1.md). Se compara contra el merge-base,
-// así lo que la base agregó después no cuenta.
+// así lo que la base agregó después no cuenta. La comparación es de bytes:
+// recodificar el archivo (UTF-16, CRLF) lo deja ilegible para el ledger
+// aunque el texto se vea igual.
 func ledgerRisks(dir, left, right string, changed []string) []ci.FileRisk {
 	var out []ci.FileRisk
+	r3 := func(f, why string) { out = append(out, ci.FileRisk{Path: f, Risk: ci.R3, Why: why}) }
 	for _, f := range changed {
 		if !strings.HasPrefix(f, "coyote/ledger/") && !strings.Contains(f, "/coyote/ledger/") {
 			continue
 		}
-		old, hadOld := product.FileAt(dir, left, f)
-		if !hadOld {
+		oldMode, _, hadOld := product.TreeEntry(dir, left, f)
+		newMode, newType, hasNew := product.TreeEntry(dir, right, f)
+		switch {
+		case hadOld && !hasNew:
+			r3(f, "borra un archivo del ledger; el ledger solo agrega")
+			continue
+		case !hasNew:
+			continue
+		case newType != "blob" || !regularMode(newMode):
+			r3(f, "el ledger tiene que ser un archivo: un symlink, un submódulo o una carpeta lo esconden")
+			continue
+		case hadOld && !regularMode(oldMode):
+			r3(f, "cambia el tipo de un archivo del ledger")
+			continue
+		}
+		nw, ok := product.BlobAt(dir, right, f, fsx.MaxText)
+		switch {
+		case !ok:
+			r3(f, "un archivo del ledger que no se pudo leer entero")
+			continue
+		case !utf8.Valid(nw) || bytes.HasPrefix(nw, []byte("\xef\xbb\xbf")):
+			r3(f, "el ledger tiene que ser UTF-8 sin BOM; recodificado, coyote no lo lee")
+			continue
+		case !hadOld:
 			continue // archivo nuevo: solo agrega
 		}
-		nw, hasNew := product.FileAt(dir, right, f)
+		old, ok := product.BlobAt(dir, left, f, fsx.MaxText)
 		switch {
-		case !hasNew:
-			out = append(out, ci.FileRisk{Path: f, Risk: ci.R3, Why: "borra un archivo del ledger; el ledger solo agrega"})
+		case !ok:
+			r3(f, "un archivo del ledger de la base que no se pudo leer entero")
 		case !appendOnly(old, nw):
-			out = append(out, ci.FileRisk{Path: f, Risk: ci.R3, Why: "cambia o borra líneas del ledger; el ledger solo agrega"})
+			r3(f, "cambia o borra líneas del ledger; el ledger solo agrega")
 		}
 	}
 	return out
 }
 
+// regularMode dice si un modo de git es el de un archivo normal.
+func regularMode(m string) bool { return m == "100644" || m == "100755" }
+
 // appendOnly dice si nw solo agrega a old. Un archivo sin salto final sigue
 // valiendo: coyote le agrega el salto antes de la línea nueva.
-func appendOnly(old, nw string) bool { return strings.HasPrefix(nw, old) }
+func appendOnly(old, nw []byte) bool { return bytes.HasPrefix(nw, old) }
 
 // hiddenRisk revisa las líneas que un PR agrega a un archivo que no es un
 // documento: caracteres invisibles o que reordenan lo que ve quien revisa.

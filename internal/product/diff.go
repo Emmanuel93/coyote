@@ -300,6 +300,25 @@ func BlobAt(dir, rev, p string, max int) ([]byte, bool) {
 	return out.Bytes(), true
 }
 
+// TreeEntry devuelve el modo y el tipo de una ruta en una revisión, sin leer
+// su contenido: 100644 blob es un archivo, 120000 blob un symlink, 160000
+// commit un submódulo y 040000 tree una carpeta.
+func TreeEntry(dir, rev, p string) (mode, typ string, ok bool) {
+	if rev == "" || strings.HasPrefix(rev, "-") || !safeGitPath(p) {
+		return "", "", false
+	}
+	out, err := gitRead(dir, "ls-tree", "-z", "--full-tree", rev, "--", p).Output()
+	if err != nil {
+		return "", "", false
+	}
+	meta, name, found := strings.Cut(strings.TrimSuffix(string(out), "\x00"), "\t")
+	f := strings.Fields(meta)
+	if !found || name != p || len(f) != 3 {
+		return "", "", false
+	}
+	return f[0], f[1], true
+}
+
 // fileText lee un archivo del repo en una revisión, o del árbol de trabajo.
 func fileText(dir, rev, p string) (string, bool) {
 	if rev == "" {

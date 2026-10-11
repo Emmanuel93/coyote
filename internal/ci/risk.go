@@ -43,10 +43,16 @@ var DefaultRules = []Rule{
 	{R2, []string{"go.mod", "**/pom.xml", "**/build.gradle", "**/build.gradle.kts", "**/package.json", "**/pubspec.yaml", "**/requirements*.txt", "**/pyproject.toml", "**/Cargo.toml"}, "las dependencias"},
 	{R2, []string{"**/application*.{yml,yaml,properties}", "**/bootstrap*.{yml,yaml,properties}"}, "la configuración del servicio"},
 	{R2, []string{"coyote/slo/**", "**/coyote/slo/**"}, "los SLOs y sus alertas"},
+	// Bajar la línea base o quitar preguntas del golden escondería que el
+	// contexto empeoró (ADR-0025).
+	{R2, []string{"evals/golden*.jsonl", "evals/baseline*.json", "**/evals/golden*.jsonl", "**/evals/baseline*.json"}, "el golden y la línea base que miden el contexto"},
 	// Lo que los agentes leen como instrucción (ADR-0023); gate pr suma los
 	// mismos nombres con otras mayúsculas, que en macOS son el mismo archivo.
-	{R2, []string{"AGENTS.md", "CLAUDE.md", "GEMINI.md", "CONTEXT.coyote.md", "README.coyote.md", ".cursorrules", ".windsurfrules", ".clinerules",
-		".github/copilot-instructions.md", ".github/instructions/**", "**/.github/instructions/**"}, WhyAgentInstructions},
+	{R2, []string{"AGENTS.md", "AGENT.md", "CLAUDE.md", "CLAUDE.local.md", "GEMINI.md", "CONTEXT.coyote.md", "README.coyote.md",
+		".cursorrules", ".windsurfrules", ".clinerules", ".clinerules/**", ".github/copilot-instructions.md",
+		".github/instructions/**", "**/.github/instructions/**", ".github/prompts/**", "**/.github/prompts/**",
+		".github/chatmodes/**", "**/.github/chatmodes/**", ".github/agents/**", "**/.github/agents/**",
+		".kiro/steering/**", ".junie/**"}, WhyAgentInstructions},
 }
 
 // WhyAgentInstructions es el motivo de riesgo de los archivos que los agentes

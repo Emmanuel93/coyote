@@ -4,3 +4,4 @@
 2026-10-11T01:05Z|@eramirezhdez/coyote-devsecops|W-0008|coyote|feat|release|make dist reproducible con SBOM CycloneDX 1.7 y procedencia SLSA Build L1…|-|-|-|ok
 2026-10-11T01:18Z|@eramirezhdez/coyote-analyst|W-0008|coyote|doc|docs|documentación Diátaxis: tutorial probado, guías, referencia generada, explicación y CHANGELOG|-|-|-|ok
 2026-10-11T02:04Z|@eramirezhdez/coyote-security|W-0008|coyote|fix|gate|banderas que niegan cuentan tras --, coyote toma --, rutas limpias y…|-|-|-|ok
+2026-10-11T02:14Z|@eramirezhdez/coyote-security|W-0008|coyote|fix|security|ledger por bytes en gate pr, más archivos de instrucciones, marcas invisibles,…|-|-|-|ok

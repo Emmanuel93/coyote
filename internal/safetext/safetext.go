@@ -31,35 +31,60 @@ func Unsafe(r rune) bool {
 	return unicode.Is(unicode.Cf, r)
 }
 
+// Invisible dice si r, después de prev, es una marca que no se ve y puede
+// esconder texto sin ser de formato: el que une grafemas (U+034F), los
+// rellenos del hangul, los selectores de variación del mongol, las vocales
+// mudas del jemer y un selector de variación que no sigue a un símbolo, un
+// ideograma o la base de una tecla (después de un emoji, U+FE0F es su forma
+// de color).
+func Invisible(prev, r rune) bool {
+	switch {
+	case r == 0x034f, r == 0x115f, r == 0x1160, r == 0x3164, r == 0xffa0,
+		r >= 0x180b && r <= 0x180d, r == 0x180f, r == 0x17b4, r == 0x17b5:
+		return true
+	case Selector(r):
+		return !unicode.IsSymbol(prev) && !unicode.Is(unicode.Han, prev) && !unicode.IsDigit(prev) && prev != '#' && prev != '*'
+	}
+	return false
+}
+
+// Selector dice si r es un selector de variación.
+func Selector(r rune) bool { return r >= 0xfe00 && r <= 0xfe0f || r >= 0xe0100 && r <= 0xe01ef }
+
 // Escape devuelve los bytes con cada runa insegura escrita como su código y
 // cada byte que no es UTF-8 válido como \xNN.
 func Escape(b []byte) []byte {
 	clean := true
+	prev := rune(0)
 	for i := 0; i < len(b); {
 		r, n := utf8.DecodeRune(b[i:])
-		if (r == utf8.RuneError && n == 1) || Unsafe(r) {
+		if (r == utf8.RuneError && n == 1) || Unsafe(r) || Invisible(prev, r) {
 			clean = false
 			break
 		}
+		prev = r
 		i += n
 	}
 	if clean {
 		return b
 	}
 	out := make([]byte, 0, len(b)+16)
+	prev = 0
 	for i := 0; i < len(b); {
 		r, n := utf8.DecodeRune(b[i:])
+		bad := Unsafe(r) || Invisible(prev, r)
 		switch {
 		case r == utf8.RuneError && n == 1:
 			out = fmt.Appendf(out, "\\x%02x", b[i])
-		case Unsafe(r) && r > 0xffff:
+		case bad && r > 0xffff:
 			hi, lo := utf16.EncodeRune(r)
 			out = fmt.Appendf(out, "\\u%04x\\u%04x", hi, lo)
-		case Unsafe(r):
+		case bad:
 			out = fmt.Appendf(out, "\\u%04x", r)
 		default:
 			out = append(out, b[i:i+n]...)
 		}
+		prev = r
 		i += n
 	}
 	return out

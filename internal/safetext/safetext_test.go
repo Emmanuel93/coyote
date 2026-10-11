@@ -45,3 +45,21 @@ func TestWriterPartido(t *testing.T) {
 		t.Fatalf("JSON: %v %q", err, back["t"])
 	}
 }
+
+// TestEscapaMarcasInvisibles: las marcas que esconden texto salen con su
+// código; el selector de un emoji se queda.
+func TestEscapaMarcasInvisibles(t *testing.T) {
+	cases := map[string]string{
+		"a\u034fb":              `a\u034fb`,
+		"x\ufe0fy":              `x\ufe0fy`,
+		"x\U000e0101y":          `x\udb40\udd01y`,
+		"\u26a0\ufe0f atención": "\u26a0\ufe0f atención",
+		"1\ufe0f\u20e3":         "1\ufe0f\u20e3",
+		"m\u180bn":              `m\u180bn`,
+	}
+	for in, want := range cases {
+		if got := String(in); got != want {
+			t.Errorf("String(%+q) = %+q, quería %+q", in, got, want)
+		}
+	}
+}

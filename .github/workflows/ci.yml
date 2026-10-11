@@ -45,5 +45,25 @@ jobs:
       - name: sin atribución a IA en docs y commits (R15)
         run: ./bin/coyote attribution check --commits 50
 
+      - name: el contexto no empeora frente a la línea base (ADR-0025)
+        run: ./bin/coyote eval
+
       - name: ejemplo acme-shop
         run: ./bin/coyote -C examples/acme-shop standards lint
+
+  # Dos builds del release, cada uno con su caché de Go vacía, dan los mismos
+  # hashes (ADR-0027).
+  reproducible:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # la versión y la fecha salen de git
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: make verify-dist
+        run: make verify-dist

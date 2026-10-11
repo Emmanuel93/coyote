@@ -1,11 +1,13 @@
 package cli
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/Emmanuel93/coyote/internal/fsx"
 	"github.com/Emmanuel93/coyote/internal/golden"
@@ -19,7 +21,26 @@ type evalBaseline struct {
 	Golden string `json:"golden"`
 	Budget int    `json:"budget"`
 	golden.Summary
-	Updated string `json:"updated"`
+	// IDs son las preguntas medidas: quitar una del golden para esconder una
+	// regresión hace fallar a eval.
+	IDs     []string `json:"ids,omitempty"`
+	Updated string   `json:"updated"`
+}
+
+// evalPath resuelve una ruta de eval: el golden y la línea base son
+// archivos del repo en evals/, nunca de afuera ni de otra carpeta (una línea
+// base escrita en .claude/ reemplazaría la configuración del IDE).
+func evalPath(root, p, flag, ext string) (string, error) {
+	abs := p
+	if !filepath.IsAbs(abs) {
+		abs = filepath.Join(root, abs)
+	}
+	rel, err := filepath.Rel(root, filepath.Clean(abs))
+	rel = filepath.ToSlash(rel)
+	if err != nil || !strings.HasPrefix(rel, "evals/") || !strings.HasSuffix(rel, ext) || strings.Contains(rel, "/../") {
+		return "", fail(2, "--%s tiene que ser un archivo %s dentro de evals/ del proyecto", flag, ext)
+	}
+	return rel, nil
 }
 
 // cmdEval mide el contexto con el golden del proyecto, sin modelos.
@@ -38,14 +59,22 @@ func cmdEval(a *app, args []string) error {
 	if err != nil {
 		return err
 	}
-	gp := *goldenPath
-	if !filepath.IsAbs(gp) {
-		gp = filepath.Join(root, gp)
+	grel, err := evalPath(root, *goldenPath, "golden", ".jsonl")
+	if err != nil {
+		return err
 	}
-	qs, err := golden.Load(gp)
+	brel, err := evalPath(root, *basePath, "baseline", ".json")
+	if err != nil {
+		return err
+	}
+	gdata, err := fsx.ReadFile(root, grel, golden.MaxFile)
 	if errors.Is(err, os.ErrNotExist) {
-		return fail(1, "no hay golden en %s: escribe preguntas con sus fuentes (docs/specs/eval-v1.md)", *goldenPath)
+		return fail(1, "no hay golden en %s: escribe preguntas con sus fuentes (docs/specs/eval-v1.md)", grel)
 	}
+	if err != nil {
+		return fail(1, "%v", err)
+	}
+	qs, err := golden.Parse(grel, gdata)
 	if err != nil {
 		return fail(1, "%v", err)
 	}
@@ -53,17 +82,21 @@ func cmdEval(a *app, args []string) error {
 	if err != nil {
 		return err
 	}
+	// Sin los eventos del ledger: crecen con cada commit y moverían la medida
+	// sin que cambie el contexto (ADR-0025).
+	ix = ix.Without(index.KindEvent)
 	results, sum := golden.Run(ix, cfg.Name, qs, *budget)
-	bp := *basePath
-	if !filepath.IsAbs(bp) {
-		bp = filepath.Join(root, bp)
-	}
 	var base *evalBaseline
-	if data, err := os.ReadFile(bp); err == nil {
+	switch data, err := fsx.ReadFile(root, brel, golden.MaxFile); {
+	case err == nil:
 		base = &evalBaseline{}
-		if err := json.Unmarshal(data, base); err != nil {
-			return fail(1, "%s: %v", *basePath, err)
+		dec := json.NewDecoder(bytes.NewReader(data))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(base); err != nil {
+			return fail(1, "%s: %v", brel, err)
 		}
+	case !errors.Is(err, os.ErrNotExist):
+		return fail(1, "%v", err)
 	}
 	var regressions []string
 	if base != nil && !*update {
@@ -71,19 +104,38 @@ func cmdEval(a *app, args []string) error {
 			return fail(2, "la línea base se midió con --budget %d; mide igual o actualízala", base.Budget)
 		}
 		regressions = golden.Regression(base.Summary, sum, evalTolerance)
-	}
-	if *update {
-		if rel, err := filepath.Rel(root, bp); err == nil {
-			if err := fsx.NoSymlinks(root, filepath.ToSlash(rel)); err != nil {
-				return fail(1, "%v", err)
+		have := map[string]bool{}
+		for _, q := range qs {
+			have[q.ID] = true
+		}
+		var gone []string
+		for _, id := range base.IDs {
+			if !have[id] {
+				gone = append(gone, id)
 			}
 		}
-		nb := evalBaseline{Golden: filepath.ToSlash(*goldenPath), Budget: *budget, Summary: sum, Updated: a.now().Format("2006-01-02")}
+		switch {
+		case len(gone) > 0:
+			regressions = append(regressions, fmt.Sprintf("faltan %d preguntas de la línea base (%s): quitarlas se revisa en el PR con --update-baseline", len(gone), strings.Join(gone, ", ")))
+		case len(base.IDs) == 0 && sum.Questions < base.Questions:
+			regressions = append(regressions, fmt.Sprintf("el golden tiene %d preguntas y la línea base, %d", sum.Questions, base.Questions))
+		}
+	}
+	if *update {
+		if err := fsx.NoSymlinks(root, brel); err != nil {
+			return fail(1, "%v", err)
+		}
+		ids := make([]string, 0, len(qs))
+		for _, q := range qs {
+			ids = append(ids, q.ID)
+		}
+		nb := evalBaseline{Golden: grel, Budget: *budget, Summary: sum, IDs: ids, Updated: a.now().Format("2006-01-02")}
 		data, _ := json.MarshalIndent(nb, "", "  ")
+		bp := filepath.Join(root, filepath.FromSlash(brel))
 		if err := os.MkdirAll(filepath.Dir(bp), 0o755); err != nil {
 			return err
 		}
-		if err := os.WriteFile(bp, append(data, '\n'), 0o644); err != nil {
+		if err := fsx.WriteAtomic(bp, append(data, '\n'), 0o644); err != nil {
 			return err
 		}
 	}
@@ -94,7 +146,7 @@ func cmdEval(a *app, args []string) error {
 			return err
 		}
 	} else {
-		fmt.Fprintf(a.stdout, "golden %s: %d preguntas · paquete de %d tokens · sin modelos\n", *goldenPath, sum.Questions, *budget)
+		fmt.Fprintf(a.stdout, "golden %s: %d preguntas · paquete de %d tokens · sin modelos\n", grel, sum.Questions, *budget)
 		line := func(name string, v float64, b float64, pct bool) {
 			unit := ""
 			if pct {
@@ -122,11 +174,11 @@ func cmdEval(a *app, args []string) error {
 		}
 		switch {
 		case *update:
-			fmt.Fprintf(a.stdout, "línea base escrita en %s: revísala y hazle commit\n", *basePath)
+			fmt.Fprintf(a.stdout, "línea base escrita en %s: revísala y hazle commit\n", brel)
 		case base == nil:
-			fmt.Fprintf(a.stdout, "sin línea base: corre coyote eval --update-baseline y hazle commit a %s\n", *basePath)
+			fmt.Fprintf(a.stdout, "sin línea base: corre coyote eval --update-baseline y hazle commit a %s\n", brel)
 		case len(regressions) == 0:
-			fmt.Fprintf(a.stdout, "✓ sin regresiones frente a %s (tolerancia de %.0f puntos)\n", *basePath, evalTolerance)
+			fmt.Fprintf(a.stdout, "✓ sin regresiones frente a %s (tolerancia de %.0f puntos)\n", brel, evalTolerance)
 		default:
 			for _, r := range regressions {
 				fmt.Fprintf(a.stdout, "✗ %s\n", r)
@@ -135,6 +187,9 @@ func cmdEval(a *app, args []string) error {
 	}
 	if len(regressions) > 0 {
 		return fail(1, "coyote eval: el contexto empeoró frente a la línea base (ADR-0025)")
+	}
+	if base == nil && !*update {
+		return fail(1, "coyote eval: sin línea base no hay contra qué medir")
 	}
 	return nil
 }

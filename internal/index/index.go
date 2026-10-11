@@ -161,6 +161,25 @@ func BuildCached(root, base, rel string) (*Index, error) {
 
 var errNoCache = fmt.Errorf("sin caché")
 
+// Without devuelve una copia del índice sin los fragmentos de esas clases,
+// con BM25 recalculado sobre lo que queda. coyote eval mide sin los eventos
+// del ledger: cambian con cada commit y moverían la medida sin que cambie el
+// contexto (ADR-0025).
+func (ix *Index) Without(kinds ...string) *Index {
+	drop := map[string]bool{}
+	for _, k := range kinds {
+		drop[k] = true
+	}
+	out := &Index{Root: ix.Root, Reused: ix.Reused, Parsed: ix.Parsed}
+	for _, c := range ix.Chunks {
+		if !drop[c.Kind] {
+			out.Chunks = append(out.Chunks, c)
+		}
+	}
+	out.bm25 = newBM25(out.Chunks)
+	return out
+}
+
 func readCache(base, rel string) *cache {
 	c := &cache{Files: map[string]*fileEntry{}}
 	data, err := fsx.ReadFile(base, rel, 64<<20)
