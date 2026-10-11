@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/Emmanuel93/coyote/internal/ccf"
+	"github.com/Emmanuel93/coyote/internal/safetext"
 )
 
 // Control es un control de un marco y lo que el reporte aporta como evidencia.
@@ -32,6 +33,7 @@ var Limits = []string{
 	"Lo que un agente hizo por fuera de coyote no está en el ledger.",
 	"El costo es la estimación de Claude Code, no la factura.",
 	"Una aprobación del gate vale solo en la máquina que la firmó; el reporte ve su registro, no la firma.",
+	"Una historia reescrita (amend, rebase, push forzado) no se ve desde HEAD: compara el commit y la huella del ledger con los del reporte anterior.",
 	"Es evidencia para una auditoría, no una certificación (ADR-0024).",
 }
 
@@ -47,6 +49,14 @@ func (r *Report) Period() string {
 
 func usd(v float64) string { return "$" + strings.TrimPrefix(ccf.FormatUSD(v), "$") }
 
+// item deja un texto que viene del ledger o de un registro en una sola línea
+// y sin caracteres de control ni invisibles: no puede abrir una sección ni
+// esconder texto en el reporte.
+func item(s string) string { return safetext.String(oneLine(s, 300)) }
+
+// cell es item para una celda de tabla: la barra vertical no la parte.
+func cell(s string) string { return strings.ReplaceAll(item(s), "|", "\\|") }
+
 // Markdown devuelve el reporte para personas.
 func (r *Report) Markdown() string {
 	var b strings.Builder
@@ -60,8 +70,13 @@ func (r *Report) Markdown() string {
 			warns++
 		}
 	}
-	w("# Auditoría de %s · %s\n\n", r.Project, r.Period())
+	w("# Auditoría de %s · %s\n\n", item(r.Project), r.Period())
 	w("Generada por `coyote audit` el %s desde el ledger, `coyote/approvals/` y la historia de git. Es evidencia para una auditoría, no una certificación (ADR-0024).\n\n", r.Generated.Format("2006-01-02 15:04Z"))
+	head := "sin git"
+	if r.Head != "" {
+		head = "`" + r.Head[:min(12, len(r.Head))] + "`"
+	}
+	w("Commit: %s · huella del ledger (sha256): `%s`\n\n", head, r.LedgerSHA256[:min(16, len(r.LedgerSHA256))])
 	w("| Eventos | Personas | Agentes | Costo | Tope del mes | Integridad |\n| --- | --- | --- | --- | --- | --- |\n")
 	cap := "sin tope"
 	if r.MonthlyUSD > 0 {
@@ -72,11 +87,11 @@ func (r *Report) Markdown() string {
 	w("## Eventos\n\n")
 	w("| Tipo | Eventos | Costo |\n| --- | --- | --- |\n")
 	for _, c := range r.ByType {
-		w("| %s | %d | %s |\n", c.Key, c.Events, usd(c.Cost))
+		w("| %s | %d | %s |\n", cell(c.Key), c.Events, usd(c.Cost))
 	}
 	w("\n| Actor | Eventos | Costo |\n| --- | --- | --- |\n")
 	for _, c := range r.ByActor {
-		w("| %s | %d | %s |\n", c.Key, c.Events, usd(c.Cost))
+		w("| %s | %d | %s |\n", cell(c.Key), c.Events, usd(c.Cost))
 	}
 
 	w("\n## Aprobaciones y gate\n\n")
@@ -87,7 +102,7 @@ func (r *Report) Markdown() string {
 	} else {
 		w("- Concesiones (varios usos o más de una hora):\n")
 		for _, g := range r.Grants {
-			w("  - %s\n", g)
+			w("  - %s\n", item(g))
 		}
 	}
 	if len(r.Autonomous) == 0 {
@@ -95,13 +110,13 @@ func (r *Report) Markdown() string {
 	} else {
 		w("- Planes `autonomous` autorizados:\n")
 		for _, a := range r.Autonomous {
-			w("  - %s\n", a)
+			w("  - %s\n", item(a))
 		}
 	}
 	if len(r.Releases) > 0 {
 		w("\n| Gate | Release | Decisión | Aprobó | Fecha | Registró |\n| --- | --- | --- | --- | --- | --- |\n")
 		for _, x := range r.Releases {
-			w("| %s (%s) | %s | %s | %s | %s | %s |\n", x.Gate, x.ID, x.Release, x.Decision, x.Approver, x.Date, orDash(x.RecordedBy))
+			w("| %s (%s) | %s | %s | %s | %s | %s |\n", cell(x.Gate), cell(x.ID), cell(x.Release), cell(x.Decision), cell(x.Approver), cell(x.Date), cell(orDash(x.RecordedBy)))
 		}
 	}
 
@@ -115,7 +130,7 @@ func (r *Report) Markdown() string {
 		}{{"Persona", r.ByPerson}, {"Agente", r.ByAgent}, {"Modelo", r.ByModel}, {"Workstream", r.ByWS}} {
 			w("\n| %s | Eventos con costo | Costo |\n| --- | --- | --- |\n", t.title)
 			for _, c := range t.rows {
-				w("| %s | %d | %s |\n", c.Key, c.Events, usd(c.Cost))
+				w("| %s | %d | %s |\n", cell(c.Key), c.Events, usd(c.Cost))
 			}
 		}
 	}
@@ -133,7 +148,7 @@ func (r *Report) Markdown() string {
 		}
 		w("\n**%s** (%s):\n\n", c.Name, c.Result)
 		for _, d := range c.Detail {
-			w("- %s\n", d)
+			w("- %s\n", item(d))
 		}
 	}
 

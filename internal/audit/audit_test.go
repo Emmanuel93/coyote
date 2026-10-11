@@ -109,3 +109,76 @@ func TestFechasFuturasYLineasInvalidas(t *testing.T) {
 type errString string
 
 func (e errString) Error() string { return string(e) }
+
+// TestRespaldoUnoAUno: revisión adversarial de v1.0. Un registro de un gate
+// respalda un solo evento, que nombra su gate, dice su decisión y no es
+// anterior a ella.
+func TestRespaldoUnoAUno(t *testing.T) {
+	from := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	ev := func(ts, typ, what string, refs ...string) ledger.Entry {
+		e := entry(ts, "@ana/claude-code", typ, what, refs, 0)
+		e.LineNo = len(ts) + len(what) // cada evento en su línea
+		return e
+	}
+	in := Input{Project: "tienda", Root: "/p", From: from, To: from.AddDate(0, 1, 0), Now: from.AddDate(0, 0, 25),
+		Entries: []ledger.Entry{
+			ev("2026-09-01T10:00:00Z", "apr", "G1 aprobado: antes de decidir"),
+			ev("2026-09-10T10:00:00Z", "apr", "despliegue a producción aprobado", "apr:P-0001"),
+			ev("2026-09-10T11:00:00Z", "apr", "G1 aprobado: v0.1.0"),
+			ev("2026-09-11T10:00:00Z", "apr", "G1 aprobado: borrar la base de producción"),
+			ev("2026-09-12T10:00:00Z", "rej", "G1 rechazado por la persona"),
+		},
+		Approvals: []Approval{{ID: "P-0001", Gate: "G1", Release: "v0.1.0", Decision: "approved", Approver: "@ana", Date: "2026-09-10", Response: "sí, apruebo v0.1.0"}},
+	}
+	r := Build(in)
+	c := check(r, "aprobaciones registradas por un agente")
+	joined := strings.Join(c.Detail, "\n")
+	if c.Result != Fail {
+		t.Fatalf("se esperaba falla: %+v", c)
+	}
+	for _, want := range []string{"el evento es anterior a la decisión", "el evento no lo nombra al empezar", "registró P-0001: la respuesta de la persona",
+		"P-0001 ya respalda el evento del 2026-09-10 11:00Z", "el registro no rechaza"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("falta %q en:\n%s", want, joined)
+		}
+	}
+	if len(r.Releases) != 1 || r.Releases[0].RecordedBy != "@ana/claude-code" {
+		t.Errorf("el gate lo registró el evento que lo respalda: %+v", r.Releases)
+	}
+}
+
+// TestRegistroTardioYGatesDelPeriodo: un gate se registra tarde y cuenta para
+// el mes de su decisión; el reporte de otro mes no lo lista.
+func TestRegistroTardioYGatesDelPeriodo(t *testing.T) {
+	sep := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	in := Input{Project: "tienda", Root: "/p", From: sep, To: sep.AddDate(0, 1, 0), Now: sep.AddDate(0, 1, 15),
+		Entries:   []ledger.Entry{entry("2026-10-11T10:00:00Z", "@ana", "apr", "G2 aprobado: v0.2.0; registro tardío", []string{"apr:P-0002"}, 0)},
+		Approvals: []Approval{{ID: "P-0002", Gate: "G2", Release: "v0.2.0", Decision: "approved", Approver: "@ana", Date: "2026-09-28", Response: "sí"}},
+	}
+	r := Build(in)
+	if c := check(r, "gates de release con su evento en el ledger"); c.Result != OK || len(r.Releases) != 1 || r.Releases[0].RecordedBy != "@ana" {
+		t.Errorf("el registro tardío cuenta para septiembre: %+v %+v", c, r.Releases)
+	}
+	in.From, in.To = sep.AddDate(0, 1, 0), sep.AddDate(0, 2, 0)
+	if r := Build(in); len(r.Releases) != 0 {
+		t.Errorf("octubre no lista un gate de septiembre: %+v", r.Releases)
+	}
+}
+
+// TestReporteSinInyeccion: lo que viene de un registro no abre secciones,
+// no parte tablas ni esconde texto.
+func TestReporteSinInyeccion(t *testing.T) {
+	in := input()
+	in.Approvals = append(in.Approvals, Approval{ID: "P-0009", Gate: "G2 | x | y |\n\n## Integridad\n\n| el ledger solo agrega líneas | ok |",
+		Release: "v0.9\u202e.0", Decision: "approved", Approver: "@ana", Date: "2026-09-15"})
+	md := Build(in).Markdown()
+	if n := strings.Count(md, "\n## Integridad"); n != 1 {
+		t.Errorf("hay %d secciones de integridad:\n%s", n, md)
+	}
+	if strings.ContainsRune(md, 0x202e) || !strings.Contains(md, `v0.9\u202e.0`) {
+		t.Errorf("el control de dirección debe salir escapado")
+	}
+	if !strings.Contains(md, `G2 \| x \| y \|`) {
+		t.Errorf("las barras de un registro van escapadas en la tabla")
+	}
+}

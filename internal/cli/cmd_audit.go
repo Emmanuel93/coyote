@@ -13,6 +13,7 @@ import (
 	"github.com/Emmanuel93/coyote/internal/gitx"
 	"github.com/Emmanuel93/coyote/internal/ledger"
 	"github.com/Emmanuel93/coyote/internal/product"
+	"github.com/Emmanuel93/coyote/internal/safetext"
 )
 
 // cmdAudit arma el reporte de auditoría de un mes (ADR-0024).
@@ -70,7 +71,7 @@ func cmdAudit(a *app, args []string) error {
 		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 			return err
 		}
-		if err := os.WriteFile(p, []byte(r.Markdown()), 0o644); err != nil {
+		if err := fsx.WriteAtomic(p, safetext.Escape([]byte(r.Markdown())), 0o644); err != nil {
 			return err
 		}
 		fmt.Fprintf(a.stdout, "reporte en %s: revísalo y hazle commit\n", rel)

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -201,6 +202,11 @@ func (c *Config) Validate() error {
 	}
 	if err := c.Hub.Validate(); err != nil {
 		errs = append(errs, err.Error())
+	}
+	// Un tope que no es un número (.nan, .inf) no limita nada y rompe los
+	// reportes en JSON.
+	if b := c.Budgets.MonthlyUSD; b < 0 || b > hub.MaxBudgetUSD || math.IsNaN(b) {
+		errs = append(errs, fmt.Sprintf("budgets.monthly_usd %v fuera de rango (0 a %d)", b, hub.MaxBudgetUSD))
 	}
 	if len(c.Admins) > 100 {
 		errs = append(errs, "admins: hasta 100 personas")
