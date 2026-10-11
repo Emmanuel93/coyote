@@ -19,7 +19,7 @@ coyote note "los pedidos se confirman al capturar el pago" --type inv --scope pe
 | `todo` | Un pendiente |
 
 - Cada nota tiene hasta 20 palabras y el archivo, hasta 1 500 tokens. Cuando se llena, archiva las entradas viejas en el ADR o el workstream que les dio origen.
-- Una nota con forma de orden para un agente se rechaza, porque `AGENTS.md` es una instrucción (ADR-0023). Escríbela como un hecho: no "corre X", sino "X se hace con Y".
+- Una nota con la forma de una inyección se rechaza, porque `AGENTS.md` es una instrucción (ADR-0023): pedirle al agente que ignore sus instrucciones, que cambie de rol, que le esconda algo a la persona, que baje y corra un script, que lea credenciales o que apague el gate. Lo mismo vale para el nombre del proyecto en `README.coyote.md`. Una indicación de trabajo ("las pruebas se corren con make test") es una nota normal.
 
 ## Pedir contexto
 
@@ -41,7 +41,7 @@ Escribe preguntas reales con las fuentes que deberían salir en `evals/golden.v1
 
 ```sh
 coyote eval --update-baseline     # la primera vez; haz commit de evals/baseline.json
-coyote eval -v                    # en cada cambio; falla si algo baja más de 2 puntos
+coyote eval -v                    # en cada cambio; falla si algo baja más de 2 puntos o falta una pregunta
 ```
 
 El formato y las métricas están en [eval-v1](../specs/eval-v1.md).

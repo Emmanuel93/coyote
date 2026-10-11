@@ -39,6 +39,8 @@ Un agente lee repos, documentos, PRs y páginas web. Cualquiera de esas fuentes 
 
 Si aun así una orden convence al agente, lo que intente hacer con efectos pasa por el gate. El [modelo de amenazas](../security/threat-model.md) dice qué queda abierto.
 
+Las revisiones adversariales de cada release atacan justamente estas fronteras con reproducciones concretas. La de v1.0 encontró, por ejemplo, que un `--` delante de una bandera la escondía del gate y que una ruta con `//` no se reconocía. Las dos se cerraron con su prueba antes de publicar.
+
 ## Un cambio no se juzga con sus propias reglas
 
 En un PR, coyote toma de la rama base todo lo que decide: el workflow, las reglas de riesgo, el CODEOWNERS, las dispensas de secretos, la configuración de gitleaks y los SLOs con los que compara. El código del PR se lee como dato y nunca se ejecuta (ADR-0013). Así un PR no puede relajar la regla que lo revisa, y el autor nunca cuenta como su propio revisor.
@@ -47,7 +49,7 @@ Por la misma razón, un cambio al hub rige cuando llega a `main` por su PR, no c
 
 ## Sin modelos en el camino crítico
 
-El gate, la búsqueda, los paquetes de contexto, `gate pr`, la evaluación y la auditoría no llaman a ningún modelo ni a la red. Una decisión de seguridad no puede depender de algo que se deja persuadir. Además así cada decisión se repite igual, no cuesta nada y se prueba con tablas y fuzzing.
+El gate, la búsqueda, los paquetes de contexto, `gate pr`, la evaluación y la auditoría no llaman a ningún modelo. Tampoco usan la red, salvo `gate pr`, que lee de GitHub las revisiones y los autores del PR. Una decisión de seguridad no puede depender de algo que se deja persuadir. Además así cada decisión se repite igual, no cuesta nada y se prueba con tablas y fuzzing.
 
 Los modelos entran solo en `coyote run` y `coyote ws`, que corren Claude Code con topes y con el gate puesto (ADR-0012).
 

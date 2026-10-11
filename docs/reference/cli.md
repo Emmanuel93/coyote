@@ -20,7 +20,7 @@ Generada desde la CLI: no se edita a mano. La regenera `COYOTE_UPDATE_DOCS=1 go 
 | [`secrets`](#coyote-secrets) | `list \| scan [--staged \| --range base...head]` | archivos de secretos y sus nombres, sin valores; secretos escritos en el repo (ADR-0016) |
 | [`infra`](#coyote-infra) | `check \| plan <plan.json> \| propose` | inventario de la infraestructura (R13), su revisión y el plan de Terraform (ADR-0017) |
 | [`slo`](#coyote-slo) | `check [--json] \| rules [servicio] [--check] [--stdout]` | SLOs como código: valida coyote/slo y genera sus alertas de Prometheus (R19, ADR-0020) |
-| [`approvals`](#coyote-approvals) | `[--all] [--json]` | cola de propuestas y aprobaciones vigentes |
+| [`approvals`](#coyote-approvals) | `[--all] [--json]` | cola de propuestas; con --all, también las aprobaciones y sus usos |
 | [`review`](#coyote-review) | `[id...]` | muestra el comando o el diff que se aprobaría |
 | [`approve`](#coyote-approve) | `<id>... \| --all \| --bash CMD [--uses N] [--for 1h]` | aprueba acciones exactas (solo una persona, en su terminal) |
 | [`reject`](#coyote-reject) | `<id>... --reason TEXTO` | rechaza una propuesta; el agente verá el motivo |
@@ -378,7 +378,7 @@ uso: coyote slo rules [servicio] [--check] [--stdout]
 
 ## coyote approvals
 
-cola de propuestas y aprobaciones vigentes
+cola de propuestas; con --all, también las aprobaciones y sus usos
 
 ```
 uso: coyote approvals [--all] [--json]

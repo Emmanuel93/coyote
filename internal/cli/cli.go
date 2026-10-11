@@ -56,7 +56,7 @@ func init() {
 		{"secrets", "list | scan [--staged | --range base...head]", "archivos de secretos y sus nombres, sin valores; secretos escritos en el repo (ADR-0016)", cmdSecrets},
 		{"infra", "check | plan <plan.json> | propose", "inventario de la infraestructura (R13), su revisión y el plan de Terraform (ADR-0017)", cmdInfra},
 		{"slo", "check [--json] | rules [servicio] [--check] [--stdout]", "SLOs como código: valida coyote/slo y genera sus alertas de Prometheus (R19, ADR-0020)", cmdSLO},
-		{"approvals", "[--all] [--json]", "cola de propuestas y aprobaciones vigentes", cmdApprovals},
+		{"approvals", "[--all] [--json]", "cola de propuestas; con --all, también las aprobaciones y sus usos", cmdApprovals},
 		{"review", "[id...]", "muestra el comando o el diff que se aprobaría", cmdReview},
 		{"approve", "<id>... | --all | --bash CMD [--uses N] [--for 1h]", "aprueba acciones exactas (solo una persona, en su terminal)", cmdApprove},
 		{"reject", "<id>... --reason TEXTO", "rechaza una propuesta; el agente verá el motivo", cmdReject},

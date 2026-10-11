@@ -35,7 +35,7 @@ Un IDE de nivel 2 o 3 no hace tareas R2 o R3 fuera de ramas `coyote/` con `gate 
 Cuando el gate frena una acción, la deja en una cola:
 
 ```sh
-coyote approvals                    # la cola y las aprobaciones vigentes
+coyote approvals                    # la cola; con --all, también las aprobaciones y sus usos
 coyote review <id>                  # el comando o el diff exacto
 coyote approve <id>                 # un uso, vigente una hora
 coyote approve --all                # todo lo que está en la cola
