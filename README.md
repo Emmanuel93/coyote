@@ -2,13 +2,14 @@
 
 Coyote es una CLI en Go para trabajar con agentes de IA en proyectos de software sin perder el control: el contexto del proyecto vive versionado junto al código, cada acción queda registrada con su costo, el estándar del equipo se valida solo y ningún entregable sale firmado por una herramienta de IA.
 
-Estado: **v1.0.0-rc.1**, en la rama `v1.0`, con su reporte para el gate G8 pendiente. Trae `coyote audit`, `coyote eval`, la web con clave por sesión, el contenido de los repos como dato, `requires` con la promesa de compatibilidad de 1.x y un `make dist` reproducible con SBOM y procedencia. v0.7.0, aprobada en G7, está en la rama `v0.7`, y `main` sigue en v0.4.0 hasta que el ejercicio en ramas termine. Funciona sin red; para GitHub usa tus propias credenciales. El orden está en [docs/plan/EXECUTION_PLAN.md](docs/plan/EXECUTION_PLAN.md).
+Estado: **v1.0.0-rc.2**, en la rama `v1.0`, a la espera del piloto y del gate G8. Trae la fase del PRD, `coyote audit`, `coyote eval`, la web con clave por sesión, el contenido de los repos como dato, `requires` con la promesa de compatibilidad de 1.x y un `make dist` reproducible con SBOM y procedencia. v0.7.0, aprobada en G7, está en la rama `v0.7`, y `main` sigue en v0.4.0 hasta que el ejercicio en ramas termine. Funciona sin red; para GitHub usa tus propias credenciales. El orden está en [docs/plan/EXECUTION_PLAN.md](docs/plan/EXECUTION_PLAN.md).
 
 ## Qué resuelve
 
 - **Contexto que no se pierde.** Cada repo lleva `README.coyote.md` (qué es y cómo se corre) y `CONTEXT.coyote.md` (invariantes, decisiones, trampas) en un formato compacto con tope de tokens. De ahí se genera `AGENTS.md`, que leen Claude Code, Cursor y los demás IDEs.
 - **Todo queda registrado.** El ledger (`coyote/ledger/`) guarda una línea por evento: quién, qué, tokens de entrada, caché y salida, y costo. Un archivo por día y persona, así git nunca choca.
 - **Un estándar por capas.** El default de la herramienta, el de tu organización y el de cada proyecto se combinan con `extends`. Relajar una regla exige motivo y puede vencer. El de la organización vive en un hub, un repo con sus admins y su presupuesto, y rige lo que tiene commit.
+- **Se construye lo que se pidió.** Todo plan de riesgo R2 o R3 parte de un PRD que una persona revisó: el del producto y el de cada feature, con requisitos con ID y criterios en Gherkin. `coyote-pm` lo redacta y `ws check` avisa si falta (R20).
 - **Nada con efectos sin tu aprobación.** Un gate en el hook de cada IDE deja leer libremente y detiene todo lo demás hasta que apruebas esa acción exacta. Un agente no puede aprobarse, tocar el gate, leer tus credenciales ni los secretos del proyecto (`.env`, tfstate, llaves).
 - **Un cambio se ve contra todo el producto.** El mapa de interfaces de todos los repos dice a quién afecta un cambio. En cada PR, el pipeline pide la revisión de un dueño cuando el riesgo lo amerita, también si relaja un SLO o si gitleaks encuentra un secreto.
 - **SLOs con alertas que salen de un archivo.** Cada servicio declara sus SLOs; coyote genera sus alertas de Prometheus, revisa que estén al día (R19) y en un PR marca lo que relaja un objetivo o apaga una alerta.
@@ -28,7 +29,7 @@ coyote version
 ## Empezar
 
 ```sh
-coyote init pedidos-api --type backend --purpose "API de pedidos"
+coyote init pedidos-api --type backend --purpose "API de pedidos"   # nunca sobrescribe: en un repo existente solo agrega lo que falta
 cd pedidos-api
 coyote doctor                       # identidad, hook, documentos y estándar
 coyote note "un pedido se confirma solo con pago capturado" --type inv --scope pedidos
@@ -39,8 +40,6 @@ coyote ask "cuándo se confirma un pedido"
 coyote push                         # revisa autoría y estándar, y publica a ritmo humano
 coyote web                          # costos, presupuesto, workstreams, gate y SLOs; imprime la URL con la clave de la sesión
 ```
-
-`coyote init` nunca sobrescribe: en un repo existente solo agrega lo que falta.
 
 ## Trabajar con agentes
 
@@ -121,6 +120,7 @@ coyote/
   standards/rules.yaml    estándar del proyecto (extends)
   ledger/AAAA/MM/         eventos en CCF, un archivo por día y persona
   decisions/              ADRs
+  prd/                    el PRD del producto (producto.md) y el de cada feature
   workstreams/            planes, corridas (runs/) y cierres con su costo
   router.yaml             modelo por agente, pisos por riesgo y topes (opcional)
   map/, repos/, ci/       en un producto: mapa, documentos propuestos y workflows por repo

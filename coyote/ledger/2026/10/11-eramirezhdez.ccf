@@ -22,3 +22,4 @@
 2026-10-11T20:12Z|@eramirezhdez/coyote-architect|W-0008|coyote|doc|adr|ADR-0028, el PRD como primera fase del ciclo (D46)|-|-|-|ok
 2026-10-11T20:12Z|@eramirezhdez/coyote-pm|W-0008|coyote|feat|prd|skill coyote-prd con la plantilla, coyote-pm que la usa y la regla…|-|-|-|ok
 2026-10-11T20:12Z|@eramirezhdez/coyote-dev|W-0008|coyote|feat|ws|prd: en el plan, su aviso en ws check y el índice…|-|-|-|ok
+2026-10-11T20:12Z|@eramirezhdez/coyote-scribe|W-0008|coyote|doc|prd|guía del PRD, ejemplo en acme-shop, explicación, README, CHANGELOG y plan (T62)|-|-|-|ok

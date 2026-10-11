@@ -1,6 +1,6 @@
 # Plan de ejecución — Coyote
 
-Estado: v0.7.0 aprobada en G7 (P-0007), en la rama `v0.7`; `main` sigue en v0.4.0 · v1.0 construida en la rama `v1.0`, con su reporte para G8 pendiente de tu decisión · actualizado 2026-10-10
+Estado: v0.7.0 aprobada en G7 (P-0007), en la rama `v0.7`; `main` sigue en v0.4.0 · v1.0 construida en la rama `v1.0`: G8 decidió esperar el piloto antes de etiquetar v1.0.0 y pidió la fase del PRD, que sale como `v1.0.0-rc.2` · actualizado 2026-10-11
 
 Este plan ejecuta la propuesta aprobada ("Plan de construcción — Framework Coyote"). Cada release se razona con la plantilla de cinco partes que usarán los agentes de Coyote (problema, restricciones, opciones, decisión, riesgos) y cierra con un gate humano: nada se etiqueta, se publica ni toca otros proyectos sin autorización explícita.
 
@@ -672,7 +672,15 @@ G7 autorizaría:
   - Para cada binario genera, con Go estándar, un SBOM CycloneDX 1.7 armado desde su buildinfo.
   - Genera también la procedencia SLSA v1.2 Build L1, con el commit, el comando, la versión de Go y el sha256 de cada archivo.
   - `docs/` explica cómo verificar todo, incluido reconstruir desde la etiqueta y comparar hashes.
-- **Piloto real (T60, hito H8a).** Cuando T53 a T56 estén hechos, te propongo una feature R2 chica en `fintech-services`, con su plan `supervised`, su presupuesto y sus ramas `ws/`. La corres tú si la autorizas. De paso ejercita lo pendiente de G5 (el pipeline y las corridas medidas) y de G6 (el canario en tu IDE). Si no hay tiempo o presupuesto, v1.0 sale sin el piloto, pasa a v1.1 y G8 lo dice.
+- **Piloto real (T60, hito H8a).** Cuando T53 a T56 estén hechos, te propongo una feature R2 chica en `fintech-services`, con su plan `supervised`, su presupuesto y sus ramas `ws/`. La corres tú si la autorizas. De paso ejercita lo pendiente de G5 (el pipeline y las corridas medidas) y de G6 (el canario en tu IDE). Si no hay tiempo o presupuesto, v1.0 sale sin el piloto, pasa a v1.1 y G8 lo dice. En G8 decidiste esperarlo, y que parta de un PRD (T62).
+- **Fase del PRD (T62, pedida en G8).** Antes del piloto, el ciclo gana su primer documento: el PRD. El razonamiento:
+  1. **El hueco.** Hasta aquí el ciclo arrancaba en el dominio (R16), y el primer paso de un plan decidía el alcance por su cuenta. Nada decía, antes de gastar, qué problema se resuelve, para quién, cómo se mide y qué queda fuera. Los pasos siguientes heredan esa decisión, así que el error cuesta más con cada paso.
+  2. **Dos niveles.** Pediste uno del producto y uno por feature. El del producto es vivo y cubre los tres repos, porque las metas se comparan entre features solo si viven en un mismo lugar. El de cada feature cuelga de él y dice qué metas mueve. La misma plantilla en los dos: ocho secciones, requisitos con ID (`RQ-01`) y criterios en Gherkin que citan su requisito, para que el diseño, las pruebas y la revisión puedan señalarlos.
+  3. **Dónde vive.** En `coyote/prd/`, junto a `decisions/`: es un documento del proyecto que sobrevive a cualquier workstream y que varios planes pueden citar. El índice de contexto lo lee, así `ask` y los paquetes citan sus requisitos.
+  4. **Cómo se conecta.** El plan declara `prd:` (un archivo o `step:ID`). Un campo explícito se puede revisar y queda dentro del hash que se autoriza; adivinarlo por el nombre de un archivo no. El campo crece el formato sin quitar nada (ADR-0026), y entrando antes de 1.0.0 ningún binario 1.0 lo desconoce.
+  5. **SHOULD y aviso.** Una regla MUST nueva llega primero como SHOULD (ADR-0026). `ws check` avisa cuando un plan R2 o R3 no parte de un PRD, pero no lo impide: un plan chico y urgente no debe quedar bloqueado por un documento. Un `prd:` que no dice lo que quiere decir sí es un error.
+  6. **Sin comandos.** Un `coyote prd new|check` fijaría números, rutas y validaciones antes de ver un solo uso. El piloto lo muestra: si guardar el PRD aceptado en `coyote/prd/` duele, entra en 1.1.
+  7. **Quién decide qué.** `coyote-pm` redacta, pero las metas, las prioridades y el alcance son de la persona: lo que no sabe va a Preguntas abiertas. Aceptar el paso con `ws continue` es aprobar el PRD, y queda en el ledger.
 - **Verificación (T61).** Tres pasadas adversariales, como en v0.7, la retro de los ocho releases y `docs/releases/v1.0.0.md` para G8.
 
 **Riesgos.**
@@ -680,6 +688,7 @@ G7 autorizaría:
 - **Errores del clasificador.** Tendrá falsos positivos y falsos negativos. Mitigación: marca pero no borra, y el gate no depende de que el modelo obedezca.
 - **Falsa confianza en la auditoría.** Mitigación: cada sección dice qué verifica y qué no, y el reporte recomienda firmar los commits.
 - **Alcance de SLSA L1.** Dice cómo se construyó el binario, pero no prueba quién lo construyó. Mitigación: L2, con una plataforma hospedada, queda para G8.
+- **Un PRD que nadie lee, o que un agente inventa.** Mitigación: el aviso conecta el PRD con el plan, los requisitos llevan ID para que el revisor mida contra ellos, y el agente deja como pregunta abierta lo que no le dieron. Cuánto sirve lo mide el piloto.
 - **Alcance del golden.** El golden de coyote mide coyote, no tus proyectos. Mitigación: el formato sirve para cualquier proyecto, y escribir el suyo es parte del piloto.
 - **Tamaño del release.** Orden de trabajo:
   1. web, amenazas, auditoría y golden, porque el piloto real los usa;
@@ -700,16 +709,16 @@ G7 autorizaría:
 | T57 | Compatibilidad 1.x | Una 1.0 es una promesa | `compatibilidad.md`, `requires` y el estándar 1.0 | Hecho: `requires` en `project.yaml` y `hub.yaml`, leído antes que el resto; `init` escribe la línea del binario; `doctor` la muestra |
 | T58 | Documentación | C6.6 | Tutorial probado, guías, referencia generada, explicación y CHANGELOG | Hecho: `TestTutorial` corre cada comando del tutorial; ocho guías; `cli.md` sale de la CLI y `make check` falla si queda vieja; generarla destapó tres textos de ayuda equivocados, ya corregidos |
 | T59 | Cadena de suministro | C6.8 | Build reproducible; SBOM y procedencia por binario; verificación documentada | Hecho: `make verify-dist` da los mismos 9 hashes en dos builds con la caché de Go vacía; SBOM CycloneDX 1.7 por binario y procedencia SLSA v1.2 Build L1 |
-| T60 | Piloto real (H8a) | C6.4 | Con tu autorización: plan `supervised`, PRs en `ws/` y `close.md`. Sin ella, pasa a v1.1 | H8a aprobado (P-0008) y kit entregado en `dist/piloto-h8a/`; no corrió. G8 decide si se espera o pasa a v1.1 |
+| T60 | Piloto real (H8a) | C6.4 | Con tu autorización: plan `supervised`, PRs en `ws/` y `close.md`. Sin ella, pasa a v1.1 | H8a aprobado (P-0008) y kit entregado en `dist/piloto-h8a/`; no corrió. G8 decidió esperarlo, y el kit parte de un PRD (T62) |
 | T61 | Verificación y G8 | Evidencia antes de la 1.0 | Pruebas, tres pasadas adversariales, retro y `docs/releases/v1.0.0.md` | Hecho, a la espera de G8: 67 hallazgos en tres pasadas (32, 22 y 13), todos corregidos salvo un límite declarado; retro de los ocho releases (261 hallazgos); `v1.0.0-rc.1` con SBOM y procedencia |
+| T62 | Fase del PRD | Pedida en G8: el ciclo no tenía el qué y el porqué antes del diseño | Skill `coyote-prd`, `coyote-pm`, R20, `prd:` con su aviso en `ws check`, guía, ADR-0028 y el kit del piloto con un paso S0 | Hecho: `v1.0.0-rc.2` |
 
-G8 autorizaría (el reporte está en `docs/releases/v1.0.0.md`):
+G8 decidió el 2026-10-11 (el reporte está en `docs/releases/v1.0.0.md`):
 
-1. Etiquetar `v1.0.0` y aceptar ADR-0022 a ADR-0027.
-2. Llevar `main` a v1.0.0 sin merge: puede avanzar porque las ramas de release descienden de él. El push es tuyo.
-3. Publicar el release en GitHub con binarios, SBOM y procedencia. Con Actions sube a SLSA Build L2.
-4. El piloto real, si no se hizo en H8a.
-5. Qué entra en v1.1.
+1. Etiquetar `v1.0.0` después del piloto, y aceptar entonces ADR-0022 a ADR-0027. Mientras tanto, una cuarta pasada adversarial corta sobre los arreglos de la tercera ronda.
+2. `main` no se toca y el release no se publica en GitHub: no se autorizaron.
+3. v1.1 trae solo los pendientes de G5 a G7.
+4. Se agrega la fase del PRD (T62) antes del piloto, como `v1.0.0-rc.2`; ADR-0028 se acepta al etiquetar con los demás.
 
 ## Supuestos sobre decisiones abiertas
 
@@ -742,15 +751,16 @@ G8 autorizaría (el reporte está en `docs/releases/v1.0.0.md`):
 | D34 formato de SLOs | `coyote/slo/<servicio>.yaml` v1, propio y cercano a los formatos conocidos; reglas de Prometheus generadas por coyote y versionadas en `coyote/slo/prometheus/` (ADR-0020) | Un generador sin binarios externos que el gate y `gate pr` entienden | Confirmado en G7 |
 | D35 cargar alertas | Nunca un agente: la persona o un pipeline cargan las reglas en Faro (ADR-0020) | Una alerta cambiada en producción es un cambio de infraestructura | Confirmado en G7 |
 | D36 gitleaks | Opcional (`features.gitleaks`), fijado por hash, con la configuración de la rama base y su reporte en `gate pr` (ADR-0021) | Más patrones en el PR sin que el autor lo apague | Aceptado en G7 (ADR-0021); prenderlo en el pipeline del producto queda para después |
-| D37 web en máquina compartida | Clave por corrida en la ruta de cada enlace; sin ella, 404 (ADR-0022) | Otro usuario de la máquina no ve lo que ve quien la corre, y una cookie de 127.0.0.1 viajaría a cualquier puerto | Se confirma en G8 |
-| D38 contenido de los repos | Datos enmarcados y marcados por un clasificador de reglas fijas; notas marcadas fuera de `AGENTS.md`; instrucciones de agentes R2 y ledger reescrito R3 en `gate pr` (ADR-0023) | La inyección no se puede evitar del todo: se hace visible y el gate frena sus efectos | Se confirma en G8 |
-| D39 auditoría | `coyote audit` desde el ledger y git, con controles de ISO/IEC 42001 y NIST AI RMF; es evidencia, no certificación (ADR-0024) | Lo registrado sirve si alguien lo puede revisar sin leer el ledger a mano | Se confirma en G8 |
-| D40 evaluación del contexto | Golden y métricas sin modelo en la CI, con umbral de 2 puntos; el juez con modelo es opcional y usa tu presupuesto (ADR-0025) | La CI no gasta y una regresión se ve en el PR | Se confirma en G8 |
-| D41 compatibilidad | Semver sobre formatos, CLI y estándar, con `requires`; el gate puede negar más en cualquier versión (ADR-0026) | Una 1.0 le dice al equipo qué no va a cambiar | Se confirma en G8 |
-| D42 cadena de suministro | Build reproducible, SBOM CycloneDX 1.7 y procedencia SLSA Build L1 en `make dist`; L2 con Actions si se publica (ADR-0027) | Sin red no hay goreleaser, y un binario se verifica reconstruyéndolo | Se confirma en G8 |
-| D43 piloto real | Hito H8a con su propia autorización y presupuesto; sin él, pasa a v1.1 | Toca `fintech-services` y gasta en corridas | Confirmado en H8a (P-0008): listado de desembolsos, worktree aparte, tope de $10. No corrió: G8 decide si se espera |
-| D44 `coyote serve` | Queda para v1.1 si el uso lo pide (D18) | Ningún uso lo pidió | Se confirma en G8 |
-| D45 `main` | Avanza a v1.0.0 en G8, sin merge; el push es tuyo | Las ramas de release descienden de `main` | Se confirma en G8 |
+| D37 web en máquina compartida | Clave por corrida en la ruta de cada enlace; sin ella, 404 (ADR-0022) | Otro usuario de la máquina no ve lo que ve quien la corre, y una cookie de 127.0.0.1 viajaría a cualquier puerto | Se confirma al etiquetar v1.0.0, después del piloto (G8) |
+| D38 contenido de los repos | Datos enmarcados y marcados por un clasificador de reglas fijas; notas marcadas fuera de `AGENTS.md`; instrucciones de agentes R2 y ledger reescrito R3 en `gate pr` (ADR-0023) | La inyección no se puede evitar del todo: se hace visible y el gate frena sus efectos | Se confirma al etiquetar v1.0.0, después del piloto (G8) |
+| D39 auditoría | `coyote audit` desde el ledger y git, con controles de ISO/IEC 42001 y NIST AI RMF; es evidencia, no certificación (ADR-0024) | Lo registrado sirve si alguien lo puede revisar sin leer el ledger a mano | Se confirma al etiquetar v1.0.0, después del piloto (G8) |
+| D40 evaluación del contexto | Golden y métricas sin modelo en la CI, con umbral de 2 puntos; el juez con modelo es opcional y usa tu presupuesto (ADR-0025) | La CI no gasta y una regresión se ve en el PR | Se confirma al etiquetar v1.0.0, después del piloto (G8) |
+| D41 compatibilidad | Semver sobre formatos, CLI y estándar, con `requires`; el gate puede negar más en cualquier versión (ADR-0026) | Una 1.0 le dice al equipo qué no va a cambiar | Se confirma al etiquetar v1.0.0, después del piloto (G8) |
+| D42 cadena de suministro | Build reproducible, SBOM CycloneDX 1.7 y procedencia SLSA Build L1 en `make dist`; L2 con Actions si se publica (ADR-0027) | Sin red no hay goreleaser, y un binario se verifica reconstruyéndolo | Se confirma al etiquetar v1.0.0, después del piloto (G8) |
+| D43 piloto real | Hito H8a con su propia autorización y presupuesto; sin él, pasa a v1.1 | Toca `fintech-services` y gasta en corridas | Confirmado en H8a (P-0008): listado de desembolsos, worktree aparte, tope de $10. No corrió: G8 decidió esperarlo para etiquetar v1.0.0 |
+| D44 `coyote serve` | Queda para después de v1.1 si el uso lo pide (D18) | Ningún uso lo pidió | G8: v1.1 trae solo los pendientes de G5 a G7 |
+| D45 `main` | Podría avanzar a v1.0.0 sin merge, porque las ramas de release descienden de él; el push es tuyo | Evitar un merge que reescriba historia | No autorizado en G8: `main` no se toca hasta que lo pidas |
+| D46 fase del PRD | Dos niveles (el del producto, vivo, y uno por feature) en `coyote/prd/`; plantilla en la skill `coyote-prd`; `coyote-pm` lo redacta; R20 SHOULD y aviso de `ws check` con `prd:`; sin comandos nuevos (ADR-0028) | El plan decidía el alcance en su primer paso, sin un documento que fijara el problema, las metas y lo que no se hace | Pedida en G8 (2026-10-11); se acepta al etiquetar v1.0.0 |
 | D23 unidad de trabajo | Producto multi-repo: servicios, app y backoffice juntos, en un proyecto aparte que lee los tres (ADR-0011) | Un cambio en uno afecta a los otros (G3) | Confirmado en G4 |
 | D20 lectura sin aprobación | Lista cerrada de comandos de solo lectura en la herramienta; sin patrones propios del proyecto | Leer no tiene efectos y evita la fatiga | Confirmado en G3 |
 | D21 validez de una aprobación | Solo en la máquina donde se dio (firma con clave local), 24 h como máximo | Un registro copiado o fabricado no sirve | Confirmado en G3 |

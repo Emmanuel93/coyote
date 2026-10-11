@@ -29,6 +29,14 @@ El gate vive en el hook previo de cada IDE. Leer es libre. Lo que tiene efectos 
 
 El costo es fricción. Las concesiones (`--uses`, `--for`) y los modos `supervised` y `autonomous` la bajan, pero el gate aplica igual en los tres modos.
 
+## Qué se construye también lo decide una persona
+
+El gate controla lo que un agente hace, no qué intenta lograr. Un plan que arranca en el diseño deja que el primer agente fije el alcance, y los siguientes lo heredan: el error cuesta más con cada paso. Por eso el ciclo empieza en un PRD (ADR-0028), con el problema, las metas y lo que no se hace, escritos y revisados por una persona antes del primer gasto.
+
+Hay dos niveles. El del producto es un documento vivo que cubre todos sus repos; el de cada feature cuelga de él y dice qué metas mueve. Los requisitos llevan ID y los criterios de aceptación los citan, para que el diseño, las pruebas y la revisión puedan señalarlos en lugar de interpretar un párrafo.
+
+Es una regla de proceso, no un control: R20 es SHOULD y `coyote ws check` avisa, no impide. La herramienta puede comprobar que el PRD exista y esté conectado al plan; que sea el correcto lo decide quien lo aprueba.
+
 ## Lo que se lee es dato
 
 Un agente lee repos, documentos, PRs y páginas web. Cualquiera de esas fuentes puede traer una orden escrita por otra persona. Eso no se puede evitar del todo (ADR-0023), así que coyote lo hace visible y frena sus efectos:

@@ -6,6 +6,7 @@ Los cambios de cada versión de coyote. Desde 1.0 sigue versionado semántico, c
 
 ### Agregado
 
+- La fase del PRD (ADR-0028). La skill `coyote-prd` trae la plantilla de ocho secciones (problema, usuarios, metas y métricas, alcance, requisitos con ID, criterios en Gherkin, riesgos y preguntas abiertas) y `coyote-pm` la usa. El PRD del producto es un documento vivo en `coyote/prd/producto.md` y cada feature tiene el suyo, que cuelga de él. El plan declara `prd:` (un archivo o `step:ID`) y `coyote ws check` avisa cuando uno de riesgo R2 o R3 no parte de un PRD: es la regla R20, SHOULD. El índice de contexto lee `coyote/prd/`.
 - `coyote audit`: el reporte del mes desde el ledger, las aprobaciones y git, con eventos, costo, integridad y los controles de ISO/IEC 42001 y del NIST AI RMF que apoya. `--write` lo deja en `coyote/audit/` (ADR-0024).
 - `coyote eval`: mide el contexto con un golden de preguntas, sin modelos (recall@5, MRR y cobertura del paquete), y falla si algo baja más de 2 puntos contra `evals/baseline.json` (ADR-0025).
 - `requires` en `project.yaml` y `hub.yaml`: la versión mínima de coyote que entiende el archivo. `init` lo escribe y `doctor` muestra la versión (ADR-0026).
@@ -24,6 +25,7 @@ Los cambios de cada versión de coyote. Desde 1.0 sigue versionado semántico, c
 
 ### Al actualizar
 
+- Un plan de riesgo R2 o R3 sin `prd:` recibe un aviso de `coyote ws check` (R20, SHOULD); no impide correrlo. coyote 1.0.0-rc.1 no conoce `prd:` y falla nombrando el campo.
 - Lo que sigue a `--` en un comando de coyote es siempre un argumento; una bandera del comando después de `--` es un error de uso.
 - Regenera el workflow de cada repo del producto con `coyote install --ci github`: ahora compila coyote con su versión.
 - Si ya tenías una línea base de `coyote eval`, vuelve a fijarla con `--update-baseline`: ahora guarda la medida de cada pregunta y se mide sin los eventos del ledger. El golden y la línea base viven en `evals/`.

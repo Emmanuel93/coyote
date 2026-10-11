@@ -11,12 +11,13 @@ id: W-0003
 title: pagos con revisión
 autonomy: supervised           # manual, supervised o autonomous
 risk: R2
+prd: coyote/prd/pagos.md       # de qué PRD parte el plan (R20)
 budget_usd: 3                  # tope del plan
 steps:
   - id: S1
     does: diseñar el cobro con tarjeta
     agent: coyote-architect
-    input: [docs/pagos.md]
+    input: [coyote/prd/pagos.md, docs/pagos.md]
     output: diseño
     sections: [Contrato, Riesgos]    # lo que la entrega tiene que traer
     max_usd: 0.5
@@ -25,6 +26,8 @@ steps:
 ```
 
 Cada paso de agente declara su salida y su tope (A2). El campo `task` lleva la instrucción larga. Todos los campos están en [workstream-v1](../specs/workstream-v1.md).
+
+Un plan de riesgo R2 o R3 parte de un PRD (R20): `prd: coyote/prd/pagos.md`, o `prd: step:S1` si el primer paso lo escribe `coyote-pm`. `ws check` avisa cuando falta. Cómo escribirlo está en la [guía del PRD](prd.md).
 
 ```sh
 coyote ws check W-0003      # valida el plan y muestra modelo, tope y revisión de cada paso

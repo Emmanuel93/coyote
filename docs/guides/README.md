@@ -5,6 +5,7 @@ Cada guía resuelve una tarea concreta. Si es tu primera vez, empieza por el [tu
 | Guía | Para qué |
 | --- | --- |
 | [El gate en tu IDE](gate-en-tu-ide.md) | Instalar el gate en Claude Code, Cursor, Codex, Gemini CLI, Copilot o Windsurf, medir su nivel y aprobar lo que piden los agentes |
+| [PRD: del problema al plan](prd.md) | Escribir el PRD del producto y el de cada feature, y partir de él en el plan |
 | [Contexto para agentes](contexto.md) | Notas, paquetes de contexto, preguntas y cómo medir con un golden si el contexto sirve |
 | [Workstreams](workstreams.md) | Un plan de varios pasos de agentes, con topes, puntos de revisión y su costo real |
 | [El pipeline de PRs](pipeline-de-prs.md) | El impacto y el riesgo de cada PR, quién tiene que aprobar y gitleaks |
