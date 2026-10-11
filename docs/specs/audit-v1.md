@@ -14,7 +14,7 @@ coyote audit [--month AAAA-MM] [--json] [--write]
 
 ## Qué trae el reporte
 
-- **Resumen.** Eventos, personas, agentes, costo, tope del mes y el conteo de fallas y avisos. También el commit sobre el que se armó y la huella (sha256) de lo que leyó del ledger: comparadas con las del reporte anterior, delatan una historia reescrita.
+- **Resumen.** Eventos, personas, agentes, costo, tope del mes y el conteo de fallas y avisos. También el commit sobre el que se armó y la huella (sha256) del ledger hasta el fin del periodo, tal como está en HEAD: regenerar un mes ya auditado da la misma huella, salvo que ese mes o uno anterior se haya reescrito o le hayan llegado líneas con fecha pasada.
 - **Eventos.** Por tipo y por actor, con su costo.
 - **Aprobaciones y gate.**
   - Aprobaciones y rechazos registrados.
@@ -27,8 +27,8 @@ coyote audit [--month AAAA-MM] [--json] [--write]
 
 | Verificación | Falla | Aviso |
 | --- | --- | --- |
-| El ledger solo agrega líneas | Un commit (un merge, contra su primer padre) cambia, borra o cambia de tipo un archivo del ledger (un symlink o un submódulo en su lugar); en el árbol de trabajo, un archivo de HEAD falta, ya no es un archivo o tiene líneas cambiadas, aunque se haya preparado un renombre o se use skip-worktree; un archivo que no se pudo leer | No se pudo leer la historia; el clon es superficial |
-| Eventos con fecha anterior a su commit | Un `apr` o `rej` de un agente que llegó en un commit del periodo con una fecha más de un día anterior | Cualquier otro evento así, como una importación con `--ts` |
+| El ledger solo agrega líneas | Un commit de la historia de HEAD (todos, no solo la cadena de primeros padres; un merge, contra cada uno de sus padres) cambia, borra o esconde líneas del ledger, también cambiando el archivo por un symlink o un submódulo; en el árbol de trabajo, un archivo de HEAD falta, ya no es un archivo o tiene líneas cambiadas, aunque se haya preparado un renombre o se use skip-worktree (un checkout con CRLF no cuenta); un archivo que no se pudo leer | No se pudo leer la historia; el clon es superficial |
+| Eventos con fecha anterior a su commit | Un `apr` o `rej` de un agente con una fecha de un mes anterior al del commit que lo trajo | Cualquier otro evento con una fecha más de un día anterior a su commit, como una importación con `--ts` o un squash; un commit con fecha anterior a la de su padre |
 | Actor, archivo y autor del commit | — | Una línea de una persona en el archivo de otra; un mismo autor de git registra a nombre de varias personas |
 | Aprobaciones registradas por un agente | Un `apr` o `rej` de un agente sin un registro de `coyote/approvals/` que lo respalde con la respuesta de la persona | Lo registró un agente, con la respuesta de la persona |
 | Gates de release con su evento en el ledger | — | Una decisión del periodo en `coyote/approvals/` sin su evento `apr`, en cualquier mes |
@@ -38,7 +38,9 @@ coyote audit [--month AAAA-MM] [--json] [--write]
 
 El reporte también cuenta cuántos commits del periodo van firmados.
 
-Un evento `apr` o `rej` se vincula con los registros que cita (`apr:P-0004`) o, si no cita ninguno, con el del gate que nombra al empezar (`G4 aprobado: …`), como se registraron los primeros gates de coyote. Un registro de un gate respalda un solo evento: el primero que nombra su gate al empezar, dice su decisión (`apr` con `approved`, `rej` con `rejected`) y no es anterior a ella. Así un agente no respalda una aprobación cualquiera citando el registro de otro gate.
+Un evento `apr` o `rej` se vincula con los registros que cita (`apr:P-0004`), y todos tienen que respaldarlo, o, si no cita ninguno, con el primer registro libre del gate que nombra al empezar (`G4 aprobado: …`), como se registraron los primeros gates de coyote. Un registro de un gate respalda un solo evento: el primero que nombra su gate al empezar, dice su decisión (`apr` con `approved`, `rej` con `rejected`) y no es anterior a ella. La decisión de un agente solo la respalda el registro de un gate: un agente no aprueba acciones, y un registro sin gate respaldaría cualquier cosa.
+
+Los commits se leen todos y la fecha se filtra después: git deja de recorrer con `--since` en el primer commit con fecha vieja. Los diffs van en texto (`--text`), así que un `.gitattributes` con `-diff` no los esconde.
 
 Lo que viene del ledger o de un registro sale en una sola línea, sin controles ni caracteres invisibles y, en una tabla, con las barras escapadas: un registro no puede abrir una sección del reporte. `--write` guarda el reporte escapado.
 

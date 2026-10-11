@@ -244,12 +244,13 @@ func Build(in Input) *Report {
 	r.MonthlyUSD = in.MonthlyUSD
 	r.Checks = append(r.Checks, checkAgentApprovals(period, approvals, links), checkReleaseEvents(r.Releases),
 		checkFuture(in.Entries, in.Now), checkInvalid(in.Problems, in.Root))
-	r.LedgerSHA256 = ledgerSum(in.Entries, in.Problems)
+	r.LedgerSHA256 = ledgerSum(in)
 	if in.Git != nil {
 		if out, err := in.Git("rev-parse", "HEAD"); err == nil {
 			r.Head = strings.TrimSpace(out)
 		}
-		r.Checks = append(r.Checks, checkAppendOnly(in), checkBackdated(in), checkActors(in, period))
+		h, herr := readHistory(in)
+		r.Checks = append(r.Checks, checkAppendOnly(in, h, herr), checkBackdated(in, h, herr), checkActors(in, period))
 		c, commits, signed := checkCommits(in)
 		r.Checks = append(r.Checks, c)
 		r.Commits, r.Signed = commits, signed
@@ -289,6 +290,10 @@ func linkApprovals(entries []ledger.Entry, list []Approval) (map[string]link, ma
 	for _, a := range list {
 		byID[a.ID] = a
 	}
+	list = append([]Approval(nil), list...)
+	sort.SliceStable(list, func(i, j int) bool {
+		return list[i].Date < list[j].Date || list[i].Date == list[j].Date && list[i].ID < list[j].ID
+	})
 	ordered := append([]ledger.Entry(nil), entries...)
 	sort.SliceStable(ordered, func(i, j int) bool { return ordered[i].Line.TS.Before(ordered[j].Line.TS) })
 	links, claimed, recordedBy := map[string]link{}, map[string]string{}, map[string]string{}
@@ -298,25 +303,51 @@ func linkApprovals(entries []ledger.Entry, list []Approval) (map[string]link, ma
 			continue
 		}
 		var lk link
-		for _, id := range approvalIDs(l, list) {
-			a, ok := byID[id]
-			if !ok {
-				lk.why = append(lk.why, id+" no existe en coyote/approvals/")
-				continue
-			}
-			if why := mismatch(l, a); why != "" {
-				lk.why = append(lk.why, id+": "+why)
-				continue
-			}
+		claim := func(a Approval) {
 			if a.Gate != "" {
-				if at, taken := claimed[id]; taken {
-					lk.why = append(lk.why, id+" ya respalda el evento del "+at)
+				claimed[a.ID] = l.TS.Format("2006-01-02 15:04Z")
+				recordedBy[a.ID] = l.Actor
+			}
+			lk.ids = append(lk.ids, a.ID)
+		}
+		if cited := refs(l.Refs, "apr:"); len(cited) > 0 {
+			// Los registros citados: todos tienen que respaldarlo.
+			for _, id := range cited {
+				a, ok := byID[id]
+				switch {
+				case !ok:
+					lk.why = append(lk.why, id+" no existe en coyote/approvals/")
+				case mismatch(l, a) != "":
+					lk.why = append(lk.why, id+": "+mismatch(l, a))
+				case a.Gate != "" && claimed[id] != "":
+					lk.why = append(lk.why, id+" ya respalda el evento del "+claimed[id])
+				default:
+					claim(a)
+				}
+			}
+		} else {
+			// Por el gate que nombra: el primer registro libre que coincide. Un
+			// gate rechazado y después aprobado tiene dos registros.
+			first, _, _ := strings.Cut(strings.TrimSpace(l.What), " ")
+			var whys []string
+			for _, a := range list {
+				if a.Gate == "" || a.Gate != first {
 					continue
 				}
-				claimed[id] = l.TS.Format("2006-01-02 15:04Z")
-				recordedBy[id] = l.Actor
+				if why := mismatch(l, a); why != "" {
+					whys = append(whys, a.ID+": "+why)
+					continue
+				}
+				if at := claimed[a.ID]; at != "" {
+					whys = append(whys, a.ID+" ya respalda el evento del "+at)
+					continue
+				}
+				claim(a)
+				break
 			}
-			lk.ids = append(lk.ids, id)
+			if len(lk.ids) == 0 {
+				lk.why = whys
+			}
 		}
 		links[entryKey(e)] = lk
 	}
@@ -345,15 +376,39 @@ func mismatch(l ccf.Line, a Approval) string {
 	return ""
 }
 
-// ledgerSum es la huella de lo que el reporte leyó del ledger: cada línea
-// válida e inválida, en orden.
-func ledgerSum(entries []ledger.Entry, probs []ledger.Problem) string {
+// ledgerSum es la huella del ledger hasta el fin del periodo: las líneas
+// con fecha anterior a To, tal como están en HEAD (o en el disco, sin git).
+// Regenerar un mes ya auditado da la misma huella, salvo que ese mes o uno
+// anterior se haya reescrito o le hayan llegado líneas con fecha pasada.
+func ledgerSum(in Input) string {
 	h := sha256.New()
-	for _, e := range entries {
-		fmt.Fprintf(h, "%s:%d %s\n", filepath.Base(e.File), e.LineNo, e.Line.String())
+	add := func(file string, n int, text string) {
+		if l, err := ccf.Parse(text); err == nil && l.TS.Before(in.To) {
+			fmt.Fprintf(h, "%s:%d %s\n", file, n, text)
+		}
 	}
-	for _, p := range probs {
-		fmt.Fprintf(h, "%s:%d invalid\n", filepath.Base(p.File), p.LineNo)
+	if in.Git != nil {
+		if out, err := in.Git("-c", "core.quotePath=false", "ls-tree", "-r", "-z", "--name-only", "HEAD", "--", ledgerDir); err == nil {
+			files := strings.Split(strings.TrimSuffix(out, "\x00"), "\x00")
+			sort.Strings(files)
+			for _, f := range files {
+				if f == "" {
+					continue
+				}
+				blob, err := in.Git("cat-file", "blob", "HEAD:./"+f)
+				if err != nil {
+					fmt.Fprintf(h, "%s: ilegible\n", f)
+					continue
+				}
+				for i, line := range strings.Split(blob, "\n") {
+					add(f, i+1, line)
+				}
+			}
+			return hex.EncodeToString(h.Sum(nil))
+		}
+	}
+	for _, e := range in.Entries {
+		add(filepath.Base(e.File), e.LineNo, e.Line.String())
 	}
 	return hex.EncodeToString(h.Sum(nil))
 }
@@ -368,23 +423,6 @@ func longGrant(a Approval) bool {
 	from, err1 := time.Parse(time.RFC3339, a.TS)
 	to, err2 := time.Parse(time.RFC3339, a.Expires)
 	return err1 == nil && err2 == nil && to.Sub(from) > time.Hour
-}
-
-// approvalIDs devuelve los registros de coyote/approvals a los que apunta un
-// evento: por sus referencias apr: o, si no tiene, por el gate que nombra al
-// empezar ("G4 aprobado: …"), como se registraron los primeros gates.
-func approvalIDs(l ccf.Line, approvals []Approval) []string {
-	if ids := refs(l.Refs, "apr:"); len(ids) > 0 {
-		return ids
-	}
-	first, _, _ := strings.Cut(strings.TrimSpace(l.What), " ")
-	var out []string
-	for _, a := range approvals {
-		if a.Gate != "" && a.Gate == first {
-			out = append(out, a.ID)
-		}
-	}
-	return out
 }
 
 func refs(rs []string, prefix string) []string {
@@ -451,11 +489,21 @@ func checkAgentApprovals(period []ledger.Entry, approvals map[string]Approval, l
 			c.Detail = append(c.Detail, fmt.Sprintf("%s %s registró %q sin un registro que lo respalde: %s", when, l.Actor, oneLine(l.What, 60), why))
 			continue
 		}
-		answered := true
+		answered, gated := true, true
 		for _, id := range lk.ids {
 			if strings.TrimSpace(approvals[id].Response) == "" {
 				answered = false
 			}
+			if approvals[id].Gate == "" {
+				gated = false
+			}
+		}
+		if !gated {
+			// Un agente no aprueba acciones: solo registra la decisión de un
+			// gate, y un registro sin gate respaldaría cualquier cosa.
+			c.Result = Fail
+			c.Detail = append(c.Detail, fmt.Sprintf("%s %s registró %q con %s, que no es el registro de un gate", when, l.Actor, oneLine(l.What, 60), strings.Join(lk.ids, ", ")))
+			continue
 		}
 		if !answered {
 			c.Result = Fail

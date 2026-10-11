@@ -15,11 +15,117 @@ import (
 
 const ledgerDir = "coyote/ledger"
 
-// checkAppendOnly revisa en la historia que ningún commit cambie, borre ni
-// cambie de tipo un archivo del ledger, y lo mismo en el árbol de trabajo.
-// Un merge se compara con su primer padre. Lo que no se puede leer cuenta
-// como falla: una verificación que no corrió no puede dar ok.
-func checkAppendOnly(in Input) Check {
+// gitCommit es un commit de la historia de HEAD.
+type gitCommit struct {
+	sha     string
+	parents []string
+	when    time.Time // fecha del commit
+}
+
+// ledgerDiff es lo que un commit cambia en el ledger frente a uno de sus
+// padres: líneas quitadas por archivo y líneas agregadas.
+type ledgerDiff struct {
+	commit, parent string
+	merge          bool
+	removed        map[string]int
+	added          []string
+}
+
+// history es la historia del ledger que leen las verificaciones.
+type history struct {
+	commits []gitCommit
+	byID    map[string]gitCommit
+	diffs   []ledgerDiff
+	shallow bool
+}
+
+// readHistory recorre todos los commits de HEAD, no solo la cadena de
+// primeros padres: un merge cuyo primer padre ya no tiene una línea, seguido
+// de un fast-forward, también se ve. Cada commit se compara con cada uno de
+// sus padres, con el diff en texto (--text) para que un .gitattributes con
+// -diff no lo esconda.
+func readHistory(in Input) (*history, error) {
+	h := &history{byID: map[string]gitCommit{}}
+	if out, err := in.Git("rev-parse", "--is-shallow-repository"); err == nil && strings.TrimSpace(out) == "true" {
+		h.shallow = true
+	}
+	out, err := in.Git("log", "--format=%H %P%x00%ct", "HEAD")
+	if err != nil {
+		return nil, err
+	}
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		ids, ct, ok := strings.Cut(line, "\x00")
+		f := strings.Fields(ids)
+		if !ok || len(f) == 0 {
+			continue
+		}
+		var unix int64
+		fmt.Sscanf(ct, "%d", &unix)
+		c := gitCommit{sha: f[0], parents: f[1:], when: time.Unix(unix, 0).UTC()}
+		h.commits = append(h.commits, c)
+		h.byID[c.sha] = c
+	}
+	// Los commits que tocan el ledger frente a algún padre, sin simplificar
+	// la historia.
+	out, err = in.Git("log", "--full-history", "-m", "--no-renames", "--relative", "--format=@%H", "--name-only", "--", ledgerDir)
+	if err != nil {
+		return nil, err
+	}
+	touched := map[string]bool{}
+	for _, line := range strings.Split(out, "\n") {
+		if sha, ok := strings.CutPrefix(line, "@"); ok {
+			touched[strings.TrimSpace(sha)] = true
+		}
+	}
+	for _, c := range h.commits {
+		if !touched[c.sha] {
+			continue
+		}
+		parents := c.parents
+		if len(parents) == 0 {
+			parents = []string{""} // el commit raíz, contra el árbol vacío
+		}
+		for _, p := range parents {
+			args := []string{"-c", "core.quotePath=false", "diff-tree", "-p", "--text", "-U0", "--no-ext-diff", "--no-textconv", "--no-renames", "--relative"}
+			if p == "" {
+				args = append(args, "--root", c.sha)
+			} else {
+				args = append(args, p, c.sha)
+			}
+			out, err := in.Git(append(args, "--", ledgerDir)...)
+			if err != nil {
+				return nil, err
+			}
+			d := ledgerDiff{commit: c.sha, parent: p, merge: len(c.parents) > 1, removed: map[string]int{}}
+			file := ""
+			for _, l := range strings.Split(out, "\n") {
+				switch {
+				case strings.HasPrefix(l, "diff --git "):
+					file = ""
+				case strings.HasPrefix(l, "--- a/"):
+					file = strings.TrimPrefix(l, "--- a/")
+				case strings.HasPrefix(l, "+++ b/"):
+					if file == "" {
+						file = strings.TrimPrefix(l, "+++ b/")
+					}
+				case strings.HasPrefix(l, "---"), strings.HasPrefix(l, "+++"):
+				case strings.HasPrefix(l, "-"):
+					d.removed[file]++
+				case strings.HasPrefix(l, "+"):
+					d.added = append(d.added, strings.TrimPrefix(l, "+"))
+				}
+			}
+			h.diffs = append(h.diffs, d)
+		}
+	}
+	return h, nil
+}
+
+// checkAppendOnly revisa que ningún commit cambie ni borre líneas del ledger
+// frente a ninguno de sus padres, y lo mismo en el árbol de trabajo. Lo que
+// no se puede leer cuenta como falla: una verificación que no corrió no
+// puede dar ok.
+func checkAppendOnly(in Input, h *history, herr error) Check {
 	c := Check{Name: "el ledger solo agrega líneas", Result: OK}
 	fail := func(s string) {
 		c.Result = Fail
@@ -27,52 +133,28 @@ func checkAppendOnly(in Input) Check {
 			c.Detail = append(c.Detail, s)
 		}
 	}
-	if out, err := in.Git("rev-parse", "--is-shallow-repository"); err == nil && strings.TrimSpace(out) == "true" {
+	if herr != nil {
+		return Check{Name: c.Name, Result: Warn, Detail: []string{"no pude leer la historia: " + oneLine(herr.Error(), 120)}}
+	}
+	if h.shallow {
 		c.Result = Warn
 		c.Detail = append(c.Detail, "el clon es superficial: la historia que no bajó no se revisó")
 	}
-	// Las rutas, relativas a la carpeta del proyecto y sin comillas: un
-	// proyecto en una subcarpeta o con acentos en su ruta se revisa igual.
-	out, err := in.Git("-c", "core.quotePath=false", "log", "-m", "--first-parent", "--no-renames", "--relative",
-		"--format=@%H %P", "--name-status", "--diff-filter=MDT", "--", ledgerDir)
-	if err != nil {
-		return Check{Name: c.Name, Result: Warn, Detail: []string{"no pude leer la historia: " + oneLine(err.Error(), 120)}}
-	}
-	commit, parent := "", ""
-	for _, line := range strings.Split(out, "\n") {
-		if rest, ok := strings.CutPrefix(line, "@"); ok {
-			f := strings.Fields(rest)
-			commit, parent = "", ""
-			if len(f) >= 2 {
-				commit, parent = f[0], f[1]
+	for _, d := range h.diffs {
+		for f, n := range d.removed {
+			if n == 0 {
+				continue
 			}
-			continue
-		}
-		status, p, ok := strings.Cut(line, "\t")
-		if !ok || commit == "" {
-			continue
-		}
-		short := commit[:min(7, len(commit))]
-		switch status {
-		case "D":
-			fail(fmt.Sprintf("el commit %s borra %s", short, p))
-			continue
-		case "T":
-			fail(fmt.Sprintf("el commit %s cambia el tipo de %s (un symlink o un submódulo esconden el archivo)", short, p))
-			continue
-		}
-		old, err1 := in.Git("cat-file", "blob", parent+":./"+p)
-		nw, err2 := in.Git("cat-file", "blob", commit+":./"+p)
-		switch {
-		case err1 != nil || err2 != nil:
-			fail(fmt.Sprintf("no pude leer %s en el commit %s", p, short))
-		case !strings.HasPrefix(nw, old):
-			fail(fmt.Sprintf("el commit %s cambia o borra líneas de %s", short, p))
+			against := ""
+			if d.merge {
+				against = " frente a su padre " + d.parent[:min(7, len(d.parent))]
+			}
+			fail(fmt.Sprintf("el commit %s cambia, borra o esconde líneas de %s%s", d.commit[:min(7, len(d.commit))], f, against))
 		}
 	}
 	// Sin commit todavía: cada archivo de HEAD contra el disco. Se recorre
 	// HEAD, no git diff: un renombre preparado o skip-worktree no esconden
-	// un cambio.
+	// un cambio. Un checkout con CRLF (eol=crlf) no cuenta como cambio.
 	if out, err := in.Git("-c", "core.quotePath=false", "ls-tree", "-r", "-z", "--name-only", "HEAD", "--", ledgerDir); err == nil {
 		for _, p := range strings.Split(out, "\x00") {
 			if p == "" {
@@ -98,7 +180,8 @@ func checkAppendOnly(in Input) Check {
 				fail(fmt.Sprintf("no pude leer %s", p))
 				continue
 			}
-			if !strings.HasPrefix(string(data), old) {
+			crlf := strings.NewReplacer("\r\n", "\n")
+			if !strings.HasPrefix(crlf.Replace(string(data)), crlf.Replace(old)) {
 				fail(fmt.Sprintf("%s tiene líneas cambiadas o borradas sin commit", p))
 			}
 		}
@@ -106,64 +189,73 @@ func checkAppendOnly(in Input) Check {
 	return c
 }
 
-// checkBackdated busca eventos que llegaron en un commit del periodo con una
-// fecha más de un día anterior a ese commit, o sin commit con una fecha más
-// de un día anterior a ahora: un evento con fecha pasada cae en un mes que
-// quizá ya se auditó. Una aprobación o un rechazo de un agente con fecha
-// pasada es falla; lo demás, como una importación con --ts, es aviso.
-func checkBackdated(in Input) Check {
+// checkBackdated busca eventos con una fecha más de un día anterior al
+// commit que los trajo (el que no es un merge: lo que llega por un merge se
+// mide contra el commit de su rama) o, sin commit, anterior a ahora. Una
+// aprobación o un rechazo de un agente que cae en un mes anterior al de su
+// commit, quizá ya auditado, es falla; lo demás, como una importación con
+// --ts o un squash, es aviso. También avisa de commits con fecha anterior a
+// la de su padre: un reloj atrasado o una fecha cambiada.
+func checkBackdated(in Input, h *history, herr error) Check {
 	c := Check{Name: "eventos con fecha anterior a su commit", Result: OK}
-	note := func(l ccf.Line, where string, landed time.Time) {
-		agentDecision := (l.Type == "apr" || l.Type == "rej") && usage.Agent(l.Actor) != "" && usage.Agent(l.Actor) != "-"
-		switch {
-		case agentDecision:
-			c.Result = Fail
-		case c.Result == OK:
+	if herr != nil {
+		return Check{Name: c.Name, Result: Warn, Detail: []string{"no pude leer la historia: " + oneLine(herr.Error(), 120)}}
+	}
+	warn := func(s string) {
+		if c.Result == OK {
 			c.Result = Warn
 		}
 		if len(c.Detail) < 20 {
-			days := int(landed.Sub(l.TS).Hours() / 24)
-			c.Detail = append(c.Detail, fmt.Sprintf("%s agrega un %s de %s con fecha %s, %d días antes", where, l.Type, l.Actor, l.TS.Format("2006-01-02 15:04Z"), days))
+			c.Detail = append(c.Detail, s)
 		}
 	}
-	scan := func(diff string, where func(string) (string, time.Time)) {
-		label, landed := "", time.Time{}
-		for _, line := range strings.Split(diff, "\n") {
-			if strings.HasPrefix(line, "@@") {
-				continue // encabezado de un trozo del diff
+	note := func(l ccf.Line, where string, landed time.Time) {
+		days := int(landed.Sub(l.TS).Hours() / 24)
+		msg := fmt.Sprintf("%s agrega un %s de %s con fecha %s, %d días antes", where, l.Type, l.Actor, l.TS.Format("2006-01-02 15:04Z"), days)
+		agentDecision := (l.Type == "apr" || l.Type == "rej") && usage.Agent(l.Actor) != "" && usage.Agent(l.Actor) != "-"
+		if agentDecision && l.TS.Format("2006-01") < landed.Format("2006-01") {
+			c.Result = Fail
+			if len(c.Detail) < 20 {
+				c.Detail = append(c.Detail, msg+": cae en un mes anterior")
 			}
-			if rest, ok := strings.CutPrefix(line, "@"); ok {
-				label, landed = where(rest)
+			return
+		}
+		warn(msg)
+	}
+	inPeriod := func(t time.Time) bool { return !t.Before(in.From) && t.Before(in.To) }
+	for _, d := range h.diffs {
+		cm := h.byID[d.commit]
+		if d.merge || !inPeriod(cm.when) {
+			continue
+		}
+		for _, line := range d.added {
+			if l, err := ccf.Parse(line); err == nil && cm.when.Sub(l.TS) > 24*time.Hour {
+				note(l, "el commit "+cm.sha[:min(7, len(cm.sha))], cm.when)
+			}
+		}
+	}
+	for _, cm := range h.commits {
+		for _, p := range cm.parents {
+			pc, ok := h.byID[p]
+			if !ok || !inPeriod(cm.when) && !inPeriod(pc.when) {
 				continue
 			}
-			if !strings.HasPrefix(line, "+") || strings.HasPrefix(line, "+++") || label == "" {
-				continue
-			}
-			l, err := ccf.Parse(strings.TrimPrefix(line, "+"))
-			if err == nil && landed.Sub(l.TS) > 24*time.Hour {
-				note(l, label, landed)
+			if pc.when.Sub(cm.when) > time.Hour {
+				warn(fmt.Sprintf("el commit %s tiene fecha anterior a la de su padre %s: un reloj atrasado o una fecha cambiada", cm.sha[:min(7, len(cm.sha))], p[:min(7, len(p))]))
 			}
 		}
 	}
-	out, err := in.Git("-c", "core.quotePath=false", "log", "-m", "--first-parent", "--no-renames", "--relative", "-p", "-U0",
-		"--no-ext-diff", "--no-textconv", "--since="+in.From.Format(time.RFC3339), "--until="+in.To.Format(time.RFC3339),
-		"--format=@%H %ct", "--", ledgerDir)
-	if err != nil {
-		return Check{Name: c.Name, Result: Warn, Detail: []string{"no pude leer la historia: " + oneLine(err.Error(), 120)}}
-	}
-	scan(out, func(rest string) (string, time.Time) {
-		f := strings.Fields(rest)
-		if len(f) < 2 {
-			return "", time.Time{}
-		}
-		var unix int64
-		fmt.Sscanf(f[1], "%d", &unix)
-		return "el commit " + f[0][:min(7, len(f[0]))], time.Unix(unix, 0).UTC()
-	})
 	// Lo que todavía no tiene commit cuenta contra ahora, si ahora cae en el periodo.
-	if !in.Now.Before(in.From) && in.Now.Before(in.To) {
-		if out, err := in.Git("-c", "core.quotePath=false", "diff", "--no-ext-diff", "--no-textconv", "--relative", "-U0", "HEAD", "--", ledgerDir); err == nil {
-			scan("@\n"+out, func(string) (string, time.Time) { return "un cambio sin commit", in.Now })
+	if inPeriod(in.Now) {
+		if out, err := in.Git("-c", "core.quotePath=false", "diff", "--text", "--no-ext-diff", "--no-textconv", "--relative", "-U0", "HEAD", "--", ledgerDir); err == nil {
+			for _, line := range strings.Split(out, "\n") {
+				if !strings.HasPrefix(line, "+") || strings.HasPrefix(line, "+++") {
+					continue
+				}
+				if l, err := ccf.Parse(strings.TrimPrefix(line, "+")); err == nil && in.Now.Sub(l.TS) > 24*time.Hour {
+					note(l, "un cambio sin commit", in.Now)
+				}
+			}
 		}
 	}
 	return c
@@ -276,17 +368,24 @@ func isHex(s string) bool {
 // cuántos van firmados.
 func checkCommits(in Input) (Check, int, int) {
 	c := Check{Name: "commits del periodo sin atribución a IA (R15)", Result: OK}
-	out, err := in.Git("log", "--since="+in.From.Format(time.RFC3339), "--until="+in.To.Format(time.RFC3339),
-		"--format=%H%x00%G?%x00%B%x1e")
+	// Sin --since ni --until: git deja de recorrer en el primer commit con
+	// fecha vieja, y uno así escondería los anteriores. La fecha se filtra aquí.
+	out, err := in.Git("log", "--format=%H%x00%ct%x00%G?%x00%B%x1e", "HEAD")
 	if err != nil {
 		return Check{Name: c.Name, Result: Warn, Detail: []string{"no pude leer los commits: " + oneLine(err.Error(), 120)}}, 0, 0
 	}
 	commits, signed := 0, 0
 	for _, rec := range strings.Split(out, "\x1e") {
-		parts := strings.SplitN(strings.TrimLeft(rec, "\n"), "\x00", 3)
-		if len(parts) < 3 || parts[0] == "" {
+		f := strings.SplitN(strings.TrimLeft(rec, "\n"), "\x00", 4)
+		if len(f) < 4 || f[0] == "" {
 			continue
 		}
+		var unix int64
+		fmt.Sscanf(f[1], "%d", &unix)
+		if when := time.Unix(unix, 0).UTC(); when.Before(in.From) || !when.Before(in.To) {
+			continue
+		}
+		parts := []string{f[0], f[2], f[3]}
 		commits++
 		if parts[1] != "N" {
 			signed++

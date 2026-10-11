@@ -182,3 +182,37 @@ func TestReporteSinInyeccion(t *testing.T) {
 		t.Errorf("las barras de un registro van escapadas en la tabla")
 	}
 }
+
+// TestRespaldoSegundaRevision: un registro sin gate no respalda la decisión
+// de un agente; un gate rechazado y después aprobado se vincula por nombre,
+// cada evento con su registro.
+func TestRespaldoSegundaRevision(t *testing.T) {
+	from := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	ev := func(ts, typ, what string, refs ...string) ledger.Entry {
+		e := entry(ts, "@ana/coyote-scribe", typ, what, refs, 0)
+		e.LineNo = len(ts) + len(what)
+		return e
+	}
+	in := Input{Project: "tienda", Root: "/p", From: from, To: from.AddDate(0, 1, 0), Now: from.AddDate(0, 0, 25),
+		Entries: []ledger.Entry{
+			ev("2026-09-05T10:00:00Z", "apr", "renombrar la carpeta de docs", "apr:P-0009"),
+			ev("2026-09-10T11:00:00Z", "rej", "G1 rechazado: falta la retro"),
+			ev("2026-09-12T11:00:00Z", "apr", "G1 aprobado: v0.1.0"),
+		},
+		Approvals: []Approval{
+			{ID: "P-0009", Decision: "approved", Approver: "@ana", Date: "2026-09-05", Response: "sí, renómbrala"},
+			{ID: "P-0001", Gate: "G1", Release: "v0.1.0", Decision: "rejected", Approver: "@ana", Date: "2026-09-10", Response: "no todavía"},
+			{ID: "P-0002", Gate: "G1", Release: "v0.1.0", Decision: "approved", Approver: "@ana", Date: "2026-09-12", Response: "sí"},
+		},
+	}
+	c := check(Build(in), "aprobaciones registradas por un agente")
+	joined := strings.Join(c.Detail, "\n")
+	if c.Result != Fail || !strings.Contains(joined, "P-0009, que no es el registro de un gate") {
+		t.Errorf("un registro sin gate no respalda a un agente: %+v", c)
+	}
+	for _, want := range []string{"registró P-0001: la respuesta", "registró P-0002: la respuesta"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("falta %q en:\n%s", want, joined)
+		}
+	}
+}

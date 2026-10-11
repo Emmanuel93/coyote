@@ -3,6 +3,7 @@ package cli
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -47,7 +48,7 @@ func TestAuditConHistoriaDeGit(t *testing.T) {
 	git(t, root, "commit", "-qam", "chore: arreglo")
 	r = run(t, root, "", "audit")
 	must(t, r, 1, "ledger reescrito en un commit")
-	if !strings.Contains(r.stdout, "cambia o borra líneas de coyote/ledger/") {
+	if !strings.Contains(r.stdout, "cambia, borra o esconde líneas de coyote/ledger/") {
 		t.Errorf("reescritura en la historia:\n%s", r.stdout)
 	}
 
@@ -116,7 +117,7 @@ func TestAuditNoSeEvade(t *testing.T) {
 	}
 	git(t, root, "update-index", "--add", "--cacheinfo", "160000,"+head+","+f)
 	git(t, root, "commit", "-qm", "chore: limpieza")
-	falla(root, "submódulo", "cambia el tipo de")
+	falla(root, "submódulo", "cambia, borra o esconde líneas de")
 
 	// Un renombre preparado con una edición, y skip-worktree.
 	root, f = nuevo("renombre")
@@ -157,7 +158,7 @@ func TestAuditNoSeEvade(t *testing.T) {
 	}
 	falla(sub, "subcarpeta sin commit", "tiene líneas cambiadas o borradas sin commit")
 	git(t, mono, "commit", "-qam", "chore: arreglo")
-	falla(sub, "subcarpeta con acentos", "cambia o borra líneas de")
+	falla(sub, "subcarpeta con acentos", "cambia, borra o esconde líneas de")
 
 	// Un agente que registra una aprobación con fecha pasada.
 	root, _ = nuevo("atrasado")
@@ -175,5 +176,118 @@ func TestAuditNoSeEvade(t *testing.T) {
 	r := run(t, shallow, "", "audit")
 	if !strings.Contains(r.stdout, "| el ledger solo agrega líneas | aviso |") || !strings.Contains(r.stdout, "superficial") {
 		t.Errorf("clon superficial:\n%s", r.stdout)
+	}
+}
+
+// TestAuditSegundaRevision: segunda revisión adversarial de v1.0. Un merge
+// con -s ours y un fast-forward, un commit con fecha vieja, un
+// .gitattributes con -diff, un squash y un checkout con CRLF.
+func TestAuditSegundaRevision(t *testing.T) {
+	base := setup(t)
+	nuevo := func(name string) (string, string) {
+		t.Helper()
+		must(t, run(t, base, "", "init", name, "--purpose", "API de pedidos de la tienda demo"), 0, "init "+name)
+		root := filepath.Join(base, name)
+		git(t, root, "add", "-A")
+		git(t, root, "commit", "-qm", "chore: adopta coyote")
+		files, _ := filepath.Glob(filepath.Join(root, "coyote", "ledger", "*", "*", "*.ccf"))
+		rel, _ := filepath.Rel(root, files[0])
+		return root, filepath.ToSlash(rel)
+	}
+	report := func(root string, args ...string) result {
+		t.Helper()
+		return run(t, root, "", append([]string{"audit"}, args...)...)
+	}
+
+	// Un merge -s ours cuyo primer padre no tiene la línea, y main que avanza por fast-forward.
+	root, f := nuevo("ours")
+	c0 := strings.TrimSpace(git(t, root, "rev-parse", "HEAD"))
+	clean := readFile(t, filepath.Join(root, f))
+	must(t, run(t, root, "", "record", "fix", "el agente borró la base de producción"), 0, "record")
+	git(t, root, "commit", "-qam", "chore: registro")
+	git(t, root, "checkout", "-q", "-b", "limpieza", c0)
+	if err := os.WriteFile(filepath.Join(root, f), []byte(clean+"2026-10-01T10:00Z|@ana|-|ours|feat|-|otra cosa|-|-|-|ok\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, root, "commit", "-qam", "chore: limpieza")
+	git(t, root, "merge", "-q", "-s", "ours", "main", "-m", "merge")
+	git(t, root, "checkout", "-q", "main")
+	git(t, root, "merge", "-q", "--ff-only", "limpieza")
+	if r := report(root); r.code != 1 || !strings.Contains(r.stdout, "frente a su padre") {
+		t.Errorf("merge -s ours con fast-forward: %d\n%s", r.code, r.stdout)
+	}
+
+	// Un commit con fecha vieja no esconde los anteriores del mes, ni un -diff.
+	root, _ = nuevo("fechas")
+	past := time.Now().UTC().AddDate(0, 0, -40).Format(time.RFC3339)
+	write(t, root, ".gitattributes", "coyote/ledger/** -diff\n")
+	must(t, run(t, root, "", "record", "apr", "despliegue aprobado", "--agent", "coyote-scribe", "--ts", past), 0, "record")
+	git(t, root, "add", "-A")
+	git(t, root, "commit", "-qm", "chore: registro", "-m", aiTrailer, "--no-verify")
+	old := exec.Command("git", "-C", root, "commit", "-q", "--allow-empty", "-m", "chore: reloj atrasado")
+	old.Env = append(os.Environ(), "GIT_COMMITTER_DATE="+time.Now().UTC().AddDate(0, -2, 0).Format(time.RFC3339))
+	if out, err := old.CombinedOutput(); err != nil {
+		t.Fatalf("commit con fecha vieja: %v\n%s", err, out)
+	}
+	git(t, root, "commit", "-q", "--allow-empty", "-m", "chore: hoy")
+	r := report(root)
+	for _, want := range []string{"| eventos con fecha anterior a su commit | falla |", "| commits del periodo sin atribución a IA (R15) | falla |", "tiene fecha anterior a la de su padre"} {
+		if !strings.Contains(r.stdout, want) {
+			t.Errorf("falta %q:\n%s", want, r.stdout)
+		}
+	}
+
+	// Una aprobación de la rama, registrada el mismo mes e integrada con
+	// --no-ff días después, se mide contra el commit que la trajo.
+	root, _ = nuevo("rama")
+	git(t, root, "checkout", "-q", "-b", "feature")
+	day := time.Now().UTC()
+	if day.Day() < 4 {
+		t.Skip("al principio del mes la prueba cruzaría de mes")
+	}
+	must(t, run(t, root, "", "record", "fix", "un arreglo en la rama", "--ts", day.Add(-2*time.Hour).Format(time.RFC3339)), 0, "record")
+	git(t, root, "commit", "-qam", "fix: rama")
+	git(t, root, "checkout", "-q", "main")
+	merge := exec.Command("git", "-C", root, "merge", "-q", "--no-ff", "feature", "-m", "merge")
+	merge.Env = append(os.Environ(), "GIT_COMMITTER_DATE="+day.Add(72*time.Hour).Format(time.RFC3339))
+	if out, err := merge.CombinedOutput(); err != nil {
+		t.Fatalf("merge: %v\n%s", err, out)
+	}
+	if r := report(root); strings.Contains(r.stdout, "| eventos con fecha anterior a su commit | falla |") {
+		t.Errorf("lo que llega por un merge se mide contra su commit:\n%s", r.stdout)
+	}
+
+	// Un checkout con CRLF no es un ledger reescrito.
+	root, f = nuevo("crlf")
+	write(t, root, ".gitattributes", "* text=auto eol=crlf\n")
+	git(t, root, "add", "-A")
+	git(t, root, "commit", "-qm", "chore: atributos")
+	if err := os.Remove(filepath.Join(root, f)); err != nil {
+		t.Fatal(err)
+	}
+	git(t, root, "checkout", "--", f)
+	if r := report(root); strings.Contains(r.stdout, "sin commit") {
+		t.Errorf("CRLF del checkout:\n%s", r.stdout)
+	}
+
+	// La huella de un mes no cambia cuando llegan eventos de otro mes.
+	root, _ = nuevo("huella")
+	lastMonth := time.Now().UTC().AddDate(0, -1, 0).Format("2006-01")
+	sum := func() string {
+		t.Helper()
+		r := report(root, "--month", lastMonth, "--json")
+		var rep struct {
+			Sum string `json:"ledger_sha256"`
+		}
+		if err := json.Unmarshal([]byte(r.stdout), &rep); err != nil {
+			t.Fatalf("--json: %v\n%s", err, r.stdout)
+		}
+		return rep.Sum
+	}
+	before := sum()
+	must(t, run(t, root, "", "record", "feat", "algo de este mes"), 0, "record")
+	git(t, root, "commit", "-qam", "chore: registro")
+	if after := sum(); after != before {
+		t.Errorf("la huella del mes pasado cambió con un evento de este mes: %s → %s", before, after)
 	}
 }
