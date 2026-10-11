@@ -70,6 +70,15 @@ func ledgerText(t *testing.T, root string) string {
 	return b.String()
 }
 
+// asHuman hace que la prueba corra como una persona en su terminal: lo que
+// coyote reserva a una persona (instalar, aprobar) se puede probar.
+func asHuman(t *testing.T) {
+	t.Helper()
+	old := isTerminal
+	isTerminal = func() bool { return true }
+	t.Cleanup(func() { isTerminal = old })
+}
+
 // setup deja un entorno aislado: HOME y configuración global de git propios.
 func setup(t *testing.T) string {
 	t.Helper()

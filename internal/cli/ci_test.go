@@ -155,6 +155,7 @@ func TestCIImpact(t *testing.T) {
 
 func TestInstallCI(t *testing.T) {
 	base := setup(t)
+	asHuman(t)
 	productoDemo(t, base)
 	root := filepath.Join(base, "producto")
 	must(t, run(t, base, "", "init", "producto", "--type", "product", "--purpose", "tienda demo"), 0, "init")
@@ -260,6 +261,53 @@ func TestInstallCI(t *testing.T) {
 	must(t, run(t, root, "", "install", "--ci", "github", "--coyote-ref", "v0.5.1", "--coyote-repo", "acme/coyote", "--check"), 1, "check con otra versión")
 	must(t, run(t, root, "", "install", "--ci", "gitlab"), 2, "otro proveedor")
 	must(t, run(t, root, "", "install", "--ci", "github", "--ide", "cursor"), 2, "ide y ci a la vez")
+}
+
+// TestInstallCISoloPersona: cuarta pasada de v1.0. Escribir los workflows es
+// de una persona, como instalar el gate de un IDE: sin terminal, o dentro de
+// una sesión de agente, no se escribe nada. Revisar y simular siguen libres.
+func TestInstallCISoloPersona(t *testing.T) {
+	base := setup(t)
+	productoDemo(t, base)
+	root := filepath.Join(base, "producto")
+	must(t, run(t, base, "", "init", "producto", "--type", "product", "--purpose", "tienda demo"), 0, "init")
+	for _, r := range []string{"servicios", "app", "backoffice"} {
+		must(t, run(t, root, "", "repo", "add", r, "--path", "../"+r), 0, "repo add "+r)
+		git(t, filepath.Join(base, r), "remote", "add", "origin", "git@github.com:acme/"+r+".git")
+	}
+	install := []string{"install", "--ci", "github", "--coyote-ref", "v0.5.0", "--coyote-repo", "acme/coyote"}
+	wf := filepath.Join(root, "coyote", "ci", "app.yml")
+	exists := func() bool { _, err := os.Stat(wf); return err == nil }
+
+	old := isTerminal
+	t.Cleanup(func() { isTerminal = old })
+	isTerminal = func() bool { return false }
+	r := run(t, root, "", install...)
+	must(t, r, 1, "sin terminal")
+	if !strings.Contains(r.stderr, "necesita una terminal interactiva") || exists() {
+		t.Errorf("sin terminal no se escribe:\n%s", r.stderr)
+	}
+	isTerminal = func() bool { return true }
+	t.Setenv("CLAUDECODE", "1")
+	r = run(t, root, "", install...)
+	must(t, r, 1, "dentro de una sesión de agente")
+	if !strings.Contains(r.stderr, "sesión de agente") || exists() {
+		t.Errorf("un agente no escribe los workflows:\n%s", r.stderr)
+	}
+	// Revisar y simular no escriben y no piden persona.
+	isTerminal = func() bool { return false }
+	must(t, run(t, root, "", append(install, "--check")...), 1, "revisar sin workflows")
+	must(t, run(t, root, "", append(install, "--dry-run")...), 0, "simular")
+	if exists() {
+		t.Error("--check y --dry-run no escriben")
+	}
+	// La persona sí los escribe.
+	t.Setenv("CLAUDECODE", "")
+	isTerminal = func() bool { return true }
+	must(t, run(t, root, "", install...), 0, "la persona instala")
+	if !exists() {
+		t.Error("la persona escribe los workflows")
+	}
 }
 
 func TestGatePR(t *testing.T) {

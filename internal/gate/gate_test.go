@@ -46,6 +46,7 @@ func TestReadOnlyShell(t *testing.T) {
 		"git -C internal log -1", "sleep 1", "coyote ws status W-0002", "coyote ws check W-0002 --json", "coyote ws status",
 		"coyote hub status", "coyote hub status --json", "coyote slo check", "coyote slo rules --check", "coyote slo rules pagos --stdout",
 		"coyote audit", "coyote audit --month 2026-09 --json", "coyote eval", "coyote eval -v --json",
+		"coyote install --ci github --check", "coyote install --ide cursor --check", "coyote install --ci github --policy warn --dry-run", "coyote install --dry-run --ide cursor",
 	}
 	for _, c := range allow {
 		a := claude(t, "Bash", map[string]any{"command": c, "description": "x"}, root)
@@ -66,6 +67,9 @@ func TestReadOnlyShell(t *testing.T) {
 		"coyote slo rules", "coyote slo rules pagos", "coyote hub init ../hub", "coyote audit --write", "coyote audit --month 2026-09 -write", "coyote eval --update-baseline",
 		"coyote slo rules --check --check=false", "coyote slo rules --stdout=false", "coyote slo rules --check -- x --check=false",
 		"coyote generate agents --check --check=false", "coyote install --dry-run --dry-run=false --ide cursor",
+		// Una bandera de texto se lleva la siguiente como valor: --check no queda prendida.
+		"coyote install --ci github --policy --check", "coyote install --ci github --coyote-ref --check", "coyote install --ci github --coyote-repo --dry-run",
+		"coyote install --ide --check", "coyote install --policy --dry-run=true --ci github", "coyote slo rules --dir --check", "coyote generate agents --out --check",
 		"go test -run X ./...", "go run .", "ls\nrm -rf x", "ls # comentario", "git worktree add x",
 		"git config --list", "git config -l", "git config --get-regexp .", "git config --get-urlmatch http https://x",
 		"git config --get http.https://x.extraheader", "git remote -v", "git remote get-url origin", "go vet ./...", "go env",
@@ -95,6 +99,14 @@ func TestCredentialsAndGateAreBlocked(t *testing.T) {
 		{"Bash", map[string]any{"command": "go run ./cmd/coyote approve P-1"}},
 		{"Bash", map[string]any{"command": "./bin/coyote -C . revoke P-1 --reason x"}},
 		{"Bash", map[string]any{"command": "coyote auth logout"}},
+		// Cuarta pasada: --check como valor de otra bandera no vuelve de lectura a install,
+		// y repo add escribe coyote/project.yaml por un camino que no nombra el archivo.
+		{"Bash", map[string]any{"command": "coyote install --ci github --policy --check"}},
+		{"Bash", map[string]any{"command": "coyote install --ide --check"}},
+		{"Bash", map[string]any{"command": "coyote repo add evil https://github.com/x/evil --path repos/evil"}},
+		{"Bash", map[string]any{"command": "./bin/coyote -C . repo add secretos --path ~/.ssh"}},
+		{"Bash", map[string]any{"command": "c=coyote; $c repo add x --path /"}},
+		{"Bash", map[string]any{"command": "sh -c 'coyote repo add x --path /'"}},
 		{"Bash", map[string]any{"command": "coyote run --agent coyote-dev implementa todo"}},
 		{"Bash", map[string]any{"command": "env -u CLAUDECODE -u COYOTE_IDE coyote run --agent coyote-dev x"}},
 		{"Bash", map[string]any{"command": "nice -n 10 coyote run --agent coyote-dev x"}},
@@ -180,7 +192,7 @@ func TestCredentialsAndGateAreBlocked(t *testing.T) {
 		`git commit -m "fix(run): la corrida de coyote run la registra"`, `coyote commit -m "docs(ws): coyote ws continue acepta el paso"`,
 		`grep -rn "coyote run" docs/ > /tmp/x`, `sed -i 's/coyote run/coyote ws run/' README.md`, "./bin/coyote status && make run",
 		`gh pr create --title "coyote ws run" --body "corre el plan"`, "go run ./cmd/coyote status",
-		`bash scripts/notas.sh "coyote install --ci ahora fija las acciones"`} {
+		`bash scripts/notas.sh "coyote install --ci ahora fija las acciones"`, `git commit -m "docs(repo): coyote repo add registra el repo"`} {
 		if d := ps.Evaluate(claude(t, "Bash", map[string]any{"command": c}, root)); d.Verdict != NeedsApproval {
 			t.Errorf("%s: un texto que menciona el comando se trató como %s: %s", c, d.Verdict, d.Reason)
 		}

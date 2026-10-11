@@ -538,16 +538,45 @@ func agentRisks(changed []string, have []ci.FileRisk) []ci.FileRisk {
 	return out
 }
 
+// addedLines da las líneas de un archivo que hay que revisar. Son las del
+// parche; pero lo que git lista sin hunks (con -diff en .gitattributes, un
+// binario para git, vacío) no trae líneas, y un texto en UTF-16 las trae con
+// bytes 0 entre letras. En esos casos se lee el archivo entero en la revisión
+// nueva, ya decodificado. Si no se puede leer como texto (un binario de
+// verdad, o más grande que el tope), no hay nada que revisar.
+func addedLines(f product.AddedFile, whole func(string) (string, bool)) []product.AddedLine {
+	nul := false
+	for _, l := range f.Lines {
+		if strings.IndexByte(l.Text, 0) >= 0 {
+			nul = true
+			break
+		}
+	}
+	if !f.Whole && !nul {
+		return f.Lines
+	}
+	text, ok := whole(f.Path)
+	if !ok {
+		return f.Lines
+	}
+	var out []product.AddedLine
+	for i, l := range strings.Split(text, "\n") {
+		out = append(out, product.AddedLine{Line: i + 1, Text: l})
+	}
+	return out
+}
+
 // injectionRisks marca como R2 un documento o una instrucción de agentes al
 // que el PR le agrega texto con forma de orden para un agente. Las líneas
 // seguidas se leen juntas: una orden partida en dos líneas también cuenta.
 func injectionRisks(added []product.AddedFile, whole func(string) (string, bool)) []ci.FileRisk {
 	var out []ci.FileRisk
 	for _, f := range added {
+		lines := addedLines(f, whole)
 		if !inject.Document(f.Path) {
 			// En el código solo se buscan caracteres ocultos: los que
 			// reordenan el texto (Trojan Source) son R3; los demás, R2.
-			if risk := hiddenRisk(f); risk != nil {
+			if risk := hiddenRisk(f.Path, lines); risk != nil {
 				out = append(out, *risk)
 			}
 			continue
@@ -557,13 +586,8 @@ func injectionRisks(added []product.AddedFile, whole func(string) (string, bool)
 			text  string
 		}
 		var runs []run
-		if f.Whole {
-			if text, ok := whole(f.Path); ok {
-				runs = append(runs, run{1, text})
-			}
-		}
-		for i, l := range f.Lines {
-			if i > 0 && l.Line == f.Lines[i-1].Line+1 {
+		for i, l := range lines {
+			if i > 0 && l.Line == lines[i-1].Line+1 {
 				runs[len(runs)-1].text += "\n" + l.Text
 				continue
 			}
@@ -649,15 +673,15 @@ func appendOnly(old, nw []byte) bool { return bytes.HasPrefix(nw, old) }
 
 // hiddenRisk revisa las líneas que un PR agrega a un archivo que no es un
 // documento: caracteres invisibles o que reordenan lo que ve quien revisa.
-func hiddenRisk(f product.AddedFile) *ci.FileRisk {
+func hiddenRisk(path string, lines []product.AddedLine) *ci.FileRisk {
 	var first *ci.FileRisk
-	for _, l := range f.Lines {
+	for _, l := range lines {
 		for _, h := range inject.Hidden(l.Text) {
 			if inject.Reorders(h) {
-				return &ci.FileRisk{Path: f.Path, Risk: ci.R3, Why: fmt.Sprintf("controles de dirección del texto en la línea %d: lo que se revisa no es lo que corre (Trojan Source)", l.Line)}
+				return &ci.FileRisk{Path: path, Risk: ci.R3, Why: fmt.Sprintf("controles de dirección del texto en la línea %d: lo que se revisa no es lo que corre (Trojan Source)", l.Line)}
 			}
 			if first == nil {
-				first = &ci.FileRisk{Path: f.Path, Risk: ci.R2, Why: fmt.Sprintf("%s en la línea %d", h.Label, l.Line)}
+				first = &ci.FileRisk{Path: path, Risk: ci.R2, Why: fmt.Sprintf("%s en la línea %d", h.Label, l.Line)}
 			}
 		}
 	}

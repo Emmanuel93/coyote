@@ -302,23 +302,55 @@ func hasFlag(args []word, flags ...string) (string, bool) {
 // flagOn dice si una bandera booleana de Go queda prendida: la última
 // aparición manda (--check --check=false la apaga). Con "--" en los
 // argumentos no se decide y cuenta como apagada: libera solo lo que se ve.
+//
+// El paquete flag de Go le da a una bandera de texto o de número el argumento
+// que sigue, aunque parezca una bandera: en --policy --check, "--check" es el
+// valor de --policy y el comando corre sin comprobar nada. Sin la tabla de
+// banderas de cada comando no se sabe cuáles piden valor, así que una
+// aparición pegada a otra bandera sin "=" puede ser su valor y apaga: se
+// pierde una aprobación de más en --a --check, nunca se libera un comando que
+// escribe. Dos apariciones de la misma bandera seguidas son booleanas y no
+// dudan.
 func flagOn(args []word, flags ...string) bool {
 	on := false
-	for _, a := range args {
+	for i, a := range args {
 		if a.s == "--" {
 			return false
 		}
 		for _, f := range flags {
+			var val string
 			switch {
 			case a.s == f:
-				on = true
+				val = "true"
 			case strings.HasPrefix(a.s, f+"="):
-				v, err := strconv.ParseBool(strings.TrimPrefix(a.s, f+"="))
-				on = err == nil && v
+				val = strings.TrimPrefix(a.s, f+"=")
+			default:
+				continue
 			}
+			if i > 0 && mayTakeValue(args[i-1].s, flags) {
+				on = false
+				continue
+			}
+			v, err := strconv.ParseBool(val)
+			on = err == nil && v
 		}
 	}
 	return on
+}
+
+// mayTakeValue dice si prev puede ser una bandera que se lleva el argumento
+// que sigue: parece bandera, no trae su valor con "=" y no es una de las
+// booleanas por las que se pregunta.
+func mayTakeValue(prev string, bools []string) bool {
+	if len(prev) < 2 || prev[0] != '-' || strings.Contains(prev, "=") {
+		return false
+	}
+	for _, b := range bools {
+		if prev == b {
+			return false
+		}
+	}
+	return true
 }
 
 // withoutDashDash quita los "--" de los argumentos: para buscar banderas que

@@ -265,3 +265,55 @@ func TestProhibicionesYGateConNotasMarcadas(t *testing.T) {
 		t.Errorf("install debe avisar:\n%s", r.stderr)
 	}
 }
+
+// TestGatePRCaracteresOcultosSinHunks: cuarta pasada de v1.0. Un archivo que
+// git lista sin hunks (con -diff en .gitattributes, o en UTF-16, que git toma
+// por binario) no traía líneas y se saltaba la búsqueda de caracteres
+// ocultos: Trojan Source pasaba con solo marcar el archivo. Se lee entero en
+// la revisión nueva, ya decodificado.
+func TestGatePRCaracteresOcultosSinHunks(t *testing.T) {
+	base := setup(t)
+	productoDemo(t, base)
+	svc := filepath.Join(base, "servicios")
+	baseSHA := strings.TrimSpace(git(t, svc, "rev-parse", "HEAD"))
+	git(t, svc, "checkout", "-qb", "pr")
+	le16 := func(s string) []byte {
+		out := []byte{0xff, 0xfe}
+		for _, u := range utf16.Encode([]rune(s)) {
+			out = append(out, byte(u), byte(u>>8))
+		}
+		return out
+	}
+	trojan := "package tools\n\nfunc permitido(rol string) bool {\n\treturn rol != \"user\u202e \u2066// solo admins\u2069 \u2066\" // x\n}\n"
+	cero := "package tools\n\nconst nombre = \"ad\u200bmin\"\n"
+	write(t, svc, ".gitattributes", "tools/*.go -diff\nlegacy/*.go diff\n")
+	write(t, svc, "tools/trojan.go", trojan)
+	write(t, svc, "tools/cero.go", cero)
+	write(t, svc, "tools/limpio.go", "package tools\n\nconst acceso = \"admin\"\n")
+	// UTF-16 sin el atributo: git lo toma por binario. Con diff forzado
+	// trae hunks, pero con bytes 0 entre letras.
+	for name, text := range map[string]string{"tools/u16.go": trojan, "legacy/u16.go": cero} {
+		p := filepath.Join(svc, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, le16(text), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	git(t, svc, "add", "-A")
+	git(t, svc, "commit", "-qm", "cambios")
+	headSHA := strings.TrimSpace(git(t, svc, "rev-parse", "HEAD"))
+
+	r := run(t, base, "", "gate", "pr", "--repo", "servicios="+svc, "--self", "servicios", "--base", baseSHA, "--head", headSHA, "--event", "", "--policy", "warn")
+	must(t, r, 0, "gate pr")
+	for _, want := range []string{"tools/trojan.go", "controles de dirección del texto en la línea 4", "tools/cero.go", "caracteres de ancho cero en la línea 3",
+		"tools/u16.go", "legacy/u16.go"} {
+		if !strings.Contains(r.stdout, want) {
+			t.Errorf("reporte sin %q:\n%s", want, r.stdout)
+		}
+	}
+	if strings.Contains(r.stdout, "tools/limpio.go") {
+		t.Errorf("un archivo sin caracteres ocultos no tiene riesgo:\n%s", r.stdout)
+	}
+}

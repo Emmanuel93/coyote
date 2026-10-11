@@ -591,7 +591,7 @@ func (ps Paths) hardShell(a Action) *Hard {
 	// subcomandos de lectura (install --check, por ejemplo).
 	_, notRead := analyzeShell(cmd)
 	if notRead != nil && isCoyoteAdmin(cmd) {
-		return hard("un agente no aprueba, rechaza ni revoca, no instala el gate ni credenciales y no lanza otros agentes (coyote run, coyote ws run o continue); eso lo hace la persona en su terminal")
+		return hard("un agente no aprueba, rechaza ni revoca, no instala el gate ni credenciales, no registra repos en el proyecto (coyote repo add) y no lanza otros agentes (coyote run, coyote ws run o continue); eso lo hace la persona en su terminal")
 	}
 	cwdHere := a.Cwd
 	if cwdHere == "" {

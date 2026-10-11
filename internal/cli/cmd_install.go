@@ -497,6 +497,14 @@ func (a *app) installCI(kind, policy, ref, coyoteRepo string, check, dry bool) e
 	if len(repos) < 2 {
 		return fail(1, "el producto necesita al menos dos repos para ver el impacto entre ellos")
 	}
+	// Los workflows se escriben solo si una persona lo pide: lo mismo que
+	// instalar el gate de un IDE (a.human). Revisar (--check) y simular
+	// (--dry-run) no escriben.
+	if !check && !dry {
+		if err := a.human("install"); err != nil {
+			return err
+		}
+	}
 	stale := 0
 	for i, self := range repos {
 		others := append(append([]install.CIRepo{}, repos[:i]...), repos[i+1:]...)

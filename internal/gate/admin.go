@@ -7,7 +7,9 @@ import (
 )
 
 // Un agente nunca corre coyote approve, reject, revoke, auth, hooks,
-// install, run, ws run ni ws continue: eso lo hace la persona en su terminal.
+// install, run, repo add, ws run ni ws continue: eso lo hace la persona en su
+// terminal. repo add escribe coyote/project.yaml, que el gate protege, por un
+// camino que no nombra el archivo.
 // La revisión no enumera envoltorios (watch, parallel, find -exec…): busca la
 // palabra coyote seguida del subcomando en cualquier lugar de cada segmento,
 // sigue las variables que guardan coyote y lee como comando el texto entre
@@ -34,7 +36,7 @@ var (
 	// noteText es el texto de coyote note y coyote record.
 	noteText   = regexp.MustCompile(`(?i)(\bcoyote\s+(?:-C\s+\S+\s+)*(?:note|record\s+\S+)\s+)('[^']*'|"[^"$` + "`" + `]*")`)
 	assignRe   = regexp.MustCompile(`^([A-Za-z_][A-Za-z0-9_]*)=(.*)$`)
-	mentionsRe = regexp.MustCompile(`(?i)\bcoyote\b.*\b(approve|reject|revoke|auth|hooks|install|run|ws\s+(run|continue))\b`)
+	mentionsRe = regexp.MustCompile(`(?i)\bcoyote\b.*\b(approve|reject|revoke|auth|hooks|install|run|repo\s+add|ws\s+(run|continue))\b`)
 )
 
 // lword es una palabra de shell sin comillas; quoted dice si traía comillas.
@@ -124,6 +126,9 @@ func adminWords(seg []lword, vars map[string]bool) bool {
 			if next := strings.ToLower(rest[j+1]); next == "run" || next == "continue" {
 				return true
 			}
+		}
+		if verb == "repo" && j+1 < len(rest) && strings.ToLower(rest[j+1]) == "add" {
+			return true
 		}
 	}
 	return false
