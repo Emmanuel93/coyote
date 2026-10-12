@@ -132,22 +132,41 @@ type Plan struct {
 }
 
 // Find busca la carpeta de un workstream: coyote/workstreams/W-0004 o
-// W-0004-algo. Devuelve la ruta relativa a la raíz.
+// W-0004-algo. Devuelve la ruta relativa a la raíz. Si hay varias carpetas con
+// ese id, vale la que tiene plan.yaml: una carpeta huérfana (corridas sueltas,
+// un nombre viejo) no esconde el plan de otra. Con más de una con plan, o sin
+// plan en ninguna, no se elige a ciegas.
 func Find(root, id string) (string, error) {
 	if !IDRe.MatchString(id) {
 		return "", fmt.Errorf("workstream %q inválido: usa W-0001", id)
 	}
 	entries, _ := os.ReadDir(filepath.Join(root, filepath.FromSlash(Base)))
+	var all, withPlan []string
 	for _, e := range entries {
 		if e.IsDir() && (e.Name() == id || strings.HasPrefix(e.Name(), id+"-")) {
 			if !dirRe.MatchString(e.Name()) {
 				// Las rutas de los artefactos van al ledger, que no admite espacios.
 				return "", fmt.Errorf("la carpeta %q no sirve para un workstream: usa %s-nombre con letras, números, punto, guion y guion bajo", e.Name(), id)
 			}
-			return Base + "/" + e.Name(), nil
+			all = append(all, e.Name())
+			if fsx.Regular(root, Base+"/"+e.Name()+"/plan.yaml") {
+				withPlan = append(withPlan, e.Name())
+			}
 		}
 	}
-	return "", fmt.Errorf("no existe el workstream %s en %s/", id, Base)
+	switch {
+	case len(all) == 0:
+		return "", fmt.Errorf("no existe el workstream %s en %s/", id, Base)
+	case len(withPlan) == 1:
+		return Base + "/" + withPlan[0], nil
+	case len(all) == 1:
+		return Base + "/" + all[0], nil
+	}
+	names := withPlan
+	if len(names) == 0 {
+		names = all
+	}
+	return "", fmt.Errorf("hay %d carpetas para %s en %s/ (%s): deja una", len(names), id, Base, strings.Join(names, ", "))
 }
 
 // Load lee plan.yaml de un workstream.
@@ -387,7 +406,7 @@ func CleanPath(p string) (string, error) {
 		return "", errors.New("usa una ruta relativa a la raíz del proyecto")
 	}
 	if !visible(p) {
-		return "", errors.New("la ruta lleva saltos de línea, controles o marcas que no se ven")
+		return "", errors.New("la ruta lleva saltos de línea, controles, espacios especiales o marcas que no se ven")
 	}
 	// Un espacio al borde de un nombre ("./ step:S1") se come el prefijo en lo que
 	// se muestra: la entrada se lee como un paso y es un archivo.
@@ -409,14 +428,20 @@ func CleanPath(p string) (string, error) {
 	return c, nil
 }
 
-// visible dice si una ruta se ve como es: sin saltos de línea, controles ni
-// marcas de formato que no se ven (las que cambian la dirección del texto, las
-// de etiqueta, el espacio de ancho cero). Una ruta así redibuja la salida de
-// quien la muestra, o esconde a qué archivo apunta.
+// visible dice si una ruta se ve como es: cada carácter se dibuja (nada sin
+// asignar, de formato, de control ni de uso privado, y de los espacios solo el
+// común) y ningún nombre empieza con una marca ni con un selector de
+// variación, que se pegarían a la barra y esconderían a qué archivo apunta. Una
+// ruta que no se ve como es redibuja la salida de quien la muestra, o hace
+// pasar un archivo por un paso (step:S1).
 func visible(p string) bool {
-	prev := rune(0)
+	prev := rune(0) // el carácter anterior de este nombre; 0 al empezar uno
 	for _, r := range p {
-		if r == utf8.RuneError || r < 0x20 || safetext.Unsafe(r) || safetext.Invisible(prev, r) || unicode.Is(unicode.Cf, r) {
+		if r == '/' {
+			prev = 0
+			continue
+		}
+		if r == utf8.RuneError || !unicode.IsPrint(r) || safetext.Invisible(prev, r) || prev == 0 && unicode.IsMark(r) {
 			return false
 		}
 		prev = r

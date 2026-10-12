@@ -28,6 +28,7 @@ const (
 	StopEvaluate = "evaluate" // autonomous terminó: quien lo autorizó evalúa (A4)
 	StopDone     = "done"     // todos los pasos están hechos
 	StopClosed   = "closed"   // el workstream se cerró con coyote close
+	StopPlan     = "plan"     // el plan tiene errores que ningún modo salva: ws run y ws continue se niegan
 )
 
 // MinRunUSD es lo mínimo que tiene que quedar del plan para lanzar un paso.

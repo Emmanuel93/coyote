@@ -402,7 +402,6 @@ func (a *app) statusNext(c *wsCtx, findings []workstream.Finding, st *workstream
 		nx = st.Next(c.mode)
 		return nx, wsHint(c, st, nx), ""
 	}
-	nx = st.Next(c.mode)
 	hint = fmt.Sprintf("corrige el plan (coyote ws check %s): mientras tenga errores, ws run y ws continue se niegan", c.plan.ID)
 	for r := workstream.Rank(c.mode) - 1; r >= 0; r-- {
 		lc, lf, err := a.loadWS(c.plan.ID, workstream.Modes[r])
@@ -412,6 +411,10 @@ func (a *app) statusNext(c *wsCtx, findings []workstream.Finding, st *workstream
 		nx = st.Next(lc.mode)
 		return nx, wsHint(lc, st, nx), lc.mode
 	}
+	// Ningún modo salva el plan: ws run y ws continue se niegan, y next.run para
+	// máquinas lo dice igual que el texto.
+	nx = st.Next(c.mode)
+	nx.Run, nx.Reason = false, workstream.StopPlan
 	return nx, hint, ""
 }
 
@@ -1239,8 +1242,13 @@ func (a *app) wsContinue(args []string) error {
 		}
 		fmt.Fprintf(a.stdout, "✓ %s aceptado (%s)\n", planLine(s.ID), orDash(planLine(s.Doc)))
 	}
-	if len(accepted) > 0 && c.mode == "autonomous" {
-		a.warnEvaluator(c)
+	// A4 pide que evalúe quien autorizó el loop: el aviso depende de lo que se
+	// acepta (algo que corrió en el loop autónomo), no del modo con que se acepta.
+	for _, i := range accepted {
+		if st.Steps[i].Auto {
+			a.warnEvaluator(c)
+			break
+		}
 	}
 	if nx.Reason == workstream.StopHuman {
 		s := st.Steps[nx.Index]

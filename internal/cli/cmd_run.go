@@ -731,15 +731,27 @@ func closeBlock(ws string, events []usage.Event, steps []workstream.StepState, n
 	fmt.Fprintf(&b, "Eventos por tipo: %s.\n", orDash(strings.Join(parts, ", ")))
 	if len(steps) > 0 {
 		b.WriteString("\n### Pasos del plan\n\n| Paso | Agente | Estado | Corridas | Costo |\n|---|---|---|---|---|\n")
-		open := 0
+		open, auto := 0, 0
 		for _, s := range steps {
 			fmt.Fprintf(&b, "| %s | %s | %s | %d | $%.4f |\n", mdCell(s.ID), mdCell(s.Agent), workstream.Label(s.Status), s.Runs, s.CostUSD)
 			if s.Status != workstream.Done {
 				open++
 			}
+			// Lo que el loop autónomo dejó por revisar y siguió de largo corrió sin que
+			// nadie lo viera; un paso con gate: human se detuvo a esperar a la persona.
+			if s.Status == workstream.Review && s.Auto && s.Gate != "human" {
+				auto++
+			}
 		}
 		if open > 0 {
-			fmt.Fprintf(&b, "\n%s sin cerrar: lo que corrió sin revisión lo evalúa quien autorizó el plan (A4).\n", plural(open, "paso queda", "pasos quedan"))
+			fmt.Fprintf(&b, "\n%s sin cerrar.", plural(open, "paso queda", "pasos quedan"))
+			if auto > 0 {
+				// A4 solo habla de lo que corrió en el loop autónomo, no de un plan
+				// supervised o manual donde cada paso lo revisó una persona.
+				fmt.Fprintf(&b, " De ellos, %s sin revisión en el loop autónomo: %s quien autorizó el plan (A4).",
+					plural(auto, "corrió", "corrieron"), pluralWord(auto, "lo evalúa", "los evalúa"))
+			}
+			b.WriteString("\n")
 		}
 	}
 	if len(runs) > 0 {

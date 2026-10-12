@@ -7,6 +7,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode"
 
 	"github.com/Emmanuel93/coyote/internal/ccf"
 	"github.com/Emmanuel93/coyote/internal/ledger"
@@ -852,5 +853,108 @@ func TestPlanPRDArchivoQueNingunPasoRecibe(t *testing.T) {
 	got := check("coyote/prd/pagos.md", InputUnusable)
 	if has(got, "error S1: la entrada coyote/prd/pagos.md no es un archivo regular") != 1 || has(got, "error el PRD") != 0 || len(got) != 1 {
 		t.Errorf("un PRD ilegible que un paso recibe se dice una vez, en la entrada: %q", got)
+	}
+}
+
+// TestEntradasSinCaracteresInvisibles: séptima revisión de v1.0 (P1). Un nombre
+// que empieza con un carácter sin asignar o sin forma (U+2065, U+FFF0, las
+// etiquetas U+E0002, un selector de variación o una marca tras la barra) se
+// ve como step:S1 y es un archivo: ninguna ruta de entrada lleva nada que
+// Unicode no dibuje, y el barrido lo prueba con todos los puntos de código.
+func TestEntradasSinCaracteresInvisibles(t *testing.T) {
+	for _, in := range []string{
+		"⁥step:S1", "./⁥step:S1", "docs/⁥a.md", "docs/a￰.md", "docs/\U000e0002.md", "docs/\U000e0080.md",
+		"./️step:S1", "docs/\U000e0100a.md", "docs/́a.md", "x/‍step:S1", "docs/a.md", "docs/a\U000f0000.md",
+		"./︀diff:r=main...HEAD", "file:️step:S1",
+	} {
+		if got, err := ParseInput(in); err == nil {
+			t.Errorf("%q debería ser inválida y dio %v", in, got)
+		}
+	}
+	// Un emoji con su forma de color, un acento combinado y un nombre con ñ siguen valiendo.
+	for in, want := range map[string]string{"docs/⚠️ aviso.md": "docs/⚠️ aviso.md", "docs/café.md": "docs/café.md", "docs/a b.md": "docs/a b.md"} {
+		if got, err := ParseInput(in); err != nil || got.Value != want {
+			t.Errorf("%q: %v %v", in, got, err)
+		}
+	}
+	// Barrido: no se salta ningún punto de código.
+	defaultIgnorable := func(r rune) bool {
+		return unicode.Is(unicode.Other_Default_Ignorable_Code_Point, r) || unicode.Is(unicode.Cf, r) || unicode.Is(unicode.Variation_Selector, r)
+	}
+	for r := rune(0); r <= unicode.MaxRune; r++ {
+		if r >= 0xd800 && r <= 0xdfff {
+			continue // los sustitutos no son UTF-8 válido
+		}
+		s := string(r)
+		printable := unicode.IsPrint(r)
+		for _, in := range []string{"docs/a" + s + "b.md", "docs/" + s + "step:S1"} {
+			_, err := ParseInput(in)
+			switch {
+			case !printable && err == nil:
+				t.Fatalf("U+%04X (%q) no se dibuja y pasó en %q", r, s, in)
+			case defaultIgnorable(r) && err == nil && strings.HasPrefix(in, "docs/"+s):
+				// Al borde de un nombre, un carácter ignorable no puede esconder el prefijo.
+				t.Fatalf("U+%04X es ignorable por defecto y pasó al borde de un nombre en %q", r, in)
+			}
+		}
+	}
+}
+
+// TestFindConVariasCarpetas: séptima revisión de v1.0 (P2). Find elegía la
+// primera carpeta W-NNNN* aunque no tuviera plan.yaml: una carpeta huérfana
+// (corridas sueltas, un nombre viejo) escondía el plan de otra, y run --ws lo
+// tomaba por un workstream sin plan, sin tope ni cierre.
+func TestFindConVariasCarpetas(t *testing.T) {
+	root := t.TempDir()
+	mk := func(rel string) {
+		t.Helper()
+		p := filepath.Join(root, filepath.FromSlash(Base), filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte("x\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mk("W-0001-a/runs/x.md")
+	mk("W-0001-b/plan.yaml")
+	if got, err := Find(root, "W-0001"); err != nil || got != Base+"/W-0001-b" {
+		t.Errorf("con una huérfana y una con plan, la del plan: %q %v", got, err)
+	}
+	mk("W-0002-a/runs/x.md")
+	if got, err := Find(root, "W-0002"); err != nil || got != Base+"/W-0002-a" {
+		t.Errorf("una sola carpeta, aunque no tenga plan: %q %v", got, err)
+	}
+	mk("W-0003/plan.yaml")
+	mk("W-0003-pagos/plan.yaml")
+	_, err := Find(root, "W-0003")
+	if err == nil || !strings.Contains(err.Error(), "2 carpetas para W-0003") || !strings.Contains(err.Error(), "W-0003-pagos") {
+		t.Errorf("dos carpetas con plan: %v", err)
+	}
+	mk("W-0004-a/runs/x.md")
+	mk("W-0004-b/runs/y.md")
+	if _, err := Find(root, "W-0004"); err == nil || !strings.Contains(err.Error(), "2 carpetas para W-0004") {
+		t.Errorf("dos carpetas sin plan: %v", err)
+	}
+	// W-0005 no es W-00051: el prefijo lleva guion.
+	mk("W-00051/plan.yaml")
+	if _, err := Find(root, "W-0005"); err == nil || !strings.Contains(err.Error(), "no existe") {
+		t.Errorf("W-0005 no existe: %v", err)
+	}
+	// Un nombre que no sirve se dice, como antes.
+	mk("W-0006-mal nombre/plan.yaml")
+	if _, err := Find(root, "W-0006"); err == nil || !strings.Contains(err.Error(), "no sirve") {
+		t.Errorf("un nombre con espacios: %v", err)
+	}
+	// Load usa la del plan y deja el id de la carpeta.
+	if err := os.WriteFile(filepath.Join(root, filepath.FromSlash(Base), "W-0001-b", "plan.yaml"), []byte(planYAML), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p, err := Load(root, "W-0001")
+	if err != nil || p.Dir != Base+"/W-0001-b" {
+		t.Errorf("Load: %v %v", p, err)
+	}
+	if _, err := Load(root, "W-0002"); !NoPlan(err) {
+		t.Errorf("la carpeta sin plan sigue siendo NoPlan: %v", err)
 	}
 }
