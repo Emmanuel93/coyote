@@ -34,8 +34,8 @@ const noProgram = "/dev/null"
 // filterNameRe es lo que un nombre de filtro puede tener para anularlo con -c.
 var filterNameRe = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 
-// errUnsafeFilters indica filtros con nombres que no se pueden anular.
-var errUnsafeFilters = errors.New("la configuración de git declara filtros con nombres inusuales; no se compara el árbol de trabajo para no ejecutarlos")
+// ErrUnsafeFilters indica filtros con nombres que no se pueden anular.
+var ErrUnsafeFilters = errors.New("la configuración de git declara filtros con nombres inusuales; no se compara el árbol de trabajo para no ejecutarlos")
 
 var filterCache sync.Map // carpeta → []string (argumentos -c) o error
 
@@ -121,7 +121,7 @@ func filterOverrides(abs string) ([]string, error) {
 		}
 		seen[name] = true
 		if !filterNameRe.MatchString(name) {
-			result = errUnsafeFilters
+			result = ErrUnsafeFilters
 			break
 		}
 		for _, attr := range []string{"clean", "smudge", "process"} {
@@ -159,8 +159,31 @@ func gitRead(dir string, args ...string) *exec.Cmd {
 // resto de la plomería: sin locks opcionales, sin fsmonitor, sin filtros ni
 // diffs externos. Devuelve la salida estándar.
 func Git(dir string, args ...string) (string, error) {
-	var out, errb bytes.Buffer
+	return output(gitRead(dir, args...), args)
+}
+
+// GitStdin es Git para los comandos que leen de la entrada estándar (git
+// cat-file --batch lee muchos objetos en un solo proceso).
+func GitStdin(dir, stdin string, args ...string) (string, error) {
 	cmd := gitRead(dir, args...)
+	cmd.Stdin = strings.NewReader(stdin)
+	return output(cmd, args)
+}
+
+// GitTree es Git para los comandos que comparan el árbol de trabajo (git blame
+// sin revisión, git diff contra HEAD): corren los filtros clean del repo para
+// normalizar lo que leen del disco. Si algún filtro tiene un nombre que no se
+// puede anular, falla con ErrUnsafeFilters en vez de ejecutarlo.
+func GitTree(dir string, args ...string) (string, error) {
+	cmd, err := gitWorktree(dir, args...)
+	if err != nil {
+		return "", err
+	}
+	return output(cmd, args)
+}
+
+func output(cmd *exec.Cmd, args []string) (string, error) {
+	var out, errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errb
 	if err := cmd.Run(); err != nil {
 		return "", fmt.Errorf("git %s: %v %s", strings.Join(args, " "), err, strings.TrimSpace(errb.String()))

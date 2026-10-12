@@ -129,13 +129,16 @@ func Dirty(dir string) int {
 // Log devuelve hasta n commits de las revisiones dadas, con el mensaje
 // completo (%B). Con merges=false omite los merges. Usa separadores NUL
 // (-z, %x00): un mensaje de commit no puede contener NUL, así que un texto
-// malicioso no puede desalinear los campos.
+// malicioso no puede desalinear los campos. Pide la salida en UTF-8
+// (--encoding): con i18n.logOutputEncoding=UTF-16 git escribiría hasta los
+// hashes en UTF-16, y el mensaje de un commit en otra codificación se lee
+// convertido, como lo muestra git.
 func Log(dir string, n int, merges bool, revs ...string) ([]Commit, error) {
 	if !HasCommits(dir) {
 		return nil, nil
 	}
 	const fields = 7
-	args := []string{"log", "-z", "-n", strconv.Itoa(n), "--format=%H%x00%P%x00%an%x00%ae%x00%cn%x00%ce%x00%B"}
+	args := []string{"log", "--encoding=UTF-8", "-z", "-n", strconv.Itoa(n), "--format=%H%x00%P%x00%an%x00%ae%x00%cn%x00%ce%x00%B"}
 	if !merges {
 		args = append(args, "--no-merges")
 	}

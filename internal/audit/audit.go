@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path"
@@ -25,17 +26,29 @@ import (
 // Git corre un comando de lectura de git en la raíz del proyecto.
 type Git func(args ...string) (string, error)
 
+// ErrFilters es lo que devuelve Input.Worktree cuando el repo declara filtros
+// que no se pueden anular: comparar el árbol de trabajo los ejecutaría.
+var ErrFilters = errors.New("la configuración de git declara filtros con nombres inusuales; no se compara el árbol de trabajo para no ejecutarlos")
+
 // Input es lo que el reporte lee.
 type Input struct {
-	Project     string
-	Root        string
-	From, To    time.Time // periodo [From, To)
-	Now         time.Time
-	Entries     []ledger.Entry
-	Problems    []ledger.Problem
-	Approvals   []Approval
-	MonthlyUSD  float64
-	Git         Git // nil: sin historia de git
+	Project    string
+	Root       string
+	From, To   time.Time // periodo [From, To)
+	Now        time.Time
+	Entries    []ledger.Entry
+	Problems   []ledger.Problem
+	Approvals  []Approval
+	MonthlyUSD float64
+	Git        Git // nil: sin historia de git
+	// GitBatch corre un comando de git que lee de la entrada estándar (cat-file
+	// --batch): con él los commits del periodo se leen en un puñado de procesos y no
+	// en uno por commit. nil, o si falla: un proceso por commit, con el mismo resultado.
+	GitBatch func(stdin string, args ...string) (string, error)
+	// Worktree corre los comandos que comparan el árbol de trabajo (blame, diff
+	// contra HEAD), que ejecutan los filtros clean del repo salvo que se anulen:
+	// si no se pueden anular, falla con ErrFilters. nil: sin esas lecturas.
+	Worktree    Git
 	Attribution *attribution.Config
 }
 

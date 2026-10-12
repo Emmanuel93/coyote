@@ -451,6 +451,31 @@ func TestHistorialNoSeReinicia(t *testing.T) {
 	must(t, run(t, root, "", "attribution", "check", "--commits", "20"), 1, "historial tras borrar y agregar project.yaml")
 }
 
+// TestHistorialConOtraCodificacionDeSalida: i18n.logOutputEncoding cambia la
+// codificación de lo que escribe git log; con UTF-16 la salida entera (los hashes
+// también) deja de ser texto que se pueda partir. El historial se pide siempre en UTF-8:
+// attribution check sigue viendo el pie de IA en lugar de fallar sin decir por qué.
+func TestHistorialConOtraCodificacionDeSalida(t *testing.T) {
+	base := setup(t)
+	root := filepath.Join(base, "e")
+	must(t, run(t, base, "", "init", "e", "--type", "library", "--purpose", "prueba de codificación"), 0, "init")
+	git(t, root, "add", "-A")
+	must(t, run(t, root, "", "commit", "-m", "chore: adopta coyote"), 0, "primer commit")
+	if err := os.WriteFile(filepath.Join(root, "a.txt"), []byte("a\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, root, "add", "a.txt")
+	git(t, root, "commit", "-q", "--no-verify", "-m", "feat: a", "-m", aiTrailer)
+	for _, enc := range []string{"UTF-16LE", "UTF-16BE", "UTF-16", "ISO-8859-1", "UTF-8"} {
+		git(t, root, "config", "i18n.logOutputEncoding", enc)
+		r := run(t, root, "", "attribution", "check", "--commits", "20")
+		must(t, r, 1, "pie de IA con i18n.logOutputEncoding="+enc)
+		if !strings.Contains(r.stdout+r.stderr, "coauthor-ai") && !strings.Contains(r.stdout+r.stderr, "atribución a IA") {
+			t.Errorf("i18n.logOutputEncoding=%s: se esperaba el hallazgo del pie de IA:\n%s%s", enc, r.stdout, r.stderr)
+		}
+	}
+}
+
 func TestHookModoIdentidadYTijeras(t *testing.T) {
 	base := setup(t)
 	root := filepath.Join(base, "k")

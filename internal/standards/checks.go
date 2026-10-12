@@ -291,7 +291,7 @@ func AdoptedCommits(root string, n int, merges bool) ([]gitx.Commit, error) {
 	}
 	// La base es el commit más antiguo que agregó coyote/project.yaml: borrarlo y
 	// volver a agregarlo no reinicia el historial que se revisa.
-	adds, err := gitx.Run(root, "log", "--diff-filter=A", "--format=%H", "--", "coyote/project.yaml")
+	adds, err := gitx.Run(root, "log", "--encoding=UTF-8", "--diff-filter=A", "--format=%H", "--", "coyote/project.yaml")
 	adds = strings.TrimSpace(adds)
 	if err != nil || adds == "" {
 		return nil, nil

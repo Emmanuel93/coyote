@@ -1,11 +1,13 @@
 package audit
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -56,7 +58,7 @@ func readHistory(in Input) (*history, error) {
 	if out, err := in.Git("rev-parse", "--is-shallow-repository"); err == nil && strings.TrimSpace(out) == "true" {
 		h.shallow = true
 	}
-	out, err := in.Git("log", "--format=%H %P%x00%ct", "HEAD")
+	out, err := in.Git("log", "--encoding=UTF-8", "--format=%H %P%x00%ct", "HEAD")
 	if err != nil {
 		return nil, err
 	}
@@ -126,7 +128,7 @@ func readHistory(in Input) (*history, error) {
 			h.skewed = append(h.skewed, fmt.Sprintf("el commit %s tiene fecha anterior a la de su padre: un reloj atrasado o una fecha cambiada", short(c.sha)))
 		}
 		if impossible[i] {
-			h.skewed = append(h.skewed, fmt.Sprintf("el commit %s tiene fecha futura (%s): cuenta como llegado con el commit que le sigue, o ahora si es el último; no se sabe cuándo llegó", short(c.sha), c.when.Format("2006-01-02")))
+			h.skewed = append(h.skewed, fmt.Sprintf("el commit %s tiene fecha futura (%s): cuenta como llegado con el que le sigue, o ahora si es el último (no se sabe cuándo llegó). Si esa fecha pasa, él y los que le siguen pueden contarse también en el mes siguiente: vuelve a auditar este periodo después de esa fecha", short(c.sha), c.when.Format("2006-01-02")))
 		}
 		h.landed[c.sha], prevWhen, prevFuture = at[i], c.when, impossible[i]
 		if at[i].Before(in.From) {
@@ -157,56 +159,44 @@ func readHistory(in Input) (*history, error) {
 			h.arrived = append(h.arrived, c)
 		}
 	}
-	for _, c := range h.arrived {
-		parents := c.parents
-		if len(parents) == 0 {
-			parents = []string{""} // el commit raíz, contra el árbol vacío
-		}
-		for _, p := range parents {
-			d, err := diffAgainst(in, c, p)
-			if err != nil {
-				return nil, err
-			}
-			h.diffs = append(h.diffs, d)
-		}
+	// Los diffs de lo que llegó salen de un solo git log, como los de la historia
+	// anterior: un proceso por commit y por padre hacía que un mes con miles de
+	// commits tardara medio minuto.
+	revs := []string{end}
+	if start != "" {
+		revs = append(revs, "^"+start)
+	}
+	if h.diffs, err = h.ledgerLog(in, revs...); err != nil {
+		return nil, err
 	}
 	return h, nil
-}
-
-// diffAgainst lee lo que un commit cambia en el ledger frente a uno de sus
-// padres ("" es el árbol vacío, para el commit raíz).
-func diffAgainst(in Input, c gitCommit, parent string) (ledgerDiff, error) {
-	args := []string{"-c", "core.quotePath=false", "diff-tree", "-p", "--text", "-U0", "--no-ext-diff", "--no-textconv", "--no-renames", "--relative"}
-	if parent == "" {
-		args = append(args, "--root", c.sha)
-	} else {
-		args = append(args, parent, c.sha)
-	}
-	out, err := in.Git(append(args, "--", ledgerDir)...)
-	if err != nil {
-		return ledgerDiff{}, err
-	}
-	return parseLedgerDiff(out, c.sha, parent, len(c.parents) > 1), nil
 }
 
 // priorHeader es la línea que abre cada commit de readPrior: el hash completo
 // y, en un merge, el padre contra el que va el diff que sigue.
 var priorHeader = regexp.MustCompile(`^([0-9a-f]{40}|[0-9a-f]{64})(?: \(from ([0-9a-f]{40}|[0-9a-f]{64})\))?(?: |$)`)
 
-// readPrior busca en la historia que llegó antes del periodo (todo lo que
-// alcanza start) los commits que borran o cambian líneas del ledger. Un
-// reporte de un mes anterior pudo no verlos, o la historia pudo reescribirse
-// después con fechas viejas: se avisan con el mes en que llegaron, no son
-// falla del periodo. Sale de un solo git log: con -m un merge trae un diff
-// contra cada padre, y la línea "hash (from padre)" dice cuál. Los prefijos
-// a/ y b/ van explícitos: diff.noprefix o diff.mnemonicPrefix de la
-// configuración los cambiarían y los archivos quedarían sin nombre.
-func (h *history) readPrior(in Input, start string) error {
-	out, err := in.Git("-c", "core.quotePath=false", "log", "--full-history", "-m", "--format=oneline", "--no-abbrev-commit", "--no-color",
-		"-p", "--text", "-U0", "--no-ext-diff", "--no-textconv", "--no-renames", "--relative", "--src-prefix=a/", "--dst-prefix=b/", start, "--", ledgerDir)
+// ledgerLog lee de un solo git log lo que cada commit de revs cambia en el ledger:
+// un ledgerDiff por commit y por padre (con -m un merge trae un diff contra cada
+// uno, y la línea "hash (from padre)" dice cuál), sin los commits que no tocan el
+// ledger. Los prefijos a/ y b/ van explícitos: diff.noprefix o diff.mnemonicPrefix
+// de la configuración los cambiarían y los archivos quedarían sin nombre. Y
+// log.diffMerges va en separate: desde git 2.31, -m respeta esa configuración y con
+// first-parent o combined (una preferencia legítima) el diff contra el otro padre
+// desaparece, o sale en un formato que no se lee: un merge que tira las líneas de una
+// rama pasaría por limpio. --encoding=UTF-8 en este log y en el que lee la historia:
+// i18n.logOutputEncoding=UTF-16 vuelve la salida entera UTF-16 (los hashes también),
+// y el reporte no podría leer la historia. --full-history sigue todos los padres de
+// un merge aunque su árbol coincida con el de uno de ellos: con -m el git que se probó
+// ya lo hace, y la bandera deja explícito lo que esto necesita.
+func (h *history) ledgerLog(in Input, revs ...string) ([]ledgerDiff, error) {
+	args := []string{"-c", "core.quotePath=false", "-c", "log.diffMerges=separate", "log", "--encoding=UTF-8", "--full-history", "-m", "--format=oneline", "--no-abbrev-commit", "--no-color",
+		"-p", "--text", "-U0", "--no-ext-diff", "--no-textconv", "--no-renames", "--relative", "--src-prefix=a/", "--dst-prefix=b/"}
+	out, err := in.Git(append(append(args, revs...), "--", ledgerDir)...)
 	if err != nil {
-		return err
+		return nil, err
 	}
+	var diffs []ledgerDiff
 	var sha, from string
 	var diff []string
 	flush := func() {
@@ -218,9 +208,7 @@ func (h *history) readPrior(in Input, start string) error {
 		if parent == "" && len(c.parents) > 0 {
 			parent = c.parents[0]
 		}
-		if d := parseLedgerDiff(strings.Join(diff, "\n"), c.sha, parent, len(c.parents) > 1); len(d.removed) > 0 {
-			h.prior = append(h.prior, d)
-		}
+		diffs = append(diffs, parseLedgerDiff(strings.Join(diff, "\n"), c.sha, parent, len(c.parents) > 1))
 	}
 	for _, l := range strings.Split(out, "\n") {
 		if m := priorHeader.FindStringSubmatch(l); m != nil {
@@ -231,6 +219,24 @@ func (h *history) readPrior(in Input, start string) error {
 		diff = append(diff, l)
 	}
 	flush()
+	return diffs, nil
+}
+
+// readPrior busca en la historia que llegó antes del periodo (todo lo que
+// alcanza start) los commits que borran o cambian líneas del ledger. Un
+// reporte de un mes anterior pudo no verlos, o la historia pudo reescribirse
+// después con fechas viejas: se avisan con el mes en que llegaron, no son
+// falla del periodo.
+func (h *history) readPrior(in Input, start string) error {
+	diffs, err := h.ledgerLog(in, start)
+	if err != nil {
+		return err
+	}
+	for _, d := range diffs {
+		if len(d.removed) > 0 {
+			h.prior = append(h.prior, d)
+		}
+	}
 	return nil
 }
 
@@ -343,11 +349,15 @@ func checkAppendOnly(in Input, h *history, herr error) Check {
 	// HEAD, no git diff: un renombre preparado o skip-worktree no esconden
 	// un cambio. Un checkout con CRLF (eol=crlf) no cuenta como cambio.
 	if out, err := in.Git("-c", "core.quotePath=false", "ls-tree", "-r", "-z", "--name-only", "HEAD", "--", ledgerDir); err == nil {
+		var paths []string
 		for _, p := range strings.Split(out, "\x00") {
-			if p == "" {
-				continue
+			if p != "" {
+				paths = append(paths, p)
 			}
-			old, err := in.Git("cat-file", "blob", "HEAD:./"+p)
+		}
+		blobs := headBlobs(in, paths)
+		for i, p := range paths {
+			old, err := blobs[i].data, blobs[i].err
 			if err != nil {
 				fail(fmt.Sprintf("no pude leer %s en HEAD", p))
 				continue
@@ -428,8 +438,12 @@ func checkBackdated(in Input, h *history, herr error) Check {
 		warn(s)
 	}
 	// Lo que todavía no tiene commit cuenta contra ahora, si ahora cae en el periodo.
-	if inPeriod(in.Now) {
-		if out, err := in.Git("-c", "core.quotePath=false", "diff", "--text", "--no-ext-diff", "--no-textconv", "--relative", "-U0", "HEAD", "--", ledgerDir); err == nil {
+	if inPeriod(in.Now) && in.Worktree != nil {
+		out, err := in.Worktree("-c", "core.quotePath=false", "diff", "--text", "--no-ext-diff", "--no-textconv", "--relative", "-U0", "HEAD", "--", ledgerDir)
+		if errors.Is(err, ErrFilters) {
+			warn("no se revisaron los cambios sin commit: " + oneLine(err.Error(), 160))
+		}
+		if err == nil {
 			for _, line := range strings.Split(out, "\n") {
 				if !strings.HasPrefix(line, "+") || strings.HasPrefix(line, "+++") {
 					continue
@@ -470,7 +484,10 @@ func checkActors(in Input, period []ledger.Entry) Check {
 	for _, f := range names {
 		rp := rel(in.Root, f)
 		owner := filePerson(f)
-		authors := blameAuthors(in.Git, rp)
+		authors, berr := blameAuthors(in.Worktree, rp)
+		if berr != nil {
+			warn(fmt.Sprintf("%s: no se cruzó el autor de sus líneas: %s", rp, oneLine(berr.Error(), 160)))
+		}
 		for _, e := range files[f] {
 			person := usage.Person(e.Line.Actor)
 			if owner != "" && person != owner {
@@ -509,12 +526,20 @@ func checkActors(in Input, period []ledger.Entry) Check {
 }
 
 // blameAuthors devuelve el correo del autor del commit que trajo cada línea
-// del archivo, en su versión del árbol de trabajo.
-func blameAuthors(git Git, rp string) map[int]string {
+// del archivo, en su versión del árbol de trabajo. Si el archivo no se puede
+// leer con blame (uno nuevo, sin commit), no hay autores y no es un error;
+// lo es que el repo declare filtros que no se pueden anular (ErrFilters).
+func blameAuthors(git Git, rp string) (map[int]string, error) {
+	if git == nil {
+		return nil, nil
+	}
 	// Sin textconv: git blame corre el que declare la configuración del repo.
 	out, err := git("blame", "--no-textconv", "--line-porcelain", "--", rp)
+	if errors.Is(err, ErrFilters) {
+		return nil, err
+	}
 	if err != nil {
-		return nil
+		return nil, nil
 	}
 	authors := map[int]string{}
 	line, mail, zero := 0, "", false
@@ -535,7 +560,7 @@ func blameAuthors(git Git, rp string) map[int]string {
 			}
 		}
 	}
-	return authors
+	return authors, nil
 }
 
 func isHex(s string) bool {
@@ -561,46 +586,179 @@ func checkCommits(in Input, h *history, herr error) (Check, int, int) {
 			c.Detail = append(c.Detail, s)
 		}
 	}
-	for _, cm := range h.arrived {
-		out, err := in.Git("cat-file", "commit", cm.sha)
+	// Los commits se leen por lotes, en pocos procesos, y no uno por commit.
+	for first := 0; first < len(h.arrived); first += catBatch {
+		chunk := h.arrived[first:min(first+catBatch, len(h.arrived))]
+		raws, err := rawCommits(in, chunk)
 		if err != nil {
 			return Check{Name: c.Name, Result: Warn, Detail: []string{"no pude leer los commits: " + oneLine(err.Error(), 120)}}, 0, 0
 		}
-		sig, enc, msg := splitCommit(out)
-		commits++
-		if sig {
-			signed++
-		}
-		if in.Attribution == nil {
-			continue
-		}
-		// Los bytes crudos, y el mensaje como lo lee quien lo ve: con otra
-		// codificación (encoding IBM037, por ejemplo) el trailer no aparece en
-		// los bytes y git sí lo muestra. Un mensaje con bytes nulos no es el de
-		// un commit de git y no se puede revisar.
-		texts := []string{msg}
-		switch {
-		case strings.ContainsRune(msg, 0):
-			fail(fmt.Sprintf("%s tiene bytes nulos en el mensaje: no se puede revisar su atribución", short(cm.sha)))
-		case enc != "" && !isUTF8(enc):
-			conv, err := in.Git("log", "-1", "--format=%B", "--encoding=UTF-8", cm.sha)
-			if err != nil {
-				if c.Result == OK {
-					c.Result = Warn
-				}
-				c.Detail = append(c.Detail, fmt.Sprintf("%s está en la codificación %s y no pude convertir su mensaje a UTF-8", short(cm.sha), oneLine(enc, 40)))
-				break
+		for i, cm := range chunk {
+			sig, enc, msg := splitCommit(raws[i])
+			commits++
+			if sig {
+				signed++
 			}
-			texts = append(texts, conv)
-		}
-		for _, text := range texts {
-			if f := in.Attribution.Check(text, false); len(f) > 0 {
-				fail(fmt.Sprintf("%s lleva atribución a una herramienta de IA", short(cm.sha)))
-				break
+			if in.Attribution == nil {
+				continue
+			}
+			// Los bytes crudos, y el mensaje como lo lee quien lo ve: con otra
+			// codificación (encoding IBM037, por ejemplo) el trailer no aparece en
+			// los bytes y git sí lo muestra. Un mensaje con bytes nulos no es el de
+			// un commit de git y no se puede revisar.
+			texts := []string{msg}
+			switch {
+			case strings.ContainsRune(msg, 0):
+				fail(fmt.Sprintf("%s tiene bytes nulos en el mensaje: no se puede revisar su atribución", short(cm.sha)))
+			case enc != "":
+				conv, err := in.Git("log", "-1", "--format=%B", "--encoding=UTF-8", cm.sha)
+				if err != nil {
+					if c.Result == OK {
+						c.Result = Warn
+					}
+					c.Detail = append(c.Detail, fmt.Sprintf("%s está en la codificación %s y no pude convertir su mensaje a UTF-8", short(cm.sha), oneLine(enc, 40)))
+					break
+				}
+				texts = append(texts, conv)
+			}
+			for _, text := range texts {
+				if f := in.Attribution.Check(text, false); len(f) > 0 {
+					fail(fmt.Sprintf("%s lleva atribución a una herramienta de IA", short(cm.sha)))
+					break
+				}
 			}
 		}
 	}
 	return c, commits, signed
+}
+
+// blobRead es el contenido de un archivo de HEAD, o por qué no se pudo leer.
+type blobRead struct {
+	data string
+	err  error
+}
+
+// headBlobs lee de HEAD los archivos de paths, en el mismo orden. Con GitBatch lo hace
+// por lotes de un solo cat-file --batch (un mes de trabajo deja un archivo del ledger
+// por persona y día, y los de todos los meses anteriores siguen en HEAD); una ruta con un
+// salto de línea no cabe en esa entrada y, si el lote falla o su salida no es la esperada,
+// se lee archivo a archivo con cat-file blob, que da los mismos bytes.
+func headBlobs(in Input, paths []string) []blobRead {
+	res := make([]blobRead, len(paths))
+	for first := 0; first < len(paths); first += catBatch {
+		chunk := paths[first:min(first+catBatch, len(paths))]
+		got, ok := []blobRead(nil), in.GitBatch != nil
+		for _, p := range chunk {
+			ok = ok && !strings.ContainsAny(p, "\n\r")
+		}
+		if ok {
+			var stdin strings.Builder
+			for _, p := range chunk {
+				stdin.WriteString("HEAD:./" + p + "\n")
+			}
+			if out, err := in.GitBatch(stdin.String(), "cat-file", "--batch"); err == nil {
+				got, ok = parseBlobs(out, chunk)
+			} else {
+				ok = false
+			}
+		}
+		for i, p := range chunk {
+			if ok {
+				res[first+i] = got[i]
+				continue
+			}
+			data, err := in.Git("cat-file", "blob", "HEAD:./"+p)
+			res[first+i] = blobRead{data: data, err: err}
+		}
+	}
+	return res
+}
+
+// parseBlobs lee la salida de cat-file --batch para "HEAD:./<ruta>": por cada archivo,
+// "<hash> blob <tamaño>", ese número de bytes y un salto de línea, o "<nombre> missing".
+// No acepta nada más: un tipo que no es blob, un tamaño que no cuadra o bytes de sobra
+// hacen que se descarte el lote.
+func parseBlobs(out string, paths []string) ([]blobRead, bool) {
+	res := make([]blobRead, 0, len(paths))
+	for _, p := range paths {
+		nl := strings.IndexByte(out, '\n')
+		if nl < 0 {
+			return nil, false
+		}
+		head := out[:nl]
+		if head == "HEAD:./"+p+" missing" {
+			res = append(res, blobRead{err: errors.New("no está en HEAD")})
+			out = out[nl+1:]
+			continue
+		}
+		f := strings.Split(head, " ")
+		if len(f) != 3 || f[1] != "blob" || (len(f[0]) != 40 && len(f[0]) != 64) || !isHex(f[0]) {
+			return nil, false
+		}
+		size, err := strconv.Atoi(f[2])
+		if err != nil || size < 0 || len(out)-(nl+1) < size+1 || out[nl+1+size] != '\n' {
+			return nil, false
+		}
+		res = append(res, blobRead{data: out[nl+1 : nl+1+size]})
+		out = out[nl+1+size+1:]
+	}
+	return res, out == ""
+}
+
+// catBatch es cuántos commits se piden en un solo cat-file --batch: la entrada
+// (41 bytes por commit) y la salida en memoria no crecen con el tamaño del mes.
+const catBatch = 1000
+
+// rawCommits devuelve los commits crudos de cms, en ese orden. Con GitBatch los lee un
+// solo cat-file --batch, que enmarca cada objeto por su tamaño: nada de lo que diga un
+// mensaje puede mover los límites. Si el lote falla o su salida no es exactamente la
+// esperada, lee commit a commit (cat-file commit), que da los mismos bytes.
+func rawCommits(in Input, cms []gitCommit) ([]string, error) {
+	if in.GitBatch != nil {
+		var stdin strings.Builder
+		for _, cm := range cms {
+			stdin.WriteString(cm.sha + "\n")
+		}
+		if out, err := in.GitBatch(stdin.String(), "cat-file", "--batch"); err == nil {
+			if raws, ok := parseBatch(out, cms); ok {
+				return raws, nil
+			}
+		}
+	}
+	raws := make([]string, len(cms))
+	for i, cm := range cms {
+		out, err := in.Git("cat-file", "commit", cm.sha)
+		if err != nil {
+			return nil, err
+		}
+		raws[i] = out
+	}
+	return raws, nil
+}
+
+// parseBatch lee la salida de cat-file --batch: por cada objeto, la línea
+// "<hash> <tipo> <tamaño>", exactamente ese número de bytes y un salto de línea. No
+// acepta nada más: otro hash, otro tipo, un tamaño que no cuadra o bytes de sobra
+// hacen que se descarte el lote entero.
+func parseBatch(out string, cms []gitCommit) ([]string, bool) {
+	raws := make([]string, 0, len(cms))
+	for _, cm := range cms {
+		nl := strings.IndexByte(out, '\n')
+		if nl < 0 {
+			return nil, false
+		}
+		f := strings.Split(out[:nl], " ")
+		if len(f) != 3 || f[0] != cm.sha || f[1] != "commit" {
+			return nil, false
+		}
+		size, err := strconv.Atoi(f[2])
+		if err != nil || size < 0 || len(out)-(nl+1) < size+1 || out[nl+1+size] != '\n' {
+			return nil, false
+		}
+		raws = append(raws, out[nl+1:nl+1+size])
+		out = out[nl+1+size+1:]
+	}
+	return raws, out == ""
 }
 
 // isUTF8 dice si la etiqueta del encabezado encoding de un commit es UTF-8.
@@ -608,11 +766,14 @@ func isUTF8(label string) bool {
 	return strings.ToLower(strings.NewReplacer("-", "", "_", "").Replace(strings.TrimSpace(label))) == "utf8"
 }
 
-// splitCommit separa un commit crudo en si lleva firma, su codificación
-// declarada (el encabezado encoding, vacío si no hay) y su mensaje. La firma
-// se cuenta, no se verifica: verificarla corre gpg, ssh-keygen o el programa
-// que declare la configuración del repo, y auditar no ejecuta nada ajeno.
-// Quien necesite la verificación la corre con git verify-commit y sus llaves.
+// splitCommit separa un commit crudo en si lleva firma, una codificación
+// declarada que no es UTF-8 (un encabezado encoding; vacío si no hay ninguna) y
+// su mensaje. Git lee el primer encabezado encoding y un objeto puede traer
+// varios (git hash-object los acepta): si alguno no es UTF-8, el mensaje se lee
+// también como lo convierte git, sin adivinar cuál de ellos usa. La firma se
+// cuenta, no se verifica: verificarla corre gpg, ssh-keygen o el programa que
+// declare la configuración del repo, y auditar no ejecuta nada ajeno. Quien
+// necesite la verificación la corre con git verify-commit y sus llaves.
 func splitCommit(raw string) (signed bool, encoding, msg string) {
 	head, msg, _ := strings.Cut(raw, "\n\n")
 	for _, l := range strings.Split(head, "\n") {
@@ -620,7 +781,12 @@ func splitCommit(raw string) (signed bool, encoding, msg string) {
 		case strings.HasPrefix(l, "gpgsig "), strings.HasPrefix(l, "gpgsig-sha256 "):
 			signed = true
 		case strings.HasPrefix(l, "encoding "):
-			encoding = strings.TrimPrefix(l, "encoding ")
+			if label := strings.TrimPrefix(l, "encoding "); !isUTF8(label) {
+				encoding = label
+				if strings.TrimSpace(encoding) == "" {
+					encoding = "(vacía)"
+				}
+			}
 		}
 	}
 	return signed, encoding, msg

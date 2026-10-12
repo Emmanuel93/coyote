@@ -476,6 +476,10 @@ func TestAuditCuartaRevision(t *testing.T) {
 
 	// Los programas de firma de la configuración del repo no corren: un repo
 	// ajeno no ejecuta nada al auditarlo. Una firma se cuenta, no se verifica.
+	// Las dos guardas de gitRead (log.showSignature=false y los gpg.*.program
+	// anulados) se cubren una a la otra a propósito: quitar cualquiera de las dos
+	// deja esta prueba en verde, y solo quitar ambas la pone en rojo. La prueba
+	// cuida la combinación, no cada guarda por separado.
 	root, _ = nuevo("firma", now)
 	ran := filepath.Join(root, ".git", "programa-corrio")
 	prog := filepath.Join(root, ".git", "programa.sh")
@@ -599,9 +603,16 @@ func TestAuditQuintaRevision(t *testing.T) {
 	if n := auditCommits(t, root, month); n != 5 {
 		t.Errorf("el mes cerrado cuenta 5 commits (adopción, dos con fecha adelantada, borrado y atribución), cuenta %d", n)
 	}
-	// El mes en curso no repite lo que ya llegó en el cerrado.
+	// El mes en curso no repite lo que ya llegó en el cerrado. Vale porque 2099 y 2098
+	// siguen siendo imposibles mañana: con una fecha apenas adelantada, que después
+	// pasa, el commit y los que le siguen se cuentan también en el mes siguiente (límite
+	// conocido, TestFechaFuturaQuePasaSeCuentaEnDosReportes en internal/audit); el aviso
+	// de fecha futura lo dice.
 	if n := auditCommits(t, root, now.Format("2006-01")); n != 0 {
 		t.Errorf("el mes en curso no tiene commits, cuenta %d", n)
+	}
+	if !strings.Contains(r.stdout, "vuelve a auditar este periodo después de esa fecha") {
+		t.Errorf("el aviso de fecha futura debe decir que el reporte puede repetirse en el mes siguiente:\n%s", r.stdout)
 	}
 
 	// El textconv que declara la configuración del repo no corre: auditar no
@@ -759,4 +770,60 @@ func ebcdic037(s string) []byte {
 		out = append(out, b)
 	}
 	return out
+}
+
+// TestAuditSextaRevision: sexta pasada adversarial de v1.0.
+func TestAuditSextaRevision(t *testing.T) {
+	base := setup(t)
+	now := time.Now().UTC()
+
+	// H3. Dos encabezados encoding: git usa el primero y muestra el trailer; la
+	// auditoría lo tiene que leer igual, con el orden que sea.
+	root, _ := auditNuevo(t, base, "dos-encoding", now)
+	msg := ebcdic037("feat: algo\n\nCo-Authored-By: Claude <noreply@anthropic.com>\n")
+	sha := commitCrudo(t, root, "encoding IBM037\nencoding UTF-8\n", msg)
+	if out := git(t, root, "log", "-1", "--format=%B", "--encoding=UTF-8", sha); !strings.Contains(out, "Co-Authored-By") {
+		t.Skip("este git no convierte IBM037: la prueba no puede armar el caso")
+	}
+	r := run(t, root, "", "audit")
+	must(t, r, 1, "dos encabezados encoding, el primero IBM037")
+	if !strings.Contains(r.stdout, "| commits del periodo sin atribución a IA (R15) | falla |") {
+		t.Errorf("dos encoding (IBM037 y luego UTF-8): R15 no falla\n%s", r.stdout)
+	}
+	// Con UTF-8 primero git no convierte nada: no hay trailer que ver ni que decir.
+	root, _ = auditNuevo(t, base, "dos-encoding-b", now)
+	commitCrudo(t, root, "encoding UTF-8\nencoding IBM037\n", msg)
+	r = run(t, root, "", "audit")
+	must(t, r, 0, "dos encabezados encoding, el primero UTF-8")
+	if !strings.Contains(r.stdout, "| commits del periodo sin atribución a IA (R15) | ok |") {
+		t.Errorf("dos encoding (UTF-8 y luego IBM037): git muestra los bytes tal cual\n%s", r.stdout)
+	}
+
+	// H4. El filtro clean que declara la configuración del repo no corre, ni
+	// siquiera cuando otro filtro tiene un nombre que no se puede anular con -c:
+	// lo que no se puede leer sin ejecutarlo se avisa, no se calla.
+	root, _ = auditNuevo(t, base, "filtro", now)
+	ranFilter := filepath.Join(root, ".git", "filtro-corrio")
+	script := filepath.Join(root, ".git", "marca.sh")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\ntouch '"+ranFilter+"'\ncat\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".git", "info", "attributes"), []byte("* filter=x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, root, "config", "filter.x.clean", script)
+	git(t, root, "config", "filter.a+b.clean", "cat")
+	for _, args := range [][]string{{"audit"}, {"audit", "--json"}} {
+		r = run(t, root, "", args...)
+		must(t, r, 0, "audit con un filtro clean")
+		if _, err := os.Stat(ranFilter); err == nil {
+			t.Fatalf("coyote %v corrió el filtro clean que declara el repo", args)
+		}
+	}
+	r = run(t, root, "", "audit")
+	for _, want := range []string{"no se cruzó el autor de sus líneas: la configuración de git declara filtros con nombres inusuales", "no se revisaron los cambios sin commit: la configuración de git declara filtros con nombres inusuales"} {
+		if !strings.Contains(r.stdout, want) {
+			t.Errorf("la verificación que no pudo leer el árbol de trabajo lo dice (%q):\n%s", want, r.stdout)
+		}
+	}
 }

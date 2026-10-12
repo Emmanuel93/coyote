@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -54,6 +55,14 @@ func cmdAudit(a *app, args []string) error {
 		Entries: entries, Problems: probs, Approvals: approvals, MonthlyUSD: cfg.Budgets.MonthlyUSD, Attribution: attr}
 	if gitx.IsRepo(root) && gitx.HasCommits(root) {
 		in.Git = func(args ...string) (string, error) { return product.Git(root, args...) }
+		in.GitBatch = func(stdin string, args ...string) (string, error) { return product.GitStdin(root, stdin, args...) }
+		in.Worktree = func(args ...string) (string, error) {
+			out, err := product.GitTree(root, args...)
+			if errors.Is(err, product.ErrUnsafeFilters) {
+				return "", fmt.Errorf("%w: %v", audit.ErrFilters, err)
+			}
+			return out, err
+		}
 	}
 	r := audit.Build(in)
 	if *asJSON {
