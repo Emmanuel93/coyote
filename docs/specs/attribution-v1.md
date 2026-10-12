@@ -24,8 +24,11 @@ Los commits, PRs, issues, releases y documentos son de la persona que los aprueb
 | robot-emoji | una línea con 🤖 y "generated" o el nombre de una herramienta |
 | ai-session-url | `claude.ai/code/session_…` · `app.devin.ai/sessions/…` · `chatgpt.com/codex/tasks/…` · `ampcode.com/threads/…` |
 | ai-noreply | `noreply@anthropic.com` |
+| ai-assisted-by-trailer | `Assisted-by: Claude Code` · `Generated-by: Gemini` · `Co-developed-by: Claude (model by Anthropic)` · `AI-Assisted-By: Cursor Agent` · `Helped-by: Claude 3.5 Sonnet` |
 
 Un pie exige que la herramienta vaya seguida de un enlace, puntuación o fin de línea: "Written by Claude Dupont and Ana Ruiz." es una firma humana y se queda.
+
+Un trailer `Assisted-by`, `Generated-by`, `Written-by`, `Drafted-by`, `Authored-by`, `Co-developed-by`, `Produced-by`, `Coded-by` o `Helped-by` (con o sin `AI-`, con guion o con espacio) cuenta cuando lo que sigue es una herramienta o un modelo, con su versión, su variante o su buzón, y no cuando es una persona: `Assisted-by: Claude Dupont <claude@example.fr>` y `Assisted-by: Cursor Smith` se quedan. Con los verbos de herramienta un `Claude` suelto cuenta; con `Helped-by`, el trailer de las personas que ayudaron, un `Claude` suelto es un nombre de pila y no cuenta, pero sí `Claude 3.5`, `Claude4`, `Claude: Opus`, `Claude/Cursor` o `Claude [bot]`. También cuentan los bots de GitHub (`cursor[bot]`) y la herramienta entre corchetes (`[Cursor]`). Un espacio que no es ASCII (el espacio sin corte, el ideográfico) se lee como un espacio, en los trailers, en las frases y en el nombre del autor.
 
 **Frases dentro de un texto útil**, siempre con el nombre de una herramienta seguido de puntuación, enlace o fin de línea:
 
@@ -63,6 +66,8 @@ Si el autor o el committer son una herramienta, el commit no se hace. `coyote do
 | 3 | `coyote commit` | antes de `git commit` | revisa la autoría, quita las líneas, rechaza frases, registra un evento `attr` y hace el commit con la identidad de la persona |
 | 4 | Hook `commit-msg` | en cada `git commit`, venga de donde venga | usa `coyote` si lo encuentra (PATH, `~/go/bin`, `/opt/homebrew/bin`, `/usr/local/bin`); si no, un filtro con `grep` que aplica las mismas reglas de líneas e identidad y trata el mensaje como bytes |
 | 5 | Lint y CI | `coyote standards lint` y `coyote attribution check --commits 50` | revisa `.md` y `.txt`, y mensaje, autor y committer de los commits desde el primero que agregó `coyote/project.yaml`, merges incluidos |
+
+En la capa 5 el historial se lee con el git del sistema, pero lo que se revisa no depende de la configuración de quien lo lee: `log.showSignature` (que antepone la salida de gpg a cada commit firmado) y `log.showRoot=false` (que esconde el primer commit) no cambian el resultado. El primero que agregó `project.yaml` es el primero en el orden de la historia y no el de fecha más vieja, así que un commit que lo devuelve con otra fecha no deja fuera a los anteriores. La revisión no da por limpio lo que no pudo leer: si la salida de git no tiene la forma esperada, si git falla o si el mensaje de un commit trae bytes nulos (git lo corta en el primero y el trailer que sigue no aparece, como con un mensaje en UTF-16) sale con error y nombra el commit.
 
 Cada capa funciona sola; juntas cubren commits hechos por la persona, por el IDE o por un agente. Los merges hechos con el botón de GitHub no pasan por hooks locales: los detecta la capa 5. Borrar y volver a agregar `coyote/project.yaml` no reinicia el historial que se revisa.
 
