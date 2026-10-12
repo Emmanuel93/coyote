@@ -1,6 +1,7 @@
 package main
 
 import (
+	"debug/buildinfo"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -179,5 +180,70 @@ func TestPreviaDeMakeDistSinElEntornoDeGit(t *testing.T) {
 	cmd.Dir = aqui
 	if out, err := cmd.CombinedOutput(); err == nil || !strings.Contains(string(out), "git ignora") {
 		t.Errorf("una carpeta que git no ignora debe rechazarse: %q (%v)", out, err)
+	}
+}
+
+// TestElGoBuildDeMakeDistNoLeeOtroRepo: con GIT_DIR y GIT_WORK_TREE de otro
+// repo en el entorno, el go build sella el commit de esa carpeta y distmeta
+// rechaza el release. Cargado tools/distenv.sh, que es lo primero que hace
+// make dist, sella el de la carpeta.
+func TestElGoBuildDeMakeDistNoLeeOtroRepo(t *testing.T) {
+	_, repo, commit := buildDist(t)
+	_, otro, _ := buildDist(t)
+	if out, err := exec.Command("git", "-C", otro, "-c", "user.name=Ana", "-c", "user.email=ana@example.com", "-c", "commit.gpgsign=false", "commit", "-q", "--allow-empty", "-m", "otro").CombinedOutput(); err != nil {
+		t.Fatalf("git commit: %v\n%s", err, out)
+	}
+	head, err := exec.Command("git", "-C", otro, "rev-parse", "HEAD").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	headOtro := strings.TrimSpace(string(head))
+	distenv, _ := filepath.Abs(filepath.Join("..", "distenv.sh"))
+	revision := func(load bool) string {
+		t.Helper()
+		out := filepath.Join(t.TempDir(), "coyote")
+		script := `go build -trimpath -o "$1" .`
+		if load {
+			script = `. "$2" && ` + script
+		}
+		cmd := exec.Command("sh", "-c", script, "sh", out, distenv)
+		cmd.Dir = repo
+		cmd.Env = append(os.Environ(), append(append([]string{"GOOS=linux", "GOARCH=amd64"}, buildEnv...), "GIT_DIR="+filepath.Join(otro, ".git"), "GIT_WORK_TREE="+otro)...)
+		if b, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("go build: %v\n%s", err, b)
+		}
+		info, err := buildinfo.ReadFile(out)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, s := range info.Settings {
+			if s.Key == "vcs.revision" {
+				return s.Value
+			}
+		}
+		return ""
+	}
+	if got := revision(true); got != commit {
+		t.Errorf("con distenv.sh el binario sale del commit de la carpeta (%s), no de %q", commit, got)
+	}
+	if got := revision(false); got != headOtro {
+		t.Errorf("sin distenv.sh el go build sella el commit del entorno (%s): %q; si ya no pasa, distenv.sh sobra", headOtro, got)
+	}
+}
+
+// TestMakeDistCargaElEntornoLimpio: lo primero que hace la receta de make dist
+// es cargar tools/distenv.sh, antes de las comprobaciones previas y del build.
+func TestMakeDistCargaElEntornoLimpio(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "Makefile"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, recipe, ok := strings.Cut(string(data), "\ndist:\n")
+	if !ok {
+		t.Fatal("el Makefile no tiene el objetivo dist")
+	}
+	first, _, _ := strings.Cut(recipe, "\n")
+	if !strings.HasPrefix(strings.TrimSpace(first), "@. tools/distenv.sh && head=$$(sh tools/distpre.sh ") {
+		t.Errorf("la receta de dist tiene que cargar tools/distenv.sh y llamar a tools/distpre.sh en su primera línea: %q", first)
 	}
 }
