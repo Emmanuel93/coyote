@@ -10,6 +10,12 @@ COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
 # los mismos binarios (ADR-0027).
 DATE    ?= $(shell TZ=UTC git log -1 --format=%cd --date=format-local:%Y-%m-%dT%H:%MZ 2>/dev/null || date -u +%Y-%m-%dT%H:%MZ)
 DIST    ?= dist
+# make dist le pasa DIST al shell por el entorno y entre comillas ("$$DIST"), nunca pegado
+# en la receta: una comilla invertida, un $(...) o un ; en el valor no corren nada, y
+# tools/distpre.sh lo rechaza (sexta revisión, H6). $(value DIST) evita además que make
+# expanda el valor, p. ej. un $(shell ...).
+override DIST := $(value DIST)
+export DIST
 LDFLAGS = -s -w -X $(PKG).Version=$(VERSION) -X $(PKG).Commit=$(COMMIT) -X $(PKG).Date=$(DATE)
 
 .PHONY: build test vet lint check install dist verify-dist clean
@@ -53,20 +59,20 @@ override DIST_GOENV := CGO_ENABLED=0 GOAMD64=v1 GOARM64=v8.0 GOEXPERIMENT= GOWOR
 override PLATFORMS := darwin/arm64 darwin/amd64 linux/amd64 linux/arm64
 override PKG := github.com/Emmanuel93/coyote/internal/version
 dist:
-	@. tools/distenv.sh && head=$$(sh tools/distpre.sh "$(DIST)") && rm -rf "./$(DIST)" && mkdir -p "./$(DIST)" && \
-	out=$$(cd "./$(DIST)" && pwd) && wt=$$(mktemp -d "$${TMPDIR:-/tmp}/coyote-dist.XXXXXX") && \
+	@. tools/distenv.sh && head=$$(sh tools/distpre.sh "$$DIST") && rm -rf "./$$DIST" && mkdir -p "./$$DIST" && \
+	out=$$(cd "./$$DIST" && pwd) && wt=$$(mktemp -d "$${TMPDIR:-/tmp}/coyote-dist.XXXXXX") && \
 	trap 'rm -rf "$$wt"' EXIT && \
 	sh tools/distsrc.sh . "$$wt" "$$head" && cd "$$wt/src" && \
 	ver=$$(cat ../meta/ver) && commit=$$(cat ../meta/commit) && full=$$(cat ../meta/full) && \
 	date=$$(cat ../meta/date) && rfc=$$(cat ../meta/rfc) && tag=$$(cat ../meta/tag) && \
 	for p in $(PLATFORMS); do \
 	  os=$${p%/*}; arch=$${p#*/}; dst="$$out/coyote_$${ver}_$${os}_$${arch}"; \
-	  echo "$(DIST)/coyote_$${ver}_$${os}_$${arch}"; \
+	  echo "$$DIST/coyote_$${ver}_$${os}_$${arch}"; \
 	  env $(DIST_GOENV) GOOS=$$os GOARCH=$$arch go build -trimpath \
 	    -ldflags "-s -w -X $(PKG).Version=$$ver -X $(PKG).Commit=$$commit -X $(PKG).Date=$$date" -o "$$dst/coyote" ./cmd/coyote || exit 1; \
 	done && \
 	env $(DIST_GOENV) go run ./tools/distmeta -dist "$$out" -version $$ver -commit $$full -tag "$$tag" -date $$rfc -platforms "$(PLATFORMS)"
-	cd "./$(DIST)" && { command -v sha256sum >/dev/null && sha256sum */coyote */coyote.cdx.json *.provenance.json || shasum -a 256 */coyote */coyote.cdx.json *.provenance.json; } > SHA256SUMS
+	cd "./$$DIST" && { command -v sha256sum >/dev/null && sha256sum */coyote */coyote.cdx.json *.provenance.json || shasum -a 256 */coyote */coyote.cdx.json *.provenance.json; } > SHA256SUMS
 
 # Construye el release dos veces, cada una con su caché de Go vacía, y compara:
 # los hashes tienen que ser iguales.

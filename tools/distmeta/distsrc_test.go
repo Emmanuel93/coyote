@@ -183,6 +183,29 @@ func TestPreviaDeMakeDistSinElEntornoDeGit(t *testing.T) {
 	}
 }
 
+// TestPreviaDeMakeDistSinCommits: sexta revisión de v1.0. En un repo sin commits el
+// release no tiene de dónde salir y la comprobación falla cerrada; el aviso lo dice, en
+// lugar de pedir un árbol limpio que ningún cambio de la persona arreglaría.
+func TestPreviaDeMakeDistSinCommits(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git no está instalado")
+	}
+	repo := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repo, ".gitignore"), []byte("dist/\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("git", "-C", repo, "init", "-q", "-b", "main").CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
+	script, _ := filepath.Abs(filepath.Join("..", "distpre.sh"))
+	cmd := exec.Command("sh", script, "dist")
+	cmd.Dir = repo
+	out, err := cmd.CombinedOutput()
+	if err == nil || !strings.Contains(string(out), "ningún commit") || strings.Contains(string(out), "árbol limpio") {
+		t.Errorf("sin commits se esperaba el aviso de que no hay commit, no el del árbol limpio: %q (%v)", out, err)
+	}
+}
+
 // TestElGoBuildDeMakeDistNoLeeOtroRepo: con GIT_DIR y GIT_WORK_TREE de otro
 // repo en el entorno, el go build sella el commit de esa carpeta y distmeta
 // rechaza el release. Cargado tools/distenv.sh, que es lo primero que hace
@@ -245,5 +268,114 @@ func TestMakeDistCargaElEntornoLimpio(t *testing.T) {
 	first, _, _ := strings.Cut(recipe, "\n")
 	if !strings.HasPrefix(strings.TrimSpace(first), "@. tools/distenv.sh && head=$$(sh tools/distpre.sh ") {
 		t.Errorf("la receta de dist tiene que cargar tools/distenv.sh y llamar a tools/distpre.sh en su primera línea: %q", first)
+	}
+	// Sexta revisión (H6): ni esa línea ni ninguna otra de la receta pega $(DIST) en el
+	// shell; lo leen del entorno entre comillas, como "$$DIST".
+	var body []string
+	for _, line := range strings.Split(recipe, "\n") {
+		if line != "" && !strings.HasPrefix(line, "\t") {
+			break // la receta termina en la primera línea sin tabulador
+		}
+		body = append(body, line)
+	}
+	for _, line := range body {
+		if strings.Contains(line, "$(DIST)") {
+			t.Errorf("la receta de dist no pega $(DIST) en el shell, usa \"$$DIST\": %q", line)
+		}
+	}
+	if !strings.Contains(strings.Join(body, "\n"), `"$$DIST"`) {
+		t.Error(`la receta de dist tiene que leer "$$DIST" del entorno`)
+	}
+	if !strings.Contains(string(data), "\nexport DIST\n") {
+		t.Error("el Makefile tiene que exportar DIST para que la receta lo lea del entorno aunque salga del valor por omisión")
+	}
+}
+
+// TestMakeDistNoInterpretaDIST: sexta revisión de v1.0 (H6). DIST llega al shell por el
+// entorno y entre comillas, y tools/distpre.sh lo valida antes de tocar nada: un valor
+// con comillas invertidas, $(...), ; o comillas se rechaza sin correr el comando que
+// lleva. Pegado en la receta, make dist DIST='q$$(touch X)' lo ejecutaba antes de que
+// nadie lo validara. Se prueba por la línea de comandos de make y por el entorno.
+func TestMakeDistNoInterpretaDIST(t *testing.T) {
+	for _, bin := range []string{"make", "git", "sh"} {
+		if _, err := exec.LookPath(bin); err != nil {
+			t.Skip(bin + " no está instalado")
+		}
+	}
+	repo := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(repo, "tools"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range []string{"Makefile", "tools/distenv.sh", "tools/distpre.sh"} {
+		b, err := os.ReadFile(filepath.Join("..", "..", f))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(repo, f), b, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(repo, ".gitignore"), []byte("sub/\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"init", "-q", "-b", "main"}, {"add", "-A"}, {"commit", "-qm", "inicio"}} {
+		cmd := exec.Command("git", append([]string{"-C", repo, "-c", "user.name=Ana", "-c", "user.email=ana@example.com", "-c", "commit.gpgsign=false"}, args...)...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	marca := filepath.Join(repo, "MARCA")
+	hostiles := []string{
+		"q`touch MARCA`",
+		"q$$(touch MARCA)",
+		"q$(shell touch MARCA)",
+		"q;touch MARCA",
+		"q\";touch MARCA;\"",
+		"q';touch MARCA;'",
+		"q\ntouch MARCA",
+		"q$$(touch MARCA)/x",
+		"$(DIST)",
+		"a b",
+	}
+	hacer := func(env []string, dist string, args ...string) string {
+		t.Helper()
+		cmd := exec.Command("make", append([]string{"--no-print-directory", "dist"}, args...)...)
+		cmd.Dir = repo
+		cmd.Env = append(os.Environ(), env...)
+		out, err := cmd.CombinedOutput()
+		if _, statErr := os.Stat(marca); statErr == nil {
+			t.Fatalf("DIST=%q ejecutó el comando que lleva (existe MARCA):\n%s", dist, out)
+		}
+		if err == nil || !strings.Contains(string(out), "DIST tiene que ser una carpeta relativa") {
+			t.Errorf("DIST=%q debe rechazarse con el aviso de distpre.sh: %q (%v)", dist, out, err)
+		}
+		return string(out)
+	}
+	for _, dist := range hostiles {
+		hacer(nil, dist, "DIST="+dist)                   // por la línea de comandos de make
+		hacer([]string{"DIST=" + dist}, dist)            // por el entorno
+		hacer([]string{"DIST=otro"}, dist, "DIST="+dist) // la línea de comandos gana al entorno
+	}
+	// Un valor correcto llega intacto al shell: distpre.sh lo acepta y la receta crea la
+	// carpeta (después falla porque la copia de prueba no trae tools/distsrc.sh).
+	for _, tc := range []struct {
+		dist string
+		env  bool
+	}{{"sub/dist-1.x", false}, {"sub/otra_1", true}} {
+		cmd := exec.Command("make", "--no-print-directory", "dist")
+		cmd.Dir = repo
+		cmd.Env = os.Environ()
+		if tc.env {
+			cmd.Env = append(cmd.Env, "DIST="+tc.dist)
+		} else {
+			cmd.Args = append(cmd.Args, "DIST="+tc.dist)
+		}
+		out, _ := cmd.CombinedOutput()
+		if strings.Contains(string(out), "DIST tiene que ser") {
+			t.Errorf("DIST=%q es válido y se rechazó: %q", tc.dist, out)
+		}
+		if st, err := os.Stat(filepath.Join(repo, filepath.FromSlash(tc.dist))); err != nil || !st.IsDir() {
+			t.Errorf("la receta no creó la carpeta %q: %v\n%s", tc.dist, err, out)
+		}
 	}
 }

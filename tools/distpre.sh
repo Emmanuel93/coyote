@@ -23,6 +23,10 @@ if ! git check-ignore -q "$dist/coyote" || [ -n "$(git ls-files -- "$dist")" ]; 
 	echo "DIST tiene que ser una carpeta que git ignora y sin archivos versionados (make dist la borra entera)" >&2
 	exit 1
 fi
+if ! git rev-parse --verify -q HEAD >/dev/null; then
+	echo "make dist necesita un commit: este repo todavía no tiene ningún commit (un release sale de un commit)" >&2
+	exit 1
+fi
 if [ -n "$(git status --porcelain --untracked-files=normal)" ]; then
 	echo "make dist necesita el árbol limpio: haz commit o guarda los cambios (un release sale de un commit)" >&2
 	exit 1
