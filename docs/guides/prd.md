@@ -103,9 +103,9 @@ steps:
 
 Un PRD largo entra a un paso recortado a unos 3000 tokens, como cualquier entrada. El agente lee el resto con `Read`.
 
-Lo que un paso recibe de un archivo es dato, no una instrucción: una línea con forma de orden para un agente llega con una marca que lo dice, y los caracteres invisibles se muestran escapados.
+Lo que un paso recibe de un archivo es dato, no una instrucción: una línea con forma de orden para un agente llega con una marca que lo dice, y los caracteres invisibles se muestran escritos con su código, con una marca aparte que dice que son caracteres que no se ven. Un final de línea de Windows llega como un salto de línea y los acentos, el CJK y los emojis llegan intactos.
 
-En `autonomous`, autorizar el plan es autorizar también lo que lee. `coyote review` lista cada archivo del PRD y de las entradas con las primeras cifras de su huella. Si uno cambia después de aprobar, el motor pide una autorización nueva; si cambia mientras corre, se detiene antes del paso siguiente y dice cuál. Y el paso que escribe el PRD lleva `gate: human`: sin esa revisión, el paso siguiente usaría un PRD que nadie leyó.
+En `autonomous`, autorizar el plan es autorizar también lo que lee. `coyote review` lista cada archivo del PRD y de las entradas con las primeras cifras de su huella. Si uno cambia después de aprobar, el motor pide una autorización nueva; si cambia mientras corre, se detiene antes del paso que lo recibe y dice cuál. Y el paso que escribe el PRD lleva `gate: human`: sin esa revisión, el paso siguiente usaría un PRD que nadie leyó (con `--mode supervised`, que se detiene tras cada paso, no hace falta). Un archivo que un paso del plan escribe y otro lee detiene el loop por lo mismo: pasa lo que un paso produce al siguiente con `step:ID`.
 
 ## 5. Qué revisa `coyote ws check`
 
@@ -116,13 +116,13 @@ coyote ws check W-0007
 | Hallazgo | Nivel |
 | --- | --- |
 | Un plan R2 o R3 sin `prd:` (R20) | aviso |
-| `prd:` que no es una ruta `.md` del proyecto ni `step:ID` en minúsculas, que es un `diff:` o que lleva un salto de línea, un control o un carácter invisible | error |
+| `prd:` que no es una ruta `.md` del proyecto ni `step:ID` en minúsculas, que es un `diff:` o que lleva un salto de línea, un control, un carácter invisible o un espacio al borde de un nombre | error |
 | `step:ID` que no existe, o que es un paso de la persona | error |
-| En `autonomous`, el paso del PRD sin `gate: human` | error |
+| En `autonomous`, el paso del PRD sin `gate: human` (se mira el modo con el que corre: con `--mode supervised` se acepta) | error |
 | El archivo existe pero no es un archivo regular del proyecto (un enlace, una carpeta o más de 8 MB) | error |
 | El archivo todavía no existe | aviso |
 | El archivo no es texto | aviso |
-| `step:ID` que no es el primer paso | aviso |
+| `step:ID` con un paso de agente antes: esos corren sin PRD | aviso |
 | Ningún paso recibe el PRD como entrada | aviso |
 
 R20 es SHOULD: un plan sin PRD corre, solo avisa. Los errores sí lo detienen, porque el plan no dice de qué parte. El comando no juzga si el PRD es bueno: eso lo revisas tú.
@@ -132,4 +132,4 @@ R20 es SHOULD: un plan sin PRD corre, solo avisa. Los errores sí lo detienen, p
 - **Cambia el PRD del producto primero.** Si una feature necesita otra meta, se cambia `producto.md` en su propio commit y después la feature.
 - **Un commit por cambio.** Un PRD que cambia pasa por el PR con la revisión de siempre (`coyote/prd/` es R1 para `gate pr`).
 - **El estado dice dónde está.** `borrador`, `revisado`, `aprobado` o `construido`. Al construir una feature, actualiza su fila en la tabla Features.
-- **Si cambias un requisito mientras corre un plan**, los pasos aceptados no se repiten solos. Si el PRD es un archivo, los pasos que faltan leen el texto nuevo; si es la entrega de un paso, es la que aceptaste. Rehaz con `ws continue --redo` el paso que dependa del cambio.
+- **Si cambias un requisito mientras corre un plan**, los pasos aceptados no se repiten solos. En `manual` y `supervised`, si el PRD es un archivo, los pasos que faltan leen el texto nuevo; si es la entrega de un paso, es la que aceptaste. En `autonomous`, el cambio de un archivo que el plan lee pide autorizar otra vez: el motor se detiene antes del paso que lo recibe. Rehaz con `ws continue --redo` el paso que dependa del cambio.
