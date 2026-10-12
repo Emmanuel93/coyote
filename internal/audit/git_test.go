@@ -643,7 +643,7 @@ func TestHistoriaAnteriorConOtraCodificacionDeSalida(t *testing.T) {
 // pasa, el commit se cuenta por ella, arrastra a los que le siguen y el reporte del mes
 // siguiente lo cuenta otra vez. Volver a correr el mes cerrado tampoco da el reporte
 // que se publicó. Sellar el periodo (que el reporte escrito guarde hasta dónde contó)
-// lo cerraría; queda para v1.1. Mientras tanto el reporte avisa de la fecha futura y
+// lo cerraría; no entró en v1.0. Mientras tanto el reporte avisa de la fecha futura y
 // de esto (docs/specs/audit-v1.md, "Fechas futuras"). Si el periodo se sella, esta
 // prueba cambia: cada commit tiene que contarse en un solo reporte.
 func TestFechaFuturaQuePasaSeCuentaEnDosReportes(t *testing.T) {
@@ -686,6 +686,15 @@ func TestFechaFuturaQuePasaSeCuentaEnDosReportes(t *testing.T) {
 		return strings.Join(names, "")
 	}
 	const sep, oct, nov = "2026-09-01T00:00", "2026-10-01T00:00", "2026-11-01T00:00"
+	// El reporte avisa de la fecha futura y de que, pasada, él y los que le siguen pueden
+	// contarse también en el mes siguiente (séptima revisión: el texto no estaba fijado aquí).
+	avisos, err := readHistory(Input{Root: dir, Git: git, Now: at("2026-10-02T12:00"), From: at(sep), To: at(oct)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if todos := strings.Join(avisos.skewed, "\n"); !strings.Contains(todos, "tiene fecha futura (2026-10-03)") || !strings.Contains(todos, "pueden contarse también en el mes siguiente") || !strings.Contains(todos, "vuelve a auditar este periodo después de esa fecha") {
+		t.Errorf("el aviso de la fecha futura y del mes siguiente:\n%s", todos)
+	}
 	// El 2 de octubre, cuando se escribe el reporte de septiembre, la fecha del 3 es
 	// imposible: x llega con m y los cuatro cuentan en septiembre.
 	if got := llegados("2026-10-02T12:00", sep, oct); got != "amnx" {
@@ -701,6 +710,53 @@ func TestFechaFuturaQuePasaSeCuentaEnDosReportes(t *testing.T) {
 	}
 	if got := llegados("2026-10-03T00:30", sep, oct); got != "a" {
 		t.Errorf("septiembre, vuelto a correr el 3-10: llegaron %q, se esperaba a", got)
+	}
+}
+
+// TestLedgerLogSoloCreeEnElPadreDeUnCommit: séptima revisión de v1.0 (Q1). La
+// cabecera de cada commit en el git log del ledger lleva también su asunto, y un
+// asunto «(from <hash>) …» no puede elegir contra qué padre se mide el commit: solo
+// vale el que es padre suyo. Un commit de un solo padre que imitaba la cabecera de un
+// merge hacía que sus eventos con fecha vieja no se revisaran.
+func TestLedgerLogSoloCreeEnElPadreDeUnCommit(t *testing.T) {
+	h := func(c string) string { return strings.Repeat(c, 40) }
+	p1, p2, merge, single, root, otro := h("1"), h("2"), h("3"), h("4"), h("5"), h("6")
+	hist := &history{byID: map[string]gitCommit{
+		merge:  {sha: merge, parents: []string{p1, p2}},
+		single: {sha: single, parents: []string{p1}},
+		root:   {sha: root},
+	}}
+	diff := "diff --git a/coyote/ledger/2026/10/01-ana.ccf b/coyote/ledger/2026/10/01-ana.ccf\n--- a/coyote/ledger/2026/10/01-ana.ccf\n+++ b/coyote/ledger/2026/10/01-ana.ccf\n@@ -0,0 +1 @@\n+linea\n"
+	out := strings.Join([]string{
+		merge + " (from " + p1 + ") merge\n" + diff,
+		merge + " (from " + p2 + ") merge\n" + diff,
+		single + " (from " + otro + ") (from " + p2 + ") x\n" + diff,
+		single + " (from " + p1 + ") x\n" + diff,
+		root + " (from " + p2 + ") x\n" + diff,
+		merge + " (from " + otro + ") (from " + p2 + ") y\n" + diff,
+	}, "")
+	in := Input{Git: func(args ...string) (string, error) { return out, nil }}
+	diffs, err := hist.ledgerLog(in, "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	type got struct {
+		commit, parent string
+		merge          bool
+	}
+	var have []got
+	for _, d := range diffs {
+		have = append(have, got{d.commit, d.parent, d.merge})
+	}
+	want := []got{
+		{merge, p1, true}, {merge, p2, true},
+		{single, p1, false}, // el asunto dice otro padre: se ignora
+		{single, p1, false},
+		{root, "", false}, // sin padres no hay contra qué
+		{merge, p1, true}, // un from que no es de sus padres: el primero
+	}
+	if !reflect.DeepEqual(have, want) {
+		t.Errorf("padres de cada diff:\n  %+v\nquiero\n  %+v", have, want)
 	}
 }
 

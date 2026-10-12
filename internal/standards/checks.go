@@ -289,15 +289,21 @@ func AdoptedCommits(root string, n int, merges bool) ([]gitx.Commit, error) {
 	if !gitx.IsRepo(root) || !gitx.HasCommits(root) {
 		return nil, nil
 	}
-	// La base es el commit más antiguo que agregó coyote/project.yaml: borrarlo y
-	// volver a agregarlo no reinicia el historial que se revisa.
-	adds, err := gitx.Run(root, "log", "--encoding=UTF-8", "--diff-filter=A", "--format=%H", "--", "coyote/project.yaml")
+	// La base es el primero de los commits que agregaron coyote/project.yaml, en el
+	// orden de la historia y no en el de sus fechas (un commit con la fecha cambiada
+	// no mueve la base): borrarlo y volver a agregarlo no reinicia el historial que
+	// se revisa. --root: con log.showRoot=false git no muestra lo que agrega el
+	// primer commit, y si project.yaml entró ahí no habría base y no se revisaría
+	// ningún commit. Si git falla, tampoco se da el historial por revisado.
+	adds, err := gitx.Run(root, "-c", "log.showSignature=false", "log", "--encoding=UTF-8", "--root", "--topo-order", "--reverse", "--diff-filter=A", "--format=%H", "--", "coyote/project.yaml")
+	if err != nil {
+		return nil, err
+	}
 	adds = strings.TrimSpace(adds)
-	if err != nil || adds == "" {
+	if adds == "" {
 		return nil, nil
 	}
-	lines := strings.Split(adds, "\n")
-	base := strings.TrimSpace(lines[len(lines)-1])
+	base := strings.TrimSpace(strings.SplitN(adds, "\n", 2)[0])
 	commits, err := gitx.Log(root, n, merges, base+"..HEAD")
 	if err != nil {
 		return nil, err

@@ -143,7 +143,11 @@ func TestTrailersEnCruz(t *testing.T) {
 	}
 	// Con los verbos de herramienta basta el nombre solo: «Assisted-by: Claude» nombra al
 	// modelo. Con Helped-by no: ahí un Claude suelto es un nombre de pila.
-	soloConVerbosFuertes := []string{"Claude", "Claude:claude-opus-5-5", "Claude/Opus", "Claude 3.5 Sonnet", "Claude3", "Claude [Opus]"}
+	soloConVerbosFuertes := []string{"Claude"}
+	// Un Claude con versión, con dos puntos, con barra o entre corchetes no es una
+	// persona, con cualquier verbo (séptima revisión, Q7: Helped-by los dejó pasar).
+	conVersionOMarca := []string{"Claude:claude-opus-5-5", "Claude: Opus", "Claude/Opus", "Claude/Cursor",
+		"Claude 3.5 Sonnet", "Claude 3.5", "Claude 4", "Claude4", "Claude3", "Claude [Opus]", "Claude [bot]"}
 	personas := []string{
 		"Ana Ruiz", "the payments team", "Claude Dupont", "Claude Dupont <claude@example.fr>",
 		"Claude <claude.martin@acme.fr>", "Claude <claude@acme.fr>", "Claude-Henri Dupont <chd@acme.fr>",
@@ -162,6 +166,11 @@ func TestTrailersEnCruz(t *testing.T) {
 				t.Errorf("no se quitó %q", l)
 			}
 		}
+		for _, f := range conVersionOMarca {
+			if l := pareja(v, f); !veTrailer(l) {
+				t.Errorf("no se quitó %q", l)
+			}
+		}
 		for _, f := range personas {
 			if l := pareja(v, f); len(c.Check(l, false)) != 0 {
 				t.Errorf("falso positivo en %q: %+v", l, c.Check(l, false))
@@ -176,7 +185,7 @@ func TestTrailersEnCruz(t *testing.T) {
 		}
 	}
 	for _, v := range []string{"Helped-by", "AI-Helped-By", "AI Helped by"} {
-		for _, f := range []string{"Claude", "Claude 3rd floor", "Claude 3.5 Sonnet", "Claude/Opus", "Claude [Opus]"} {
+		for _, f := range []string{"Claude", "Claude 3rd floor"} {
 			if l := pareja(v, f); len(c.Check(l, false)) != 0 {
 				t.Errorf("falso positivo en %q: %+v", l, c.Check(l, false))
 			}
@@ -187,6 +196,57 @@ func TestTrailersEnCruz(t *testing.T) {
 		if l := pareja(v, "Claude 3rd floor"); len(c.Check(l, false)) != 0 {
 			t.Errorf("falso positivo en %q: %+v", l, c.Check(l, false))
 		}
+	}
+}
+
+// TestTrailersConBotCorchetesYEspaciosQueNoSonASCII: séptima revisión de v1.0 (Q7).
+// Formas que la regla no veía antes ni después de la sexta revisión: el nombre de un
+// bot de GitHub, la herramienta entre corchetes (el enlace de Markdown) y un espacio
+// que no es ASCII donde la regla espera un espacio o el fin de la línea.
+func TestTrailersConBotCorchetesYEspaciosQueNoSonASCII(t *testing.T) {
+	c := cfg(t)
+	for _, l := range []string{
+		"Assisted-by: cursor[bot]",
+		"Assisted-by: Cursor [bot]",
+		"Assisted-by: [Cursor]",
+		"Assisted-by: [Cursor](https://cursor.com)",
+		"Assisted-by: Cursor\u00a0",
+		"Assisted-by:\u00a0Claude Code",
+		"Assisted-by: Claude\u00a0Code",
+		"Assisted-by: Claude\u3000Code",
+		"Assisted-by: Cursor\u2003Agent",
+		"Helped-by: Claude\u00a03.5",
+		"Co-authored-by:\u00a0Claude <noreply@anthropic.com>",
+		"Co-authored-by: Claude\u00a0Code <x@acme.fr>",
+		"Claude\u00a0Session: abc",
+	} {
+		if out, found := c.ScrubLines("feat: x\n\n"+l+"\n", true); len(found) != 1 || strings.TrimSpace(out) != "feat: x" {
+			t.Errorf("no se quitó %q: %+v", l, found)
+		}
+	}
+	// Una persona sigue siendo una persona, con el espacio que sea.
+	for _, l := range []string{
+		"Assisted-by: Cursor\u00a0Smith",
+		"Assisted-by: Ana\u00a0Ruiz",
+		"Assisted-by: Claude\u00a0Dupont",
+		"Helped-by: Claude\u00a0",
+		"Co-authored-by: Claude\u00a0Dupont <claude@acme.fr>",
+	} {
+		if f := c.Check(l, false); len(f) != 0 {
+			t.Errorf("falso positivo en %q: %+v", l, f)
+		}
+	}
+	// Lo mismo a mitad de un comando (la búsqueda suelta de git commit -m).
+	if f := c.Check("git commit -m \"feat: x\" -m \"Assisted-by: Claude\u00a0Code\"", true); len(f) != 1 {
+		t.Errorf("el trailer con espacio sin corte a mitad del comando no se ve: %+v", f)
+	}
+	// Una frase con el espacio sin corte antes del punto sigue reportándose.
+	if f := c.Phrases("docs: guía generada con Claude\u00a0.", false); len(f) != 1 {
+		t.Errorf("la frase con espacio sin corte no se reporta: %+v", f)
+	}
+	// El nombre de un autor de git con un espacio que no es ASCII.
+	if _, ok := c.AIIdentity("Claude\u00a0Code", ""); !ok {
+		t.Error("el autor «Claude Code» con espacio sin corte es una herramienta")
 	}
 }
 

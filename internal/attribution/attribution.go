@@ -15,6 +15,7 @@ import (
 	"io/fs"
 	"regexp"
 	"strings"
+	"unicode"
 
 	"go.yaml.in/yaml/v3"
 
@@ -129,10 +130,23 @@ func Default() (*Config, error) {
 	return Load(data)
 }
 
+// asciiSpaces cambia los espacios que no son ASCII (el espacio sin corte, el
+// ideográfico, los de ancho fijo) por un espacio común: quien lee ve un espacio,
+// pero \s de las expresiones regulares no los alcanza y «Cursor» más un espacio
+// sin corte al final de un trailer pasaba.
+func asciiSpaces(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r > unicode.MaxASCII && unicode.IsSpace(r) {
+			return ' '
+		}
+		return r
+	}, s)
+}
+
 // AIIdentity informa si una identidad de git (autor, committer o coautor) es
 // la de una herramienta de IA.
 func (c *Config) AIIdentity(name, email string) (Finding, bool) {
-	name, email = strings.TrimSpace(name), strings.Trim(strings.TrimSpace(email), "<>")
+	name, email = strings.TrimSpace(asciiSpaces(name)), strings.Trim(strings.TrimSpace(email), "<>")
 	if (name != "" && c.Identity.names.MatchString(name)) || (email != "" && c.Identity.emails.MatchString(email)) {
 		text := name
 		if email != "" {
@@ -159,6 +173,7 @@ func splitIdent(s string) (name, email string) {
 
 // lineMatch reconoce una línea que es atribución completa.
 func (c *Config) lineMatch(line string) string {
+	line = asciiSpaces(line)
 	if m := trailerRe.FindStringSubmatch(line); m != nil {
 		if _, ok := c.AIIdentity(splitIdent(m[1])); ok {
 			return CoauthorID
@@ -173,6 +188,7 @@ func (c *Config) lineMatch(line string) string {
 }
 
 func (c *Config) phraseMatch(line string) string {
+	line = asciiSpaces(line)
 	for _, p := range c.PhrasePatterns {
 		if p.re.MatchString(line) {
 			return p.ID
@@ -199,6 +215,7 @@ func (c *Config) match(line string, loose bool) string {
 		return id
 	}
 	if loose {
+		line = asciiSpaces(line)
 		for _, m := range looseTrailerRe.FindAllStringSubmatch(line, -1) {
 			name, email := m[1], m[2]
 			if _, ok := c.AIIdentity(name, email); ok {

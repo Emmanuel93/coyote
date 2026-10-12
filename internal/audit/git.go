@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -82,12 +83,15 @@ func readHistory(in Input) (*history, error) {
 		if !ok {
 			break
 		}
-		h.chain = append([]gitCommit{c}, h.chain...)
+		h.chain = append(h.chain, c)
 		sha = ""
 		if len(c.parents) > 0 {
 			sha = c.parents[0]
 		}
 	}
+	// Se recorrió de HEAD a la raíz; la cadena va del más antiguo al más nuevo.
+	// Anteponer cada commit era cuadrático: 20 000 commits tardaban 7,7 s.
+	slices.Reverse(h.chain)
 	// La fecha de llegada no retrocede: un commit con la fecha cambiada hacia
 	// atrás llega cuando llega su predecesor en la cadena. Y una fecha
 	// imposible (posterior a ahora) no cuenta: ese commit llega con el que le
@@ -190,7 +194,7 @@ var priorHeader = regexp.MustCompile(`^([0-9a-f]{40}|[0-9a-f]{64})(?: \(from ([0
 // un merge aunque su árbol coincida con el de uno de ellos: con -m el git que se probó
 // ya lo hace, y la bandera deja explícito lo que esto necesita.
 func (h *history) ledgerLog(in Input, revs ...string) ([]ledgerDiff, error) {
-	args := []string{"-c", "core.quotePath=false", "-c", "log.diffMerges=separate", "log", "--encoding=UTF-8", "--full-history", "-m", "--format=oneline", "--no-abbrev-commit", "--no-color",
+	args := []string{"-c", "core.quotePath=false", "-c", "log.diffMerges=separate", "log", "--encoding=UTF-8", "--full-history", "--root", "-m", "--format=oneline", "--no-abbrev-commit", "--no-color",
 		"-p", "--text", "-U0", "--no-ext-diff", "--no-textconv", "--no-renames", "--relative", "--src-prefix=a/", "--dst-prefix=b/"}
 	out, err := in.Git(append(append(args, revs...), "--", ledgerDir)...)
 	if err != nil {
@@ -204,9 +208,15 @@ func (h *history) ledgerLog(in Input, revs ...string) ([]ledgerDiff, error) {
 		if !ok {
 			return
 		}
-		parent := from
-		if parent == "" && len(c.parents) > 0 {
+		// "(from padre)" lo escribe git solo en un merge, pero la línea de cabecera
+		// lleva también el asunto del commit: uno que se llame "(from <hash>) x" no
+		// puede elegir contra qué padre se lo mide. Vale el que es padre del commit.
+		parent := ""
+		if len(c.parents) > 0 {
 			parent = c.parents[0]
+		}
+		if slices.Contains(c.parents, from) {
+			parent = from
 		}
 		diffs = append(diffs, parseLedgerDiff(strings.Join(diff, "\n"), c.sha, parent, len(c.parents) > 1))
 	}

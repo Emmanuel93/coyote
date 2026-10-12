@@ -22,3 +22,4 @@
 2026-10-12T16:00Z|@eramirezhdez/coyote-security|W-0008|coyote|fix|gate|los comodines se leen como bash (clases de POSIX, [!x], []x] y…|-|-|-|ok
 2026-10-12T16:14Z|@eramirezhdez/coyote-scribe|W-0008|coyote|doc|gate|las especificaciones del gate y de secretos con la séptima pasada: comodines…|-|-|-|ok
 2026-10-12T16:15Z|@eramirezhdez/coyote-dev|W-0008|coyote|fix|ws|los nombres de entradas rechazan espacios especiales y marcas sueltas, una carpeta…|-|-|-|ok
+2026-10-12T16:38Z|@eramirezhdez/coyote-dev|W-0008|coyote|fix|auditoria|un asunto con "(from hash)" ya no elige contra qué padre se…|-|-|-|ok

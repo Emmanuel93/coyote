@@ -4,6 +4,7 @@ package gitx
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os/exec"
 	"path/filepath"
@@ -132,13 +133,19 @@ func Dirty(dir string) int {
 // malicioso no puede desalinear los campos. Pide la salida en UTF-8
 // (--encoding): con i18n.logOutputEncoding=UTF-16 git escribiría hasta los
 // hashes en UTF-16, y el mensaje de un commit en otra codificación se lee
-// convertido, como lo muestra git.
+// convertido, como lo muestra git. log.showSignature va apagado: con él git
+// antepone la salida de gpg a cada commit firmado y los campos se desalinean.
+//
+// La salida se lee sin suponer nada: siete campos por commit, el primero un
+// hash, y el flujo termina donde termina un commit. Lo que no cuadra es un
+// error, no un commit menos: una revisión que no leyó todo no puede dar el visto
+// bueno. Un commit cuyo mensaje trae bytes nulos tampoco se revisa: git corta el
+// mensaje en el primero y lo que sigue (un trailer) no aparece.
 func Log(dir string, n int, merges bool, revs ...string) ([]Commit, error) {
 	if !HasCommits(dir) {
 		return nil, nil
 	}
-	const fields = 7
-	args := []string{"log", "--encoding=UTF-8", "-z", "-n", strconv.Itoa(n), "--format=%H%x00%P%x00%an%x00%ae%x00%cn%x00%ce%x00%B"}
+	args := []string{"-c", "log.showSignature=false", "log", "--encoding=UTF-8", "-z", "-n", strconv.Itoa(n), "--format=%H%x00%P%x00%an%x00%ae%x00%cn%x00%ce%x00%B"}
 	if !merges {
 		args = append(args, "--no-merges")
 	}
@@ -149,23 +156,112 @@ func Log(dir string, n int, merges bool, revs ...string) ([]Commit, error) {
 	if err := cmd.Run(); err != nil {
 		return nil, fmt.Errorf("git log: %s", firstLine(errb.String(), err))
 	}
-	parts := strings.Split(out.String(), "\x00")
+	commits, err := parseLog(out.String())
+	if err != nil {
+		return nil, err
+	}
+	if sha, err := nulInMessage(dir, commits); err != nil {
+		return nil, err
+	} else if sha != "" {
+		return nil, fmt.Errorf("el commit %s tiene bytes nulos en el mensaje: git lo corta ahí y no se puede revisar su atribución", sha[:min(7, len(sha))])
+	}
+	return commits, nil
+}
+
+// parseLog lee la salida de git log -z con el formato de Log: siete campos por
+// commit, cada uno terminado en NUL. Cualquier otra forma es un error.
+func parseLog(out string) ([]Commit, error) {
+	const fields = 7
+	parts := strings.Split(out, "\x00")
+	// Los campos terminan en NUL: queda un campo vacío al final.
+	if len(parts)%fields != 1 || parts[len(parts)-1] != "" {
+		return nil, fmt.Errorf("git log: la salida no tiene la forma esperada (%d campos): no se puede revisar el historial", len(parts)-1)
+	}
 	var commits []Commit
-	// Cada commit ocupa 7 campos; -z agrega un NUL entre commits, que deja un campo vacío.
-	for i := 0; i+fields <= len(parts); {
+	for i := 0; i+fields < len(parts); i += fields {
 		f := parts[i : i+fields]
-		if len(f[0]) != 40 && len(f[0]) != 64 { // SHA-1 o SHA-256; si no, es el separador entre commits
-			i++
-			continue
+		if !isHash(f[0]) {
+			return nil, fmt.Errorf("git log: el campo %d no es un hash: no se puede revisar el historial", i+1)
 		}
 		msg := strings.TrimSpace(f[6])
 		subject, body, _ := strings.Cut(msg, "\n")
 		commits = append(commits, Commit{SHA: f[0], Merge: len(strings.Fields(f[1])) > 1,
 			AuthorName: f[2], AuthorEmail: f[3], CommitterName: f[4], CommitterEmail: f[5],
 			Subject: strings.TrimSpace(subject), Body: strings.TrimSpace(body)})
-		i += fields
 	}
 	return commits, nil
+}
+
+// isHash dice si s es el hash completo de un objeto (SHA-1 o SHA-256).
+func isHash(s string) bool {
+	if len(s) != 40 && len(s) != 64 {
+		return false
+	}
+	for _, r := range s {
+		if !strings.ContainsRune("0123456789abcdef", r) {
+			return false
+		}
+	}
+	return true
+}
+
+// nulInMessage devuelve el primero de los commits cuyo mensaje, en el objeto tal
+// como está guardado, trae un byte nulo, o "" si ninguno. Los lee con un solo
+// cat-file --batch, que enmarca cada objeto por su tamaño: nada de lo que diga un
+// mensaje cambia dónde termina.
+func nulInMessage(dir string, commits []Commit) (string, error) {
+	if len(commits) == 0 {
+		return "", nil
+	}
+	var in strings.Builder
+	for _, c := range commits {
+		in.WriteString(c.SHA + "\n")
+	}
+	cmd := exec.Command("git", "-C", dir, "cat-file", "--batch")
+	cmd.Stdin = strings.NewReader(in.String())
+	var out, errb bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &errb
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("git cat-file: %s", firstLine(errb.String(), err))
+	}
+	shas := make([]string, len(commits))
+	for i, c := range commits {
+		shas[i] = c.SHA
+	}
+	return scanNUL(out.Bytes(), shas)
+}
+
+// scanNUL lee la salida de cat-file --batch para shas: por cada objeto, la línea
+// "<hash> commit <tamaño>", ese número de bytes y un salto de línea. Devuelve el
+// primer commit con un byte nulo en el mensaje. No acepta nada más: un tipo que no
+// es commit, un tamaño que no cuadra o bytes de sobra son un error.
+func scanNUL(out []byte, shas []string) (string, error) {
+	bad := errors.New("git cat-file: la salida no tiene la forma esperada: no se puede revisar el historial")
+	found := ""
+	for _, sha := range shas {
+		nl := bytes.IndexByte(out, '\n')
+		if nl < 0 {
+			return "", bad
+		}
+		head := strings.Split(string(out[:nl]), " ")
+		if len(head) != 3 || head[0] != sha || head[1] != "commit" {
+			return "", bad
+		}
+		size, err := strconv.Atoi(head[2])
+		if err != nil || size < 0 || len(out)-(nl+1) < size+1 || out[nl+1+size] != '\n' {
+			return "", bad
+		}
+		obj := out[nl+1 : nl+1+size]
+		out = out[nl+1+size+1:]
+		// El mensaje empieza tras la primera línea en blanco, la que cierra los encabezados.
+		if _, msg, ok := bytes.Cut(obj, []byte("\n\n")); ok && found == "" && bytes.IndexByte(msg, 0) >= 0 {
+			found = sha
+		}
+	}
+	if len(out) != 0 {
+		return "", bad
+	}
+	return found, nil
 }
 
 // IsShallow informa si el repo es un clon superficial (historial incompleto).
