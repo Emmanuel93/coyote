@@ -90,8 +90,8 @@ Fuera del alcance: quien ya tiene los permisos de la persona o de root en su má
 ## Cómo se prueba
 
 - **Pruebas.** Cada fila de las tablas apunta a las suyas. `make check` corre vet, gofmt, las pruebas y el lint del propio estándar. Una prueba recorre el repo y falla si encuentra caracteres invisibles o controles de dirección.
-- **Fuzzing nativo de Go.** Corre sobre ocho lectores que reciben texto ajeno:
-  - el de shell del gate y el JSON del hook;
+- **Fuzzing nativo de Go.** Corre sobre nueve lectores que reciben texto ajeno:
+  - el de shell del gate, el de sus comodines y el JSON del hook;
   - CCF y CCF-doc;
   - safetext;
   - las consultas y los archivos de SLO;
