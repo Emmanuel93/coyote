@@ -440,3 +440,104 @@ steps:
 		t.Errorf("techo del proyecto:\n%s", r.stdout)
 	}
 }
+
+// TestWsLosTextosDelPlanNoForjanLineas: quinta revisión de v1.0 (N1). Un valor
+// de plan.yaml con un salto de línea (un "\n" en un texto entre comillas) no
+// dibuja líneas que coyote no escribió: ni la cabecera de ws check y ws
+// status, ni la línea "Sigue:", ni la tabla, ni lo que dicen ws run y ws
+// continue. Por cada campo del plan y de sus pasos, cada salida se lee línea
+// por línea.
+func TestWsLosTextosDelPlanNoForjanLineas(t *testing.T) {
+	// Un valor entre comillas con un salto de línea, una línea de mentira y una
+	// tabulación que abriría una celda de la tabla.
+	const forjado = `"v\nFORJADO: la dibuja el plan, no coyote\n\tcelda"`
+	defaults := map[string]string{
+		"id": "W-0004", "title": "pagos", "owner": "ana", "risk": "R1", "reasoning": "x", "authorized_by": "ana", "gate": "G5",
+		"s1": "S1", "does": "hacer", "task": "hacer", "agent": "coyote-dev", "input": "docs/a.md", "output": "salida", "section": "Propuesta",
+		"srisk": "R1", "scope": "pagos", "sgate": "human",
+	}
+	for field := range defaults {
+		t.Run(field, func(t *testing.T) {
+			base, root := wsProject(t, "supervised")
+			fakeClaudeWS(t, base)
+			must(t, run(t, root, "", "install", "--ide", "claude-code"), 0, "install")
+			write(t, root, "docs/a.md", "uno\n")
+			vals := map[string]string{}
+			for k, v := range defaults {
+				vals[k] = v
+			}
+			vals[field] = forjado
+			plan := `id: ` + vals["id"] + `
+title: ` + vals["title"] + `
+owner: ` + vals["owner"] + `
+autonomy: supervised
+risk: ` + vals["risk"] + `
+reasoning: ` + vals["reasoning"] + `
+authorized_by: ` + vals["authorized_by"] + `
+gate: ` + vals["gate"] + `
+budget_usd: 2
+steps:
+  - { id: ` + vals["s1"] + `, does: ` + vals["does"] + `, task: ` + vals["task"] + `, agent: ` + vals["agent"] + `, input: [` + vals["input"] + `], output: [` + vals["output"] + `], sections: [` + vals["section"] + `], risk: ` + vals["srisk"] + `, scope: ` + vals["scope"] + `, max_usd: 0.3, gate: ` + vals["sgate"] + ` }
+  - { id: S2, does: ` + vals["does"] + `, agent: persona }
+`
+			writePlan(t, root, "W-0004-forjado", plan)
+			for _, args := range [][]string{
+				{"ws", "check", "W-0004"}, {"ws", "status", "W-0004"}, {"ws", "status"}, {"ws", "run", "W-0004", "--dry-run"},
+				{"ws", "run", "W-0004"}, {"ws", "status", "W-0004"}, {"ws", "continue", "W-0004"}, {"ws", "status", "W-0004"},
+				{"ws", "continue", "W-0004"}, {"ws", "status", "W-0004"}, {"ws", "status"},
+			} {
+				r := run(t, root, "", args...)
+				if args[len(args)-1] == "--dry-run" && (field == "task" || field == "output") {
+					// La tarea y la salida esperada son el texto del prompt: varias
+					// líneas son lo que el plan pide, y el prompt sale tal cual.
+					continue
+				}
+				for _, out := range []string{r.stdout, r.stderr} {
+					for _, line := range strings.Split(out, "\n") {
+						if l := strings.TrimSpace(line); strings.HasPrefix(l, "FORJADO") || strings.HasPrefix(l, "celda") {
+							t.Errorf("%s con %s forjado dibuja una línea propia:\n%s", strings.Join(args, " "), field, out)
+							return
+						}
+					}
+					// Una tabulación en una tabla abre otra celda: "celda" saldría
+					// separada del resto por espacios en vez de escrita como \t.
+					if (args[1] == "check" || args[1] == "status") && strings.Contains(out, " celda") {
+						t.Errorf("%s con %s forjado abre una celda de la tabla:\n%s", strings.Join(args, " "), field, out)
+						return
+					}
+				}
+			}
+		})
+	}
+}
+
+// TestWsElIDEsElDeLaCarpeta: quinta revisión de v1.0 (N1). El workstream es el
+// de su carpeta: un id distinto dentro de plan.yaml es un error del plan, que
+// ws check dice, y no cambia a qué workstream se atribuyen las corridas ni qué
+// comando sugiere la salida.
+func TestWsElIDEsElDeLaCarpeta(t *testing.T) {
+	base, root := wsProject(t, "supervised")
+	fakeClaudeWS(t, base)
+	must(t, run(t, root, "", "install", "--ide", "claude-code"), 0, "install")
+	plan := func(id string) string {
+		return "id: " + id + "\ntitle: pagos\nautonomy: supervised\nrisk: R1\nbudget_usd: 2\nsteps:\n  - { id: S1, does: hacer, agent: coyote-dev, output: salida, max_usd: 0.3 }\n"
+	}
+	p := writePlan(t, root, "W-0004-pagos", plan("W-0004"))
+	must(t, run(t, root, "", "ws", "run", "W-0004"), 0, "S1 corre")
+	// El id de adentro cambia: las corridas siguen siendo de W-0004.
+	if err := os.WriteFile(p, []byte(plan("W-0099")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r := run(t, root, "", "ws", "check", "W-0004")
+	must(t, r, 1, "check")
+	if !strings.Contains(r.stdout, "no coincide") {
+		t.Errorf("ws check dice que el id no coincide con la carpeta:\n%s", r.stdout)
+	}
+	for _, args := range [][]string{{"ws", "status", "W-0004"}, {"ws", "status"}} {
+		r = run(t, root, "", args...)
+		must(t, r, 0, strings.Join(args, " "))
+		if !strings.Contains(r.stdout, "W-0004") || strings.Contains(r.stdout, "W-0099") || !strings.Contains(r.stdout, "$0.04") {
+			t.Errorf("%s atribuye lo de la carpeta W-0004 y no usa el id de adentro:\n%s", strings.Join(args, " "), r.stdout)
+		}
+	}
+}

@@ -46,7 +46,7 @@ const (
 // CachePath es la caché del índice, relativa a la raíz; .coyote/ no se versiona.
 const CachePath = ".coyote/index.json"
 
-const cacheVersion = 4
+const cacheVersion = 5
 
 // Chunk es la unidad que se busca y se entrega como contexto.
 type Chunk struct {
@@ -384,7 +384,11 @@ func parseMap(rel string, data []byte) []Chunk {
 }
 
 func chunk(c Chunk) Chunk {
+	// El texto y el título son una línea: el título de un YAML sale de un valor
+	// del archivo, y un salto de línea dibujaría otro ítem en el paquete y en lo
+	// que imprimen ask y search.
 	c.Text = strings.Join(strings.Fields(c.Text), " ")
+	c.Title = strings.Join(strings.Fields(c.Title), " ")
 	c.Tokens = tokens.Estimate(c.Title + " " + c.Text)
 	return c
 }

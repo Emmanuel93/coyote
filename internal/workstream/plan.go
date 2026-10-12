@@ -361,6 +361,11 @@ func ParseInput(s string) (Input, error) {
 	if err != nil {
 		return Input{}, fmt.Errorf("entrada %q: %v", s, err)
 	}
+	// El prefijo se mira también en la ruta ya limpia: ./step:S1 o x/../file:step:S1
+	// se muestran como step:S1 y file:step:S1, y no son un paso.
+	if pre := reservedPrefix(p); pre != "" {
+		return Input{}, fmt.Errorf("entrada %q: una ruta no empieza con %s; escribe la entrada sin ./ ni file:", s, pre)
+	}
 	return Input{"file", p}, nil
 }
 
@@ -445,6 +450,7 @@ type CheckOptions struct {
 	Exists    func(rel string) bool       // archivos de entrada; nil no revisa
 	Inspect   func(rel string) InputState // como Exists, pero distingue lo que no se puede leer; manda sobre Exists
 	Project   string                      // autonomy del proyecto (el techo)
+	Mode      string                      // modo con el que corre esta vez (ws run --mode lo baja); vacío: el del plan, con el techo del proyecto
 }
 
 // state dice cómo está un archivo de entrada; InputOK si no se revisa.
@@ -589,6 +595,19 @@ func (p *Plan) Check(o CheckOptions) []Finding {
 	return out
 }
 
+// PRDInput lee el prd: del plan: un archivo .md del proyecto o la entrega de un
+// paso. Es lo que Check llama válido; lo que muestra ws check usa la misma regla.
+func (p *Plan) PRDInput() (Input, error) {
+	in, err := ParseInput(strings.TrimSpace(p.PRD))
+	switch {
+	case err == nil && in.Kind == "diff":
+		err = errors.New("un diff no es un PRD")
+	case err == nil && in.Kind == "file" && !strings.EqualFold(path.Ext(in.Value), ".md"):
+		err = errors.New("el PRD es un documento Markdown")
+	}
+	return in, err
+}
+
 // checkPRD revisa de dónde parte el plan (R20, ADR-0028). Que falte el PRD en
 // un plan R2 o R3 es un aviso: el plan corre, pero arranca sin saber qué se
 // construye ni para quién. Un prd: que no dice lo que quiere decir es un error,
@@ -601,13 +620,7 @@ func (p *Plan) checkPRD(o CheckOptions, add func(level, step, format string, a .
 		}
 		return
 	}
-	in, err := ParseInput(ref)
-	switch {
-	case err == nil && in.Kind == "diff":
-		err = errors.New("un diff no es un PRD")
-	case err == nil && in.Kind == "file" && !strings.EqualFold(path.Ext(in.Value), ".md"):
-		err = errors.New("el PRD es un documento Markdown")
-	}
+	in, err := p.PRDInput()
 	if err != nil {
 		add("error", "", "prd %q inválido: usa una ruta .md del proyecto (coyote/prd/<feature>.md) o step:ID (%v)", ref, err)
 		return
@@ -626,9 +639,14 @@ func (p *Plan) checkPRD(o CheckOptions, add func(level, step, format string, a .
 			add("aviso", "", "prd step:%s no es el primer paso: los pasos anteriores corren sin PRD", in.Value)
 		}
 		// En autonomous solo se detiene el paso que pide la revisión: sin ella,
-		// el paso siguiente usaría un PRD que ninguna persona leyó (R20).
-		if mode, _ := Mode(p.Autonomy, o.Project); mode == "autonomous" && p.Steps[j].Gate != "human" {
-			add("error", "", "prd step:%s: en autonomous el PRD pasa por una persona (R20): agrega gate: human al paso %s, o corre el plan en supervised", in.Value, in.Value)
+		// el paso siguiente usaría un PRD que ninguna persona leyó (R20). Se mira
+		// el modo con el que corre: supervised se detiene tras cada paso.
+		mode := o.Mode
+		if mode == "" {
+			mode, _ = Mode(p.Autonomy, o.Project)
+		}
+		if mode == "autonomous" && p.Steps[j].Gate != "human" {
+			add("error", "", "prd step:%s: en autonomous el PRD pasa por una persona (R20): agrega gate: human al paso %s, o corre con --mode supervised, que se detiene tras cada paso", in.Value, in.Value)
 		}
 	case "file":
 		// Si un agente lo recibe, la revisión de sus entradas ya dice cómo está.

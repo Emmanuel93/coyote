@@ -123,6 +123,8 @@ func TestPlanPRD(t *testing.T) {
 			[]string{"error prd \"coyote/prd/pagos.txt\" inválido: usa una ruta .md"}},
 		{"file:step: no es un paso", head + "risk: R2\nprd: file:step:S1\nsteps:\n" + step("S1", "coyote-pm", ""), true,
 			[]string{"error prd \"file:step:S1\" inválido"}},
+		{"./step: tampoco es un archivo", head + "risk: R2\nprd: ./x.md/../step:S1.md\nsteps:\n" + step("S1", "coyote-pm", ""), true,
+			[]string{"error prd \"./x.md/../step:S1.md\" inválido"}},
 		{"un salto de línea no inventa líneas", head + "risk: R2\nprd: \"coyote/prd/x.md\\n  ! fin de avisos\"\nsteps:\n" + step("S1", "coyote-dev", ""), true,
 			[]string{"error prd \"coyote/prd/x.md\\n  ! fin de avisos\" inválido"}},
 		{"una marca que no se ve", head + "risk: R2\nprd: \"coyote/prd/x\\u200b.md\"\nsteps:\n" + step("S1", "coyote-dev", ""), true,
@@ -185,6 +187,24 @@ func TestPlanPRDAutonomo(t *testing.T) {
 	// Si el proyecto lo baja a supervised, la persona acepta cada paso: no hace falta el gate.
 	if got := findings(plan(""), "supervised"); strings.Contains(got, "error") {
 		t.Errorf("en supervised la persona acepta cada paso:\n%s", got)
+	}
+	// Quinta revisión (N5): manda el modo con el que corre esta vez. Un plan
+	// autonomous que se corre con --mode supervised no pide el gate, y con
+	// --mode autonomous (o sin modo) sí.
+	at := func(mode string) string {
+		var b strings.Builder
+		for _, f := range mustParse(t, plan("")).Check(CheckOptions{Agents: map[string]bool{"coyote-pm": true, "coyote-dev": true}, Project: "autonomous", Mode: mode}) {
+			b.WriteString(f.Level + " " + f.String() + "\n")
+		}
+		return b.String()
+	}
+	if got := at("supervised"); strings.Contains(got, "error") {
+		t.Errorf("con el modo supervised la persona acepta cada paso:\n%s", got)
+	}
+	for _, mode := range []string{"autonomous", ""} {
+		if got := at(mode); !strings.Contains(got, "error prd step:P1") {
+			t.Errorf("con el modo %q sigue pidiendo el gate:\n%s", mode, got)
+		}
 	}
 	// Un PRD que es un archivo lo revisa quien lo guarda: no pide gate.
 	file := strings.Replace(strings.Replace(plan(""), "prd: step:P1", "prd: coyote/prd/pagos.md", 1), "input: [step:P1]", "input: [coyote/prd/pagos.md]", 1)
@@ -349,6 +369,9 @@ func TestEntradasEstrictas(t *testing.T) {
 		"docs/a.md\n  ! fin de avisos", "docs/a.md\r\nx", "docs/a\u202e.md", "docs/a\x1b[2J.md", "docs/a\u200b.md", "docs/\ta.md",
 		"docs/a\u2028.md", "docs/a\U000e0041.md", "docs/a\u3164.md", "docs/\xff.md", "docs/a\u0085b.md",
 		"STEP:S1", "Step:S1", "sTeP:S1", "DIFF:r=main...HEAD", "Diff:r=main...HEAD", "file:step:S1", "file:STEP:S1", "file:diff:r=main...HEAD", "file: step:S1",
+		// Quinta revisión (N3): el prefijo se mira en la ruta ya limpia, como la
+		// leen quienes ven el aviso: ./step:S1 es step:S1.
+		"./step:S1", "./diff:r=main...HEAD", "x/../file:step:S1", "./STEP:S1", "file:./step:S1", "./file:step:S1", "a/b/../../diff:r=a...b", "file:x/../DIFF:r=a...b",
 	} {
 		if got, err := ParseInput(in); err == nil {
 			t.Errorf("%q debería ser inválida y dio %v", in, got)
@@ -359,6 +382,8 @@ func TestEntradasEstrictas(t *testing.T) {
 		"docs/con espacio.md": {"file", "docs/con espacio.md"},
 		"file:docs/a.md":      {"file", "docs/a.md"},
 		"stepper/notas.md":    {"file", "stepper/notas.md"},
+		"docs/step:S1.md":     {"file", "docs/step:S1.md"},
+		"./docs/a.md":         {"file", "docs/a.md"},
 	} {
 		got, err := ParseInput(in)
 		if err != nil || got != want {
@@ -652,5 +677,56 @@ func TestFoldAtIgnoraEventosFuturos(t *testing.T) {
 	// La aceptación futura no deja avanzar; el gasto futuro cuenta para el tope.
 	if st.Spent != 100.4 || st.Steps[0].Status != Review {
 		t.Fatalf("aceptación futura fuera, gasto futuro adentro: gasto %v, S1 %s", st.Spent, st.Steps[0].Status)
+	}
+}
+
+// TestPlanPRDArchivoQueNingunPasoRecibe: quinta revisión de v1.0 (N6). Cuando
+// ningún paso recibe el PRD, la revisión del PRD dice cómo está el archivo (un
+// enlace o un archivo enorme es un error; un binario, un aviso); cuando un paso
+// lo recibe, lo dice solo la revisión de sus entradas, una sola vez.
+func TestPlanPRDArchivoQueNingunPasoRecibe(t *testing.T) {
+	yaml := func(input string) string {
+		in := ""
+		if input != "" {
+			in = ", input: [" + input + "]"
+		}
+		return "id: W-0007\nautonomy: supervised\nrisk: R2\nprd: coyote/prd/pagos.md\nsteps:\n" +
+			"  - { id: S1, does: leer, agent: coyote-dev, output: x, max_usd: 1" + in + " }\n"
+	}
+	check := func(input string, state InputState) []string {
+		var got []string
+		for _, f := range mustParse(t, yaml(input)).Check(CheckOptions{Agents: map[string]bool{"coyote-dev": true}, Project: "supervised",
+			Inspect: func(string) InputState { return state }}) {
+			got = append(got, f.Level+" "+f.String())
+		}
+		return got
+	}
+	has := func(got []string, prefix string) int {
+		n := 0
+		for _, g := range got {
+			if strings.HasPrefix(g, prefix) {
+				n++
+			}
+		}
+		return n
+	}
+	// Nadie lo recibe: el PRD dice cómo está el archivo.
+	for state, want := range map[InputState]string{
+		InputMissing:  "aviso el PRD coyote/prd/pagos.md no existe todavía",
+		InputUnusable: "error el PRD coyote/prd/pagos.md no es un archivo regular dentro del proyecto",
+		InputBinary:   "aviso el PRD coyote/prd/pagos.md no es texto: ningún paso podría leerlo",
+	} {
+		got := check("docs/otro.md", state)
+		if has(got, want) != 1 || has(got, "aviso ningún paso recibe el PRD como entrada") != 1 {
+			t.Errorf("estado %d: se esperaba %q y el aviso de que nadie lo recibe, y salió %q", state, want, got)
+		}
+	}
+	if got := check("docs/otro.md", InputOK); len(got) != 1 || !strings.HasPrefix(got[0], "aviso ningún paso recibe el PRD") {
+		t.Errorf("un archivo legible que nadie recibe solo avisa eso: %q", got)
+	}
+	// Un paso lo recibe: lo dice la entrada, una vez, y el PRD no lo repite.
+	got := check("coyote/prd/pagos.md", InputUnusable)
+	if has(got, "error S1: la entrada coyote/prd/pagos.md no es un archivo regular") != 1 || has(got, "error el PRD") != 0 || len(got) != 1 {
+		t.Errorf("un PRD ilegible que un paso recibe se dice una vez, en la entrada: %q", got)
 	}
 }

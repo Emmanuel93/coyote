@@ -604,7 +604,8 @@ func plural(n int, one, many string) string {
 	return fmt.Sprintf("%d %s", n, many)
 }
 
-// oneLineVisible escapa controles y saltos: una celda de tabla es una línea.
+// oneLineVisible escapa controles, saltos de línea y tabulaciones: una celda de
+// tabla es una línea, y un tabulador abriría otra celda.
 func oneLineVisible(s string) string {
-	return strings.ReplaceAll(gate.Visible(s), "\n", "\\n")
+	return strings.NewReplacer("\n", "\\n", "\t", "\\t").Replace(gate.Visible(s))
 }

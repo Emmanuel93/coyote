@@ -349,6 +349,10 @@ func orDash(s string) string {
 	return s
 }
 
+// oneLine deja un texto en una línea: un ámbito o un título con saltos de
+// línea dibujaría otro título u otro ítem en el paquete.
+func oneLine(s string) string { return strings.Join(strings.Fields(s), " ") }
+
 func shortQuery(q string) string {
 	w := strings.Fields(q)
 	if len(w) > 12 {
@@ -360,7 +364,7 @@ func shortQuery(q string) string {
 func (p *Pack) title() string {
 	h := "# Contexto: " + p.Repo
 	if p.Scope != "" {
-		h += " · ámbito " + p.Scope
+		h += " · ámbito " + oneLine(p.Scope)
 	}
 	if p.Query != "" {
 		h += " · consulta \"" + shortQuery(p.Query) + "\""
@@ -458,7 +462,7 @@ func (p *Pack) CCF() string { return p.fit((*Pack).ccf) }
 
 func (p *Pack) ccf() string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "# contexto|%s|%s|%s|~%d/%d tokens\n", p.Repo, orDash(p.Scope), strings.ReplaceAll(orDash(shortQuery(p.Query)), "|", "/"), p.Used, p.Budget)
+	fmt.Fprintf(&b, "# contexto|%s|%s|%s|~%d/%d tokens\n", p.Repo, orDash(strings.ReplaceAll(oneLine(p.Scope), "|", "/")), strings.ReplaceAll(orDash(shortQuery(p.Query)), "|", "/"), p.Used, p.Budget)
 	fmt.Fprintf(&b, "# %s\n", p.frameLine())
 	for _, s := range p.Sections {
 		for _, it := range s.Items {
