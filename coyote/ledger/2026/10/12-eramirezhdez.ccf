@@ -11,3 +11,4 @@
 2026-10-12T07:55Z|@eramirezhdez/coyote-devsecops|W-0008|coyote|fix|release|make dist lee DIST del entorno entre comillas y no lo pega…|-|-|-|ok
 2026-10-12T08:15Z|@eramirezhdez/coyote-security|W-0008|coyote|fix|gate|mover o borrar la carpeta coyote/ de un proyecto anidado se bloquea…|-|-|-|ok
 2026-10-12T08:49Z|@eramirezhdez/coyote-security|W-0008|coyote|doc|secretos|proyectos anidados, dispensa, dependencias, UTF-16 con secuencias ANSI, rutas con corchetes y…|-|-|-|ok
+2026-10-12T08:49Z|@eramirezhdez/coyote-scribe|W-0008|coyote|doc|auditoria|fecha de llegada, codificación, configuración de git, lectura por lotes y periodo…|-|-|-|ok

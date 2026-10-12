@@ -45,5 +45,5 @@ Van en puntos porcentuales, promediadas sobre las preguntas. Se miden sobre el �
 
 ## Límites
 
-- Mide si la fuente llega al agente, no si el agente la usa bien. El juez de fidelidad, que lo mediría con un modelo, queda para v1.1 (ADR-0025).
+- Mide si la fuente llega al agente, no si el agente la usa bien. El juez de fidelidad, que lo mediría con un modelo, no entró en v1.0 (ADR-0025).
 - El golden de coyote mide coyote. Cada proyecto escribe el suyo con sus preguntas y sus fuentes.
