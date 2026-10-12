@@ -612,7 +612,7 @@ G7 autorizaría:
 | Compatibilidad | Sin promesa. Semver sobre formatos, CLI y estándar, con `requires` | Semver y `requires` (ADR-0026) |
 | Release | goreleaser en Actions (L2). Build reproducible con SBOM y procedencia locales (L1) | L1 local. L2 con Actions solo si G8 autoriza publicar (ADR-0027) |
 | Documentación | Wiki. `docs/` con Diátaxis, referencia generada y tutorial probado | `docs/` con Diátaxis |
-| `coyote serve` (C6.7) | Postgres y pgvector, o nada | Nada: ningún uso lo pidió (D18). Pasa a v1.1 si hace falta |
+| `coyote serve` (C6.7) | Postgres y pgvector, o nada | Nada: ningún uso lo pidió (D18). Se retoma si el uso lo pide |
 | Contradicciones (C6.2) | Una heurística ahora, o después del golden | Después: sin golden no se puede medir su ruido |
 
 **Decisión.**
@@ -710,12 +710,12 @@ G7 autorizaría:
 | T58 | Documentación | C6.6 | Tutorial probado, guías, referencia generada, explicación y CHANGELOG | Hecho: `TestTutorial` corre cada comando del tutorial; ocho guías; `cli.md` sale de la CLI y `make check` falla si queda vieja; generarla destapó tres textos de ayuda equivocados, ya corregidos |
 | T59 | Cadena de suministro | C6.8 | Build reproducible; SBOM y procedencia por binario; verificación documentada | Hecho: `make verify-dist` da los mismos 9 hashes en dos builds con la caché de Go vacía; SBOM CycloneDX 1.7 por binario y procedencia SLSA v1.2 Build L1 |
 | T60 | Piloto real (H8a) | C6.4 | Con tu autorización: plan `supervised`, PRs en `ws/` y `close.md`. Sin ella, pasa a v1.1 | H8a aprobado (P-0008) y kit entregado en `dist/piloto-h8a/`; no corrió. G8 decidió esperarlo, y el kit parte de un PRD (T62) |
-| T61 | Verificación y G8 | Evidencia antes de la 1.0 | Pruebas, pasadas adversariales, retro y `docs/releases/v1.0.0.md` | Hecho, a la espera del piloto y de la etiqueta: 137 hallazgos en seis pasadas (32, 22, 13, 22, 25 y 23), todos corregidos con su prueba salvo los límites declarados; retro de los ocho releases (331 hallazgos); `v1.0.0-rc.1` y `v1.0.0-rc.2` con SBOM y procedencia. Las pasadas 4 a 6 corrieron durante el piloto y sus arreglos están en la rama `v1.0`, no en los binarios del rc.2; falta tu decisión sobre un rc.3 y sobre una séptima pasada |
+| T61 | Verificación y G8 | Evidencia antes de la 1.0 | Pruebas, pasadas adversariales, retro y `docs/releases/v1.0.0.md` | Hecho, a la espera del piloto y de la etiqueta: 160 hallazgos en siete pasadas (32, 22, 13, 22, 25, 23 y 23), todos corregidos con su prueba salvo los límites declarados; retro de los ocho releases (354 hallazgos); `v1.0.0-rc.1`, `rc.2` y `rc.3` con SBOM y procedencia. Las pasadas 4 a 7 corrieron mientras se espera el piloto y sus arreglos están en la rama `v1.0`: los de la 4.ª a la 6.ª, en el rc.3 y no en el rc.2; los de la 7.ª, que incluyen dos altos del gate que el rc.2 y el rc.3 también tienen, en ningún binario. Falta tu decisión sobre un rc.4, sobre qué binario usa el piloto y sobre una octava pasada |
 | T62 | Fase del PRD | Pedida en G8: el ciclo no tenía el qué y el porqué antes del diseño | Skill `coyote-prd`, `coyote-pm`, R20, `prd:` con su aviso en `ws check`, guía, ADR-0028 y el kit del piloto con un paso S0 | Hecho: `v1.0.0-rc.2` |
 
 G8 decidió el 2026-10-11 (el reporte está en `docs/releases/v1.0.0.md`):
 
-1. Etiquetar `v1.0.0` después del piloto, y aceptar entonces ADR-0022 a ADR-0027. Mientras tanto, una cuarta pasada adversarial corta sobre los arreglos de la tercera ronda. Esa pasada trajo una quinta y una sexta (cada ronda de arreglos tiene la suya); las tres quedaron corregidas en la rama `v1.0` y el reporte pregunta si hay un rc.3 y una séptima.
+1. Etiquetar `v1.0.0` después del piloto, y aceptar entonces ADR-0022 a ADR-0027. Mientras tanto, una cuarta pasada adversarial corta sobre los arreglos de la tercera ronda. Esa pasada trajo una quinta y una sexta (cada ronda de arreglos tiene la suya); las tres quedaron corregidas en la rama `v1.0`. Autorizaste el rc.3 con ellas (2026-10-12) y una séptima pasada de verificación sobre la sexta ronda, que trajo otras 23 correcciones; el reporte pregunta si hay un rc.4 y una octava.
 2. `main` no se toca y el release no se publica en GitHub: no se autorizaron.
 3. v1.1 trae solo los pendientes de G5 a G7.
 4. Se agrega la fase del PRD (T62) antes del piloto, como `v1.0.0-rc.2`; ADR-0028 se acepta al etiquetar con los demás.
