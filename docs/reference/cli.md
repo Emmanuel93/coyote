@@ -30,12 +30,12 @@ Generada desde la CLI: no se edita a mano. La regenera `COYOTE_UPDATE_DOCS=1 go 
 | [`ask`](#coyote-ask) | `"pregunta" [--scope S] [--repo R]` | busca en el contexto del proyecto con referencias |
 | [`index`](#coyote-index) | `[--rebuild]` | arma el índice local y muestra su tamaño |
 | [`eval`](#coyote-eval) | `[--golden G] [--baseline B] [--update-baseline] [-v]` | mide el contexto con el golden del proyecto, sin modelos; falla si empeora (ADR-0025) |
-| [`repo`](#coyote-repo) | `add <nombre> [url] [--path P] \| list \| fetch [nombre]` | repos del proyecto y sus documentos |
+| [`repo`](#coyote-repo) | `add <nombre> [url] [--path P] \| list \| fetch [nombre]` | repos del proyecto y sus documentos; add escribe coyote/project.yaml y lo hace una persona, en su terminal |
 | [`map`](#coyote-map) | `[--check] [--json]` | mapa de interfaces del producto: quién expone y quién usa cada endpoint y tópico |
 | [`extract`](#coyote-extract) | `[repo...] [--stdout] [--check]` | propone README.coyote.md y CONTEXT.coyote.md de cada repo desde su código |
 | [`impact`](#coyote-impact) | `<endpoint\|texto> \| --topic T \| --diff repo=RANGO [--format md]` | qué rompe un cambio en los repos del producto |
 | [`run`](#coyote-run) | `--agent A "tarea" [--ws W] [--risk R] [--diff repo=RANGO] [--dry-run]` | corre un paso de un agente con Claude Code, con topes, gate y costo |
-| [`ws`](#coyote-ws) | `check\|status\|run\|continue <W> [--redo TEXTO \| --retry]` | corre el plan de un workstream con puntos de control (ADR-0014) |
+| [`ws`](#coyote-ws) | `check\|status\|run\|continue <W> [--redo TEXTO \| --retry]` | corre el plan de un workstream con puntos de control; continue lo hace una persona, en su terminal (ADR-0014) |
 | [`ci`](#coyote-ci) | `impact --repo nombre=ruta... [--policy warn\|fail] [--comment]` | impacto de un PR en los repos del producto, dentro del pipeline |
 | [`router`](#coyote-router) | `[--init] [--risk R]` | modelo y topes que el router da a cada agente |
 | [`close`](#coyote-close) | `<W> [--dry-run]` | cierra un workstream con su consumo real desde el ledger |
@@ -44,7 +44,7 @@ Generada desde la CLI: no se edita a mano. La regenera `COYOTE_UPDATE_DOCS=1 go 
 | [`auth`](#coyote-auth) | `login \| status [--check] \| logout` | token de GitHub en el llavero, nunca en archivos |
 | [`web`](#coyote-web) | `[--addr 127.0.0.1:7410]` | costos, presupuesto, workstreams, gate y SLOs en el navegador, con la visibilidad de D10 (ADR-0019) |
 | [`generate`](#coyote-generate) | `agents [--check]` | genera AGENTS.md desde los documentos coyote |
-| [`install`](#coyote-install) | `--ide IDE\|all \| --ci github [--check]` | instala el gate, los agentes y las skills en el IDE, o el pipeline del producto |
+| [`install`](#coyote-install) | `--ide IDE\|all \| --ci github [--check]` | instala el gate, los agentes y las skills en el IDE, o el pipeline del producto; escribir lo hace una persona, en su terminal |
 | [`hooks`](#coyote-hooks) | `install [--force]` | instala el hook commit-msg |
 | [`doctor`](#coyote-doctor) | `[--ide IDE [--canary]]` | verifica herramienta, identidad, documentos, estándar, gate y el nivel medido de cada IDE |
 | [`version`](#coyote-version) | `` | muestra la versión |
@@ -527,7 +527,7 @@ uso: coyote eval [--golden evals/golden.v1.jsonl] [--baseline evals/baseline.jso
 
 ## coyote repo
 
-repos del proyecto y sus documentos
+repos del proyecto y sus documentos; add escribe coyote/project.yaml y lo hace una persona, en su terminal
 
 ### coyote repo add
 
@@ -641,7 +641,7 @@ uso: coyote run --agent A "tarea" [--ws W] [--risk R1|R2|R3] [--scope S] [--diff
 
 ## coyote ws
 
-corre el plan de un workstream con puntos de control (ADR-0014)
+corre el plan de un workstream con puntos de control; continue lo hace una persona, en su terminal (ADR-0014)
 
 ### coyote ws check
 
@@ -839,7 +839,7 @@ uso: coyote generate agents [--check] [--force]
 
 ## coyote install
 
-instala el gate, los agentes y las skills en el IDE, o el pipeline del producto
+instala el gate, los agentes y las skills en el IDE, o el pipeline del producto; escribir lo hace una persona, en su terminal
 
 ```
 uso: coyote install --ide claude-code|cursor|codex|gemini|copilot|windsurf|all | --ci github [--check] [--dry-run]
