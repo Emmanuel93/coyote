@@ -238,6 +238,35 @@ func TestEntradasQueNoSePuedenLeer(t *testing.T) {
 	}
 }
 
+// TestEntradaQueFaltaEnAutonomous: sexta revisión de v1.0 (N13). En autonomous la
+// persona autoriza los archivos que existen al autorizar (A4): una entrada que
+// todavía no existe detiene al loop antes de ese paso, y ws check lo dice en vez
+// de un "no existe todavía" que suena a que el paso la creará. En los otros
+// modos sigue siendo el aviso de siempre.
+func TestEntradaQueFaltaEnAutonomous(t *testing.T) {
+	yaml := "id: W-0007\nautonomy: autonomous\nbudget_usd: 2\nrisk: R1\nsteps:\n" +
+		"  - { id: S1, does: leer, agent: coyote-dev, output: x, max_usd: 1, input: [docs/falta.md] }\n"
+	at := func(mode string) string {
+		var got []string
+		for _, f := range mustParse(t, yaml).Check(CheckOptions{Agents: map[string]bool{"coyote-dev": true}, Project: "autonomous", Mode: mode,
+			Inspect: func(string) InputState { return InputMissing }}) {
+			got = append(got, f.Level+" "+f.String())
+		}
+		return strings.Join(got, "\n")
+	}
+	for _, mode := range []string{"autonomous", ""} {
+		got := at(mode)
+		if !strings.Contains(got, "aviso S1: la entrada docs/falta.md no existe todavía: en autonomous el loop se detiene antes de este paso (A4)") || strings.Contains(got, "error") {
+			t.Errorf("modo %q: una entrada que falta detiene al loop autónomo:\n%s", mode, got)
+		}
+	}
+	for _, mode := range []string{"supervised", "manual"} {
+		if got := at(mode); got != "aviso S1: la entrada docs/falta.md no existe todavía" {
+			t.Errorf("modo %q conserva el aviso de siempre:\n%s", mode, got)
+		}
+	}
+}
+
 func TestMaxRisk(t *testing.T) {
 	p := mustParse(t, "id: W-0007\nrisk: R2\nsteps:\n  - { id: S1, does: x, agent: persona, risk: R3 }\n  - { id: S2, does: x, agent: persona, risk: R9 }\n")
 	if got := p.MaxRisk(); got != "R3" {
@@ -372,6 +401,12 @@ func TestEntradasEstrictas(t *testing.T) {
 		// Quinta revisión (N3): el prefijo se mira en la ruta ya limpia, como la
 		// leen quienes ven el aviso: ./step:S1 es step:S1.
 		"./step:S1", "./diff:r=main...HEAD", "x/../file:step:S1", "./STEP:S1", "file:./step:S1", "./file:step:S1", "a/b/../../diff:r=a...b", "file:x/../DIFF:r=a...b",
+		// Sexta revisión (N12): un espacio al borde de un nombre se come el
+		// prefijo en la salida (" step:S1" se lee como step:S1). Ningún nombre de
+		// la ruta empieza ni termina con espacios, del tipo que sean.
+		"a/../ step:S1", "./ step:S1", "./\u3000step:S1", "./\u2007step:S1", "x/../\u00a0diff:r=a...b", "./\u2003STEP:S1", "file:./ step:S1", "./ file:step:S1",
+		"docs/ a.md", "docs /a.md", "docs/a.md /b.md", "a/ /b.md", "docs/\u00a0a.md", "docs/a.md\u3000/b.md",
+		"docs/ /../x.md", "docs/\u3000/../x.md", // aunque el .. lo cancele, el nombre se escribió así
 	} {
 		if got, err := ParseInput(in); err == nil {
 			t.Errorf("%q debería ser inválida y dio %v", in, got)
@@ -384,6 +419,9 @@ func TestEntradasEstrictas(t *testing.T) {
 		"stepper/notas.md":    {"file", "stepper/notas.md"},
 		"docs/step:S1.md":     {"file", "docs/step:S1.md"},
 		"./docs/a.md":         {"file", "docs/a.md"},
+		"docs/a b/c d.md":     {"file", "docs/a b/c d.md"},
+		" docs/a.md\u3000":    {"file", "docs/a.md"},
+		"file: docs/a.md":     {"file", "docs/a.md"},
 	} {
 		got, err := ParseInput(in)
 		if err != nil || got != want {
@@ -409,7 +447,7 @@ func TestEstadoDesdeElLedger(t *testing.T) {
 		t.Fatalf("un plan nuevo corre S1: %+v", n)
 	}
 	// S1 corre bien: espera revisión.
-	ev = append(ev, line(t0, "run", "ok", 0.4, "step:S1", "doc:runs/a.md"))
+	ev = append(ev, line(t0, "run", "ok", 0.4, "step:S1", "doc:runs/a.md", "mode:autonomous"))
 	st = Fold(p, ev)
 	if st.Steps[0].Status != Review || st.Steps[0].Doc != "runs/a.md" || st.Spent != 0.4 {
 		t.Fatalf("S1: %+v", st.Steps[0])
@@ -487,7 +525,7 @@ func TestEstadoDesdeElLedger(t *testing.T) {
 	if n := st.Next("autonomous"); !n.Run || n.Index != 3 {
 		t.Errorf("sin tope corre S4: %+v", n)
 	}
-	ev = append(ev, line(t0, "run", "ok", 0.1, "step:S4", "doc:runs/e.md"))
+	ev = append(ev, line(t0, "run", "ok", 0.1, "step:S4", "doc:runs/e.md", "mode:autonomous"))
 	st = Fold(p, ev)
 	if n := st.Next("autonomous"); n.Run || n.Reason != StopEvaluate || n.Index != 3 {
 		t.Errorf("autonomous termina en evaluación: %+v", n)
@@ -503,6 +541,55 @@ func TestEstadoDesdeElLedger(t *testing.T) {
 	st = Fold(p, append(ev[:2:2], line(t0, "close", "ok", 0)))
 	if n := st.Next("supervised"); n.Run || n.Reason != StopClosed || !st.Closed {
 		t.Errorf("cerrado: %+v", n)
+	}
+}
+
+// TestEvaluarSoloLoQueCorrioEnAutonomous: sexta revisión de v1.0 (N13). La
+// evaluación final de A4 es de lo que el loop autónomo hizo por su cuenta: un
+// paso que corrió en supervised (o en manual, o bajando el modo con --mode)
+// espera la revisión de la persona, no se pasa de largo, y el plan no "corrió
+// en autónomo" por mirarlo con el modo del plan.
+func TestEvaluarSoloLoQueCorrioEnAutonomous(t *testing.T) {
+	p := mustParse(t, strings.Replace(planYAML, "    gate: human\n", "", 1))
+	t0 := time.Date(2026, 10, 1, 10, 0, 0, 0, time.UTC)
+	for _, mode := range []string{"supervised", "manual", ""} {
+		refs := []string{"step:S1", "doc:runs/a.md"}
+		if mode != "" {
+			refs = append(refs, "mode:"+mode)
+		}
+		st := Fold(p, []ledger.Entry{line(t0, "run", "ok", 0.4, refs...)})
+		if st.Steps[0].Auto {
+			t.Errorf("mode:%q no es autonomous: %+v", mode, st.Steps[0])
+		}
+		if n := st.Next("autonomous"); n.Run || n.Reason != StopReview || n.Index != 0 {
+			t.Errorf("mode:%q: un paso que no corrió en autonomous lo revisa una persona: %+v", mode, n)
+		}
+	}
+	// Lo que corrió en autonomous se pasa de largo y se evalúa al final.
+	ev := []ledger.Entry{line(t0, "run", "ok", 0.4, "step:S1", "doc:runs/a.md", "mode:autonomous")}
+	st := Fold(p, ev)
+	if !st.Steps[0].Auto {
+		t.Fatalf("mode:autonomous: %+v", st.Steps[0])
+	}
+	if n := st.Next("autonomous"); !n.Run || n.Index != 1 {
+		t.Errorf("autonomous sigue con S2: %+v", n)
+	}
+	// La última corrida manda: S1 rehecho en supervised ya no es del loop.
+	ev = append(ev, line(t0, "rej", "ok", 0, "step:S1", "doc:runs/rev.md"), line(t0, "run", "ok", 0.4, "step:S1", "doc:runs/b.md", "mode:supervised"))
+	st = Fold(p, ev)
+	if st.Steps[0].Auto || st.Steps[0].Status != Review {
+		t.Errorf("S1 rehecho en supervised: %+v", st.Steps[0])
+	}
+	if n := st.Next("autonomous"); n.Run || n.Reason != StopReview || n.Index != 0 {
+		t.Errorf("lo rehecho en supervised lo revisa una persona: %+v", n)
+	}
+	// Una corrida que no arrancó no cambia con qué modo corrió el paso.
+	ev = []ledger.Entry{
+		line(t0, "run", "ok", 0.4, "step:S1", "doc:runs/a.md", "mode:autonomous"),
+		line(t0, "run", "skip", 0, "step:S1", "mode:supervised"),
+	}
+	if st := Fold(p, ev); !st.Steps[0].Auto {
+		t.Errorf("una corrida skip no cambia el modo del paso: %+v", st.Steps[0])
 	}
 }
 
@@ -606,6 +693,43 @@ func TestBuscarYListar(t *testing.T) {
 	}
 	if _, err := Load(root, "W-0006"); err == nil || !strings.Contains(err.Error(), "no sirve para un workstream") {
 		t.Errorf("carpeta con espacio: %v", err)
+	}
+}
+
+// TestLoadDejaElIDDeLaCarpeta: sexta revisión de v1.0 (N9). El workstream es el
+// de su carpeta: Load deja su id en el plan, y el que escribe plan.yaml (otro,
+// o ninguno) es un error que Check dice.
+func TestLoadDejaElIDDeLaCarpeta(t *testing.T) {
+	findingsText := func(fs []Finding) string {
+		var out []string
+		for _, f := range fs {
+			out = append(out, f.String())
+		}
+		return strings.Join(out, "\n")
+	}
+	root := t.TempDir()
+	for dir, id := range map[string]string{"W-0001-uno": "id: W-0099\n", "W-0002-dos": ""} {
+		if err := os.MkdirAll(filepath.Join(root, Base, dir), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		plan := id + "title: x\nbudget_usd: 1\nsteps:\n  - { id: S1, does: hacer, agent: coyote-dev, output: salida, max_usd: 0.3 }\n"
+		if err := os.WriteFile(filepath.Join(root, Base, dir, "plan.yaml"), []byte(plan), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	p, err := Load(root, "W-0001")
+	if err != nil || p.ID != "W-0001" || p.Declared != "W-0099" {
+		t.Fatalf("el id es el de la carpeta: %+v %v", p, err)
+	}
+	if got := findingsText(p.Check(CheckOptions{})); !strings.Contains(got, "el id W-0099 no coincide con la carpeta W-0001-uno") {
+		t.Errorf("Check dice el id de adentro:\n%s", got)
+	}
+	p, err = Load(root, "W-0002")
+	if err != nil || p.ID != "W-0002" || p.Declared != "" {
+		t.Fatalf("sin id adentro: %+v %v", p, err)
+	}
+	if got := findingsText(p.Check(CheckOptions{})); !strings.Contains(got, "falta id") {
+		t.Errorf("Check dice que falta el id:\n%s", got)
 	}
 }
 

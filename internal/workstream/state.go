@@ -43,6 +43,7 @@ type StepState struct {
 	Runs     int       `json:"runs"`
 	CostUSD  float64   `json:"cost_usd"`
 	At       time.Time `json:"at,omitempty"`
+	Auto     bool      `json:"auto,omitempty"` // la última corrida fue del loop autónomo (mode:autonomous)
 }
 
 // State es el plan con el estado de cada paso.
@@ -121,6 +122,7 @@ func Fold(p *Plan, entries []ledger.Entry) *State {
 			}
 			st.Runs++
 			st.CostUSD += cost
+			st.Auto = ref(l.Refs, "mode") == "autonomous"
 			if doc != "" {
 				st.Doc = doc
 			}
@@ -156,8 +158,10 @@ func (s *State) Remaining() (float64, bool) {
 }
 
 // Next dice qué hace el motor en un modo: correr el primer paso pendiente o
-// detenerse, y por qué. En autonomous pasa de largo los pasos por revisar,
-// salvo los que piden gate: human; la persona los evalúa al final.
+// detenerse, y por qué. En autonomous pasa de largo los pasos por revisar que
+// corrieron en autonomous, salvo los que piden gate: human; la persona los
+// evalúa al final. Un paso que corrió en otro modo (supervised, o autonomous
+// bajado con --mode) lo revisa la persona antes de seguir.
 type Next struct {
 	Run    bool
 	Index  int    // paso que corre o donde se detiene; -1 si no hay
@@ -175,7 +179,7 @@ func (s *State) Next(mode string) Next {
 		case Done:
 			continue
 		case Review:
-			if mode == "autonomous" && st.Gate != "human" {
+			if mode == "autonomous" && st.Gate != "human" && st.Auto {
 				last = i
 				continue
 			}

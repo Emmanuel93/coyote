@@ -220,6 +220,12 @@ func workViews(root string, now time.Time) ([]web.Workstream, error) {
 	if err != nil {
 		return nil, err
 	}
+	// El modo con el que corre cada plan: el suyo sin pasar el techo del
+	// proyecto; sin poder leer el proyecto, el más bajo.
+	ceiling := ""
+	if cfg, err := project.Load(root); err == nil {
+		ceiling = cfg.Autonomy
+	}
 	var out []web.Workstream
 	for _, id := range ids {
 		p, err := workstream.Load(root, id)
@@ -229,7 +235,8 @@ func workViews(root string, now time.Time) ([]web.Workstream, error) {
 		}
 		st := workstream.FoldAt(p, entries, now)
 		owner, _ := hub.NormalizeHandle(p.Owner)
-		w := web.Workstream{ID: p.ID, Title: p.Title, Mode: p.Autonomy, Gate: p.Gate, Owner: owner, Closed: st.Closed,
+		mode, _ := workstream.Mode(p.Autonomy, ceiling)
+		w := web.Workstream{ID: p.ID, Title: p.Title, Mode: mode, Gate: p.Gate, Owner: owner, Closed: st.Closed,
 			SpentUSD: st.Spent, BudgetUSD: p.BudgetUSD, Runs: st.Runs}
 		for _, x := range st.Steps {
 			w.Steps = append(w.Steps, web.Step{ID: x.ID, Does: x.Does, Agent: x.Agent, Status: x.Status, Runs: x.Runs, CostUSD: x.CostUSD, At: x.At})

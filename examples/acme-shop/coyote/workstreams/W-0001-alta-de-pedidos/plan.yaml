@@ -1,32 +1,40 @@
-# Workstream de ejemplo. Formato preliminar: v0.1 solo lo guarda como referencia;
-# el motor que ejecuta steps con gates llega en v0.3 y v0.4.
+# Workstream de ejemplo (datos sintéticos): el plan con el que partió el PRD de la
+# feature. Se revisa con coyote ws check W-0001 y se corre con coyote ws run W-0001.
 id: W-0001
 title: Alta y confirmación de pedidos
 owner: "@ana"
-autonomy: manual            # cada step con efectos espera aprobación (A1)
-budget: { usd: 3.00, tokens: 400k }
+autonomy: manual            # el proyecto permite hasta manual: cada paso lo lanza la persona (A1)
 risk: R1
+prd: coyote/prd/alta-de-pedidos.md   # de dónde parte el plan (R20); los pasos lo reciben como entrada
+budget_usd: 3
 steps:                      # dominio primero (R16): modelo, contrato, código, revisión
   - id: S1
     agent: coyote-analyst
     does: modelo de dominio, estados e invariantes
-    output: docs/domain.md
+    input: [coyote/prd/alta-de-pedidos.md]
+    output: [docs/domain.md]
+    max_usd: 0.5
     gate: human
   - id: S2
     agent: coyote-architect
     does: contrato OpenAPI desde el dominio
-    output: contracts/openapi.yaml
-    needs: [S1]
+    input: [coyote/prd/alta-de-pedidos.md, docs/domain.md]
+    output: [contracts/openapi.yaml]
+    max_usd: 0.75
     gate: human
   - id: S3
     agent: coyote-dev
     does: agregado Pedido, servicio y pruebas
+    input: [coyote/prd/alta-de-pedidos.md, docs/domain.md, contracts/openapi.yaml]
     output: [src/orders/, test/orders.test.ts]
-    needs: [S2]
+    max_usd: 1.25
     gate: human
   - id: S4
     agent: coyote-reviewer
     does: revisión contra invariantes, contrato y estándar
-    needs: [S3]
+    input: [docs/domain.md, contracts/openapi.yaml, step:S3]
+    output: [informe de revisión]
+    sections: [Hallazgos, Riesgos]
+    max_usd: 0.5
     gate: human
 close: { summary: close.md }  # tokens, modelos y costo del workstream (A3)

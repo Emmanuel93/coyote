@@ -71,6 +71,18 @@ type wsCtx struct {
 	authID     string            // aprobación que autorizó el loop autónomo
 	authPlan   string            // hash del plan solo
 	authFiles  map[string]string // huella de cada archivo que el plan leía al autorizarlo
+	lowered    bool              // --mode bajó el modo del plan: las órdenes que se sugieren llevan --mode
+}
+
+// cmd es una orden de coyote ws sobre este workstream. Si la persona bajó el modo
+// con --mode, la lleva: copiar la orden sin él correría con más autonomía de la
+// que eligió, o con el modo con el que el plan tiene errores.
+func (c *wsCtx) cmd(sub string) string {
+	s := "coyote ws " + sub + " " + c.plan.ID
+	if c.lowered {
+		s += " --mode " + c.mode
+	}
+	return s
 }
 
 // loadWS lee el plan y lo revisa con el modo con el que va a correr: lowerTo
@@ -89,14 +101,17 @@ func (a *app) loadWS(id, lowerTo string) (*wsCtx, []workstream.Finding, error) {
 	}
 	c := &wsCtx{root: root, cfg: cfg, plan: plan, person: identity.Resolve(root)}
 	c.mode, _ = workstream.Mode(plan.Autonomy, cfg.Autonomy)
-	if err := c.lower(lowerTo); err != nil {
-		return nil, nil, err
+	// Con un autonomy: que no existe no se compara --mode: el plan es inválido
+	// y Check lo dice, que es lo que la persona tiene que arreglar primero.
+	if plan.Autonomy == "" || workstream.Rank(plan.Autonomy) >= 0 {
+		if err := c.lower(lowerTo); err != nil {
+			return nil, nil, err
+		}
 	}
+	// El workstream es el de su carpeta (Load deja en plan.ID el de la carpeta):
+	// un id distinto en plan.yaml es un error del plan que Check dice y que
+	// impide correrlo.
 	findings := plan.Check(checkOptions(root, cfg, c.mode))
-	// El workstream es el de su carpeta. Un id distinto en plan.yaml es un error
-	// del plan (Check lo dice y el plan no corre); no se usa para lo demás, ni
-	// para lo que la salida le dice a la persona que corra.
-	plan.ID = id
 	if !contains(gateInstalled(root), "claude-code") {
 		findings = append(findings, workstream.Finding{Level: "aviso", Msg: "el gate no está instalado para Claude Code: los pasos no corren sin él; corre coyote install --ide claude-code"})
 	}
@@ -183,6 +198,7 @@ func (c *wsCtx) lower(m string) error {
 	case r > workstream.Rank(c.mode):
 		return fail(2, "--mode %s pide más autonomía que la del plan (%s): eso se cambia en plan.yaml y en coyote/project.yaml", m, c.mode)
 	}
+	c.lowered = r < workstream.Rank(c.mode)
 	c.mode = m
 	return nil
 }
@@ -240,7 +256,7 @@ func (a *app) wsCheck(args []string) error {
 	} else {
 		p := c.plan
 		fmt.Fprintf(a.stdout, "%s · %s\n", planLine(p.ID), orDash(planLine(p.Title)))
-		fmt.Fprintf(a.stdout, "Modo %s (plan %s, proyecto %s) · %s · %s\n", c.mode, orManual(p.Autonomy), orManual(c.cfg.Autonomy), budgetText(p.BudgetUSD), plural(len(p.Steps), "paso", "pasos"))
+		fmt.Fprintf(a.stdout, "Modo %s (plan %s, proyecto %s) · %s · %s\n", c.mode, orManual(planLine(p.Autonomy)), orManual(planLine(c.cfg.Autonomy)), budgetText(p.BudgetUSD), plural(len(p.Steps), "paso", "pasos"))
 		if strings.TrimSpace(p.PRD) != "" {
 			fmt.Fprintf(a.stdout, "PRD: %s\n", prdText(p))
 		}
@@ -337,12 +353,11 @@ func (a *app) wsStatus(args []string) error {
 	if err != nil {
 		return err
 	}
-	nx := st.Next(c.mode)
-	hint := wsHint(c, st, nx)
+	nx, hint, lowerMode := a.statusNext(c, findings, st)
 	if *asJSON {
 		out := map[string]any{"id": c.plan.ID, "title": c.plan.Title, "mode": c.mode, "budget_usd": c.plan.BudgetUSD,
 			"spent_usd": round4(st.Spent), "runs": st.Runs, "steps": st.Steps, "findings": nonNil(findings),
-			"next": map[string]any{"run": nx.Run, "step": stepAt(st, nx.Index), "reason": nx.Reason, "hint": hint}}
+			"next": map[string]any{"run": nx.Run, "step": stepAt(st, nx.Index), "reason": nx.Reason, "hint": hint, "mode": orDefault(lowerMode, c.mode)}}
 		b, _ := json.MarshalIndent(out, "", "  ")
 		fmt.Fprintln(a.stdout, string(b))
 		return nil
@@ -359,10 +374,45 @@ func (a *app) wsStatus(args []string) error {
 	}
 	tw.Flush()
 	if n := workstream.Errors(findings); n > 0 {
-		fmt.Fprintf(a.stdout, "\nEl plan tiene %s: coyote ws check %s.\n", plural(n, "error", "errores"), c.plan.ID)
+		fmt.Fprintf(a.stdout, "\nEl plan tiene %s: coyote ws check %s.", plural(n, "error", "errores"), c.plan.ID)
+		if lowerMode != "" {
+			fmt.Fprintf(a.stdout, " Con --mode %s no los tiene.", lowerMode)
+		}
+		fmt.Fprintln(a.stdout)
 	}
 	fmt.Fprintf(a.stdout, "\nSigue: %s\n", hint)
 	return nil
+}
+
+func orDefault(s, def string) string {
+	if s == "" {
+		return def
+	}
+	return s
+}
+
+// statusNext dice qué sigue en ws status. Con errores en el plan, ws run y ws
+// continue lo rechazan: no se sugiere una orden que se va a negar. Los errores
+// de algunos modos no lo son de uno con menos autonomía (el PRD sin gate: human
+// de autonomous, R20): si con el modo más alto por debajo del del plan no hay
+// errores, la pista lleva ese --mode y se devuelve; si no hay ninguno, dice que
+// primero se corrige el plan.
+func (a *app) statusNext(c *wsCtx, findings []workstream.Finding, st *workstream.State) (nx workstream.Next, hint, lowerMode string) {
+	if workstream.Errors(findings) == 0 {
+		nx = st.Next(c.mode)
+		return nx, wsHint(c, st, nx), ""
+	}
+	nx = st.Next(c.mode)
+	hint = fmt.Sprintf("corrige el plan (coyote ws check %s): mientras tenga errores, ws run y ws continue se niegan", c.plan.ID)
+	for r := workstream.Rank(c.mode) - 1; r >= 0; r-- {
+		lc, lf, err := a.loadWS(c.plan.ID, workstream.Modes[r])
+		if err != nil || workstream.Errors(lf) > 0 {
+			continue
+		}
+		nx = st.Next(lc.mode)
+		return nx, wsHint(lc, st, nx), lc.mode
+	}
+	return nx, hint, ""
 }
 
 func round4(f float64) float64 { return float64(int64(f*10000+0.5)) / 10000 }
@@ -412,7 +462,6 @@ func (a *app) wsList(asJSON bool) error {
 			rows = append(rows, row{ID: id, Error: err.Error()})
 			continue
 		}
-		plan.ID = id
 		mode, _ := workstream.Mode(plan.Autonomy, cfg.Autonomy)
 		st := workstream.FoldAt(plan, entries, a.now())
 		r := row{ID: id, Title: plan.Title, Mode: mode, Steps: len(st.Steps), Spent: round4(st.Spent), Budget: plan.BudgetUSD}
@@ -468,9 +517,10 @@ func (a *app) wsList(asJSON bool) error {
 // wsHint dice qué sigue, con el comando.
 func wsHint(c *wsCtx, st *workstream.State, nx workstream.Next) string {
 	id := c.plan.ID
+	cont := c.cmd("continue")
 	if nx.Run {
 		s := st.Steps[nx.Index]
-		return fmt.Sprintf("%s (%s, %s): corre con coyote ws run %s", planLine(s.ID), planLine(s.Agent), planLine(s.Does), id)
+		return fmt.Sprintf("%s (%s, %s): corre con %s", planLine(s.ID), planLine(s.Agent), planLine(s.Does), c.cmd("run"))
 	}
 	var s workstream.StepState
 	if nx.Index >= 0 && nx.Index < len(st.Steps) {
@@ -478,17 +528,17 @@ func wsHint(c *wsCtx, st *workstream.State, nx workstream.Next) string {
 	}
 	switch nx.Reason {
 	case workstream.StopReview:
-		return fmt.Sprintf("%s espera tu revisión: lee %s; si está bien, coyote ws continue %s; si no, coyote ws continue %s --redo \"qué cambiar\"", planLine(s.ID), orDash(planLine(s.Doc)), id, id)
+		return fmt.Sprintf("%s espera tu revisión: lee %s; si está bien, %s; si no, %s --redo \"qué cambiar\"", planLine(s.ID), orDash(planLine(s.Doc)), cont, cont)
 	case workstream.StopHuman:
-		return fmt.Sprintf("%s lo haces tú (%s); cuando termines, coyote ws continue %s", planLine(s.ID), planLine(s.Does), id)
+		return fmt.Sprintf("%s lo haces tú (%s); cuando termines, %s", planLine(s.ID), planLine(s.Does), cont)
 	case workstream.StopFailed:
 		why := ""
 		if s.Why != "" {
 			why = " (" + planLine(s.Why) + ")"
 		}
-		return fmt.Sprintf("%s falló%s: revisa %s; repítelo con coyote ws continue %s --retry o pide cambios con --redo \"qué cambiar\"", planLine(s.ID), why, orDash(planLine(s.Doc)), id)
+		return fmt.Sprintf("%s falló%s: revisa %s; repítelo con %s --retry o pide cambios con %s --redo \"qué cambiar\"", planLine(s.ID), why, orDash(planLine(s.Doc)), cont, cont)
 	case workstream.StopBlocked:
-		return fmt.Sprintf("%s dejó acciones en la cola del gate: decídelas con coyote approvals, coyote review y coyote approve o reject; luego coyote ws continue %s y el agente repite las aprobadas", planLine(s.ID), id)
+		return fmt.Sprintf("%s dejó acciones en la cola del gate: decídelas con coyote approvals, coyote review y coyote approve o reject; luego %s y el agente repite las aprobadas", planLine(s.ID), cont)
 	case workstream.StopBudget:
 		return fmt.Sprintf("el plan llegó a su tope (%s): para seguir, sube budget_usd en %s", spentText(st), c.plan.Rel)
 	case workstream.StopEvaluate:
@@ -496,7 +546,7 @@ func wsHint(c *wsCtx, st *workstream.State, nx workstream.Next) string {
 		for _, i := range st.ToReview(len(st.Steps) - 1) {
 			ids = append(ids, planLine(st.Steps[i].ID))
 		}
-		return fmt.Sprintf("el plan corrió en autónomo: evalúa %s en la rama ws/%s y acéptalos con coyote ws continue %s antes del merge (A4)", strings.Join(ids, ", "), id, id)
+		return fmt.Sprintf("el plan corrió en autónomo: evalúa %s en la rama ws/%s y acéptalos con %s antes del merge (A4)", strings.Join(ids, ", "), id, cont)
 	case workstream.StopDone:
 		return fmt.Sprintf("el plan está completo: ciérralo con coyote close %s", id)
 	case workstream.StopClosed:
@@ -585,7 +635,8 @@ func (a *app) wsLoop(c *wsCtx, f *forced, dry bool) error {
 		} else if c.mode == "autonomous" && !dry {
 			// Antes de cada paso: la autorización sigue vigente, el plan es el
 			// autorizado y la rama es la del workstream. No gasta otro uso.
-			if err := a.wsStillAuthorized(c); err != nil {
+			if why, err := a.wsStillAuthorized(c); err != nil {
+				a.wsRecordHalt(c, st, nx.Index, stopAuthorization, why)
 				return err
 			}
 		}
@@ -594,6 +645,9 @@ func (a *app) wsLoop(c *wsCtx, f *forced, dry bool) error {
 		var changed *errInputChanged
 		if errors.As(err, &changed) {
 			// No es un paso sin entrada: la persona autorizó otro contenido.
+			if !dry {
+				a.wsRecordHalt(c, st, nx.Index, stopInputChanged, changed.Error())
+			}
 			return fail(1, "A4: el loop autónomo de %s se detiene antes del paso %s: %s; revísalo y autoriza de nuevo", c.plan.ID, st.Steps[nx.Index].ID, changed)
 		}
 		if err != nil {
@@ -672,6 +726,27 @@ func (a *app) wsRecordStop(c *wsCtx, st *workstream.State, stop workstream.Next,
 		refs = append(refs, "at:"+safeRef(id))
 	}
 	return a.wsRecord(c, "plan", what, status, refs...)
+}
+
+// Motivos por los que A4 detiene al loop autónomo: no los calcula el estado del
+// plan (Next) sino las comprobaciones de antes de cada paso.
+const (
+	stopAuthorization = "authorization" // el plan, la rama o la aprobación ya no son los autorizados
+	stopInputChanged  = "input"         // un archivo que el paso lee cambió desde que se autorizó
+)
+
+// wsRecordHalt deja en el ledger que A4 detuvo al loop antes del paso i, y por
+// qué: sin él, quien audita ve dos corridas y un hueco. No cambia el estado de
+// ningún paso (Fold lo ignora) y, si no se puede escribir, la detención sigue
+// siendo la que se le dice a la persona.
+func (a *app) wsRecordHalt(c *wsCtx, st *workstream.State, i int, reason, why string) {
+	refs := []string{"mode:" + c.mode, "stop:" + reason}
+	what := "A4 detiene el loop: " + why
+	if id := stepAt(st, i); id != "" {
+		refs = append(refs, "at:"+safeRef(id))
+		what = "A4 detiene antes de " + id + ": " + why
+	}
+	_ = a.wsRecord(c, "plan", what, "skip", refs...)
 }
 
 func stopWord(reason string) string {
@@ -775,32 +850,39 @@ func filesInput(files map[string]string) []map[string]string {
 // disco es el autorizado y la rama sigue siendo ws/<W>. Los archivos que el plan
 // lee se comparan al armar cada paso (stepSpec): un paso del propio plan puede
 // cambiar un archivo que el siguiente no lee, y eso no lo detiene.
-func (a *app) wsStillAuthorized(c *wsCtx) error {
+//
+// Si algo cambió, devuelve el motivo en pocas palabras (para el ledger) y el
+// error que se le dice a la persona.
+func (a *app) wsStillAuthorized(c *wsCtx) (why string, err error) {
 	id := c.plan.ID
+	stop := func(format string, args ...any) (string, error) {
+		why := fmt.Sprintf(format, args...)
+		return why, fail(1, "A4: el loop autónomo de %s se detiene: %s", id, why)
+	}
 	if br := gitx.Branch(c.root); !wsBranch(br, id) {
-		return fail(1, "A4: el loop autónomo de %s se detiene: la rama cambió a %s", id, orDash(br))
+		return stop("la rama cambió a %s", orDash(br))
 	}
 	plan, err := workstream.Load(c.root, id)
 	if err != nil || plan.AuthHash(c.cfg.Name, nil) != c.authPlan {
-		return fail(1, "A4: el loop autónomo de %s se detiene: el plan cambió desde que lo autorizaste; revísalo y autorízalo de nuevo", id)
+		return stop("el plan cambió desde que lo autorizaste; revísalo y autorízalo de nuevo")
 	}
 	ac, err := a.approvalCtx()
 	if err != nil {
-		return err
+		return "no se pudo comprobar la autorización", err
 	}
 	sts, _, err := ac.statuses()
 	if err != nil {
-		return err
+		return "no se pudo comprobar la autorización", err
 	}
 	for _, st := range sts {
 		if st.ID == c.authID {
 			if st.Revoked || st.Expired {
-				return fail(1, "A4: el loop autónomo de %s se detiene: la autorización %s se revocó o venció", id, st.ID)
+				return stop("la autorización %s se revocó o venció", st.ID)
 			}
-			return nil
+			return "", nil
 		}
 	}
-	return fail(1, "A4: el loop autónomo de %s se detiene: no encuentro la autorización %s", id, c.authID)
+	return stop("no encuentro la autorización %s", c.authID)
 }
 
 // stepSpec arma la corrida de un paso: su contrato, sus entradas y el tope
@@ -1083,7 +1165,7 @@ func (a *app) wsContinue(args []string) error {
 		}
 		s := st.Steps[i]
 		if s.IsHuman() {
-			return fail(1, "%s lo haces tú: cuando termines, coyote ws continue %s", s.ID, id)
+			return fail(1, "%s lo haces tú: cuando termines, %s", s.ID, c.cmd("continue"))
 		}
 		allowed := []string{workstream.Failed, workstream.Blocked}
 		if *retry {
@@ -1115,7 +1197,7 @@ func (a *app) wsContinue(args []string) error {
 	switch nx.Reason {
 	case workstream.StopFailed:
 		s := st.Steps[nx.Index]
-		return fail(1, "%s falló: repítelo con coyote ws continue %s --retry o pide cambios con --redo \"qué cambiar\"", s.ID, id)
+		return fail(1, "%s falló: repítelo con %s --retry o pide cambios con --redo \"qué cambiar\"", s.ID, c.cmd("continue"))
 	case workstream.StopBudget:
 		return fail(1, "el plan llegó a su tope (%s): sube budget_usd en %s para seguir", spentText(st), c.plan.Rel)
 	case workstream.StopDone:
@@ -1172,7 +1254,7 @@ func (a *app) wsContinue(args []string) error {
 		fmt.Fprintf(a.stdout, "✓ %s hecho (%s)\n", planLine(s.ID), planLine(s.Does))
 	}
 	if len(accepted) == 0 && nx.Reason != workstream.StopHuman && c.mode == "manual" {
-		return fail(1, "no hay nada que revisar en %s: corre el paso siguiente con coyote ws run %s", id, id)
+		return fail(1, "no hay nada que revisar en %s: corre el paso siguiente con %s", id, c.cmd("run"))
 	}
 	if c.mode == "manual" {
 		st, err = a.wsState(c)

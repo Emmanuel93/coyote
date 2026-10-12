@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf16"
 )
 
@@ -411,6 +412,12 @@ var (
 	prdWsIDRe       = regexp.MustCompile(`^W-\d{4}$`)
 	prdMetaIDRe     = regexp.MustCompile(`^M\d+$`)
 	prdEncabezadoRe = regexp.MustCompile(`(?m)^(Estado|Responsable|Fecha): .+$`)
+	// Lo que dice el encabezado: un @usuario y una fecha AAAA-MM-DD de verdad; y un
+	// ID de requisito es RQ- con dos dígitos (RQ-01), como lo piden la plantilla y la guía.
+	prdResponsableRe = regexp.MustCompile(`(?m)^Responsable: (.+)$`)
+	prdFechaRe       = regexp.MustCompile(`(?m)^Fecha: (.+)$`)
+	prdHandleRe      = regexp.MustCompile(`^@[A-Za-z0-9][A-Za-z0-9._-]*$`)
+	prdReqIDRe       = regexp.MustCompile(`^RQ-\d{2}$`)
 )
 
 // prdIncoherencias revisa los PRD (nombre -> texto) y dice, en una línea cada
@@ -441,6 +448,9 @@ func prdIncoherencias(docs map[string]string, existe func(ws string) bool) []str
 				bad("%s: %s aparece dos veces", name, r.id)
 			}
 			reqs[r.id] = r
+			if !prdReqIDRe.MatchString(r.id) {
+				bad("%s: el ID %s no tiene la forma RQ-NN (dos dígitos: RQ-01)", name, r.id)
+			}
 			if prev, ok := byID[r.id]; ok && prev != r {
 				bad("%s: %s dice otra cosa que en %s (un ID es un solo requisito): %+v y %+v", name, r.id, where[r.id], r, prev)
 			}
@@ -475,6 +485,14 @@ func prdIncoherencias(docs map[string]string, existe func(ws string) bool) []str
 		}
 		if n := len(prdEncabezadoRe.FindAllString(text, -1)); n != 3 {
 			bad("%s: el encabezado tiene %d de las 3 líneas Estado, Responsable y Fecha", name, n)
+		}
+		if m := prdResponsableRe.FindStringSubmatch(text); m != nil && !prdHandleRe.MatchString(strings.TrimSpace(m[1])) {
+			bad("%s: Responsable es %q y tiene que ser un @usuario", name, m[1])
+		}
+		if m := prdFechaRe.FindStringSubmatch(text); m != nil {
+			if _, err := time.Parse("2006-01-02", strings.TrimSpace(m[1])); err != nil {
+				bad("%s: la fecha %q no es AAAA-MM-DD", name, m[1])
+			}
 		}
 	}
 	// La tabla Features del producto frente a cada feature.
@@ -543,6 +561,17 @@ func TestLaIncoherenciaDeLosPRDSeDetecta(t *testing.T) {
 		out[file] = strings.Replace(out[file], old, new, 1)
 		return out
 	}
+	cambiarTodo := func(file, old, new string) map[string]string {
+		out := map[string]string{}
+		for k, v := range docs {
+			out[k] = v
+		}
+		if !strings.Contains(out[file], old) {
+			t.Fatalf("%s no contiene %q: la desviación quedó sin efecto", file, old)
+		}
+		out[file] = strings.ReplaceAll(out[file], old, new)
+		return out
+	}
 	casos := []struct {
 		name string
 		docs map[string]string
@@ -560,12 +589,75 @@ func TestLaIncoherenciaDeLosPRDSeDetecta(t *testing.T) {
 		{"un debe sin escenario", cambiar("alta-de-pedidos.md", "Escenario: el total no usa decimales [RQ-05]", "Escenario: el total no usa decimales"), "RQ-05"},
 		{"falta una línea del encabezado", cambiar("alta-de-pedidos.md", "Fecha: 2026-09-28\n", ""), "encabezado"},
 		{"la fila de la tabla Features cambia de workstream", cambiar("producto.md", "| M1, M2 | W-0001 |", "| M1, M2 | W-0002 |"), "workstream"},
+		// Sexta revisión (N14): el encabezado tiene que traer lo que dice, no solo tres líneas.
+		{"una fecha que no es fecha", cambiar("alta-de-pedidos.md", "Fecha: 2026-09-28", "Fecha: mañana"), "fecha"},
+		{"una fecha imposible", cambiar("producto.md", "Fecha: 2026-09-28", "Fecha: 2026-02-30"), "fecha"},
+		{"una fecha con otro formato", cambiar("producto.md", "Fecha: 2026-09-28", "Fecha: 28/09/2026"), "fecha"},
+		{"una fecha sin ceros", cambiar("producto.md", "Fecha: 2026-09-28", "Fecha: 2026-9-28"), "fecha"},
+		{"un responsable que nadie es", cambiar("alta-de-pedidos.md", "Responsable: @ana", "Responsable: nadie"), "Responsable"},
+		{"un responsable sin usuario", cambiar("producto.md", "Responsable: @ana", "Responsable: @"), "Responsable"},
+		{"dos fechas", cambiar("producto.md", "Fecha: 2026-09-28\n", "Fecha: 2026-09-28\nFecha: 2026-09-29\n"), "encabezado"},
+		{"un ID de un dígito en el producto", cambiarTodo("producto.md", "RQ-04", "RQ-4"), "RQ-4"},
+		{"un ID de un dígito en toda la feature", cambiarTodo("alta-de-pedidos.md", "RQ-05", "RQ-5"), "RQ-5"},
+		{"un ID de tres dígitos", cambiarTodo("alta-de-pedidos.md", "RQ-05", "RQ-005"), "RQ-005"},
+		{"un escenario que cita un ID mal escrito", cambiar("alta-de-pedidos.md", "Escenario: el total no usa decimales [RQ-05]", "Escenario: el total no usa decimales [RQ-5]"), "RQ-5"},
 	}
 	for _, c := range casos {
 		got := strings.Join(prdIncoherencias(c.docs, workstreamDeEjemplo), "\n")
 		if got == "" || !strings.Contains(got, c.want) {
 			t.Errorf("%s: la revisión debía decir %q y dijo:\n%s", c.name, c.want, got)
 		}
+	}
+}
+
+// copyTree copia una carpeta (sin .git): la prueba trabaja sobre la copia y no
+// sobre el ejemplo.
+func copyTree(t *testing.T, src, dst string) {
+	t.Helper()
+	err := filepath.WalkDir(src, func(p string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, _ := filepath.Rel(src, p)
+		if d.IsDir() {
+			if d.Name() == ".git" {
+				return filepath.SkipDir
+			}
+			return os.MkdirAll(filepath.Join(dst, rel), 0o755)
+		}
+		data, err := os.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(filepath.Join(dst, rel), data, 0o644)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestElWorkstreamDeEjemploCarga: sexta revisión de v1.0 (N14). El plan de
+// ejemplo está en el formato de 1.0 (budget_usd, input, max_usd), cumple el
+// contrato de cada paso y parte del PRD de su feature, el que cita ese PRD:
+// quien copia el ejemplo no empieza con un "plan inválido".
+func TestElWorkstreamDeEjemploCarga(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "acme-shop")
+	copyTree(t, "../../examples/acme-shop", root)
+	r := run(t, root, "", "ws", "check", "W-0001")
+	must(t, r, 0, "ws check del ejemplo")
+	if strings.Contains(r.stdout, "✗") || strings.Contains(r.stdout, "ningún paso recibe el PRD") || !strings.Contains(r.stdout, "PRD: coyote/prd/alta-de-pedidos.md") {
+		t.Errorf("el plan de ejemplo parte del PRD de su feature y cada paso cumple su contrato:\n%s", r.stdout)
+	}
+	r = run(t, root, "", "ws", "status")
+	must(t, r, 0, "ws status del ejemplo")
+	// El ledger del ejemplo cuenta un workstream que se corrió y se cerró.
+	if strings.Contains(r.stdout, "plan inválido") || !strings.Contains(r.stdout, "W-0001") || !strings.Contains(r.stdout, "cerrado") {
+		t.Errorf("la lista de workstreams del ejemplo:\n%s", r.stdout)
+	}
+	// El PRD que el plan declara es el que cita ese workstream.
+	prd := readFile(t, filepath.Join(root, "coyote", "prd", "alta-de-pedidos.md"))
+	if !strings.Contains(prd, "Workstreams: W-0001") {
+		t.Errorf("el PRD de la feature cita el workstream del ejemplo:\n%s", prd)
 	}
 }
 

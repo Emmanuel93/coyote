@@ -119,6 +119,13 @@ type Plan struct {
 	Steps        []Step            `yaml:"steps"`
 	Close        map[string]string `yaml:"close"`
 
+	// Declared es el id que escribe plan.yaml. Load deja en ID el de la carpeta:
+	// el workstream es el de su carpeta para todo, y un id distinto adentro (un
+	// error típico al copiar una carpeta) es un error del plan que Check dice,
+	// no un cambio de workstream.
+	Declared string `yaml:"-"`
+	loaded   bool
+
 	Dir string `yaml:"-"` // carpeta del workstream, relativa a la raíz
 	Rel string `yaml:"-"` // plan.yaml, relativo a la raíz
 	Raw []byte `yaml:"-"`
@@ -162,6 +169,7 @@ func Load(root, id string) (*Plan, error) {
 		return nil, fmt.Errorf("%s: %w", rel, err)
 	}
 	p.Dir, p.Rel = dir, rel
+	p.Declared, p.ID, p.loaded = p.ID, id, true
 	return p, nil
 }
 
@@ -206,10 +214,12 @@ func All(root string) ([]string, error) {
 // Mode es el modo con el que corre el plan: el del plan, sin pasar el del
 // proyecto, que es el techo. capped informa si el proyecto lo bajó.
 func Mode(plan, project string) (mode string, capped bool) {
-	if plan == "" {
+	// Un modo que no existe es un error que Check dice; mientras tanto el plan
+	// se trata como manual, y su texto no llega a ninguna salida.
+	if plan == "" || Rank(plan) < 0 {
 		plan = "manual"
 	}
-	if project == "" {
+	if project == "" || Rank(project) < 0 {
 		project = "manual"
 	}
 	if Rank(plan) > Rank(project) {
@@ -379,6 +389,13 @@ func CleanPath(p string) (string, error) {
 	if !visible(p) {
 		return "", errors.New("la ruta lleva saltos de línea, controles o marcas que no se ven")
 	}
+	// Un espacio al borde de un nombre ("./ step:S1") se come el prefijo en lo que
+	// se muestra: la entrada se lee como un paso y es un archivo.
+	for _, seg := range strings.Split(p, "/") {
+		if strings.TrimFunc(seg, unicode.IsSpace) != seg {
+			return "", errors.New("un nombre de la ruta no empieza ni termina con espacios")
+		}
+	}
 	c := path.Clean(p)
 	if c == "." || c == ".." || strings.HasPrefix(c, "../") {
 		return "", errors.New("la ruta sale del proyecto")
@@ -474,13 +491,17 @@ func (p *Plan) Check(o CheckOptions) []Finding {
 		out = append(out, Finding{Level: level, Step: step, Msg: fmt.Sprintf(format, a...)})
 	}
 	dirID := path.Base(p.Dir)
+	declared := p.ID
+	if p.loaded {
+		declared = p.Declared
+	}
 	switch {
-	case p.ID == "":
+	case declared == "":
 		add("error", "", "falta id")
-	case !IDRe.MatchString(p.ID):
-		add("error", "", "id %q inválido: usa W-0001", p.ID)
-	case p.Dir != "" && dirID != p.ID && !strings.HasPrefix(dirID, p.ID+"-"):
-		add("error", "", "el id %s no coincide con la carpeta %s", p.ID, dirID)
+	case !IDRe.MatchString(declared):
+		add("error", "", "id %q inválido: usa W-0001", declared)
+	case p.Dir != "" && dirID != declared && !strings.HasPrefix(dirID, declared+"-"):
+		add("error", "", "el id %s no coincide con la carpeta %s", declared, dirID)
 	}
 	if p.Autonomy != "" && Rank(p.Autonomy) < 0 {
 		add("error", "", "autonomy %q inválido: %s", p.Autonomy, strings.Join(Modes, ", "))
@@ -497,6 +518,7 @@ func (p *Plan) Check(o CheckOptions) []Finding {
 	if mode, capped := Mode(p.Autonomy, o.Project); capped {
 		add("aviso", "", "el proyecto permite hasta %s: el plan corre como %s", orManual(o.Project), mode)
 	}
+	runMode := p.runMode(o)
 	if len(p.Steps) == 0 {
 		add("error", "", "el plan no tiene pasos")
 	}
@@ -579,7 +601,13 @@ func (p *Plan) Check(o CheckOptions) []Finding {
 			case "file":
 				switch o.state(in.Value) {
 				case InputMissing:
-					add("aviso", id, "la entrada %s no existe todavía", in.Value)
+					if runMode == "autonomous" {
+						// La persona autoriza los archivos que existen al autorizar (A4):
+						// uno que falta detiene al loop antes de este paso.
+						add("aviso", id, "la entrada %s no existe todavía: en autonomous el loop se detiene antes de este paso (A4); créala antes de autorizar el plan", in.Value)
+					} else {
+						add("aviso", id, "la entrada %s no existe todavía", in.Value)
+					}
 				case InputUnusable:
 					add("error", id, "la entrada %s no es un archivo regular dentro del proyecto (un enlace, una carpeta o un archivo de más de 8 MB): el paso no la puede leer", in.Value)
 				case InputBinary:
@@ -593,6 +621,17 @@ func (p *Plan) Check(o CheckOptions) []Finding {
 	}
 	p.checkPRD(o, add)
 	return out
+}
+
+// runMode es el modo con el que corre el plan en esta revisión: el que pide
+// quien la llama (ws run --mode lo baja) o, si no, el del plan con el techo del
+// proyecto.
+func (p *Plan) runMode(o CheckOptions) string {
+	if o.Mode != "" {
+		return o.Mode
+	}
+	mode, _ := Mode(p.Autonomy, o.Project)
+	return mode
 }
 
 // PRDInput lee el prd: del plan: un archivo .md del proyecto o la entrega de un
@@ -641,11 +680,7 @@ func (p *Plan) checkPRD(o CheckOptions, add func(level, step, format string, a .
 		// En autonomous solo se detiene el paso que pide la revisión: sin ella,
 		// el paso siguiente usaría un PRD que ninguna persona leyó (R20). Se mira
 		// el modo con el que corre: supervised se detiene tras cada paso.
-		mode := o.Mode
-		if mode == "" {
-			mode, _ = Mode(p.Autonomy, o.Project)
-		}
-		if mode == "autonomous" && p.Steps[j].Gate != "human" {
+		if p.runMode(o) == "autonomous" && p.Steps[j].Gate != "human" {
 			add("error", "", "prd step:%s: en autonomous el PRD pasa por una persona (R20): agrega gate: human al paso %s, o corre con --mode supervised, que se detiene tras cada paso", in.Value, in.Value)
 		}
 	case "file":

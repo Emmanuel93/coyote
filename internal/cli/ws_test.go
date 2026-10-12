@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 // fakeClaudeWS instala un claude simulado para el motor: cada corrida deja
@@ -539,5 +540,375 @@ func TestWsElIDEsElDeLaCarpeta(t *testing.T) {
 		if !strings.Contains(r.stdout, "W-0004") || strings.Contains(r.stdout, "W-0099") || !strings.Contains(r.stdout, "$0.04") {
 			t.Errorf("%s atribuye lo de la carpeta W-0004 y no usa el id de adentro:\n%s", strings.Join(args, " "), r.stdout)
 		}
+	}
+}
+
+// TestRunYWebUsanElIDDeLaCarpeta: sexta revisión de v1.0 (N9). El workstream es
+// el de su carpeta para todo: una corrida suelta con --ws, close y la web no
+// cambian de workstream porque plan.yaml diga otro id (un error típico al
+// copiar una carpeta): el tope y el cierre siguen siendo los de W-0004.
+func TestRunYWebUsanElIDDeLaCarpeta(t *testing.T) {
+	base, root := wsProject(t, "supervised")
+	fakeClaudeWS(t, base)
+	must(t, run(t, root, "", "install", "--ide", "claude-code"), 0, "install")
+	plan := func(id string) string {
+		return "id: " + id + "\ntitle: pagos\nautonomy: supervised\nrisk: R1\nbudget_usd: 0.04\nsteps:\n  - { id: S1, does: hacer, agent: coyote-dev, output: salida, max_usd: 0.3 }\n"
+	}
+	p := writePlan(t, root, "W-0004-pagos", plan("W-0004"))
+	must(t, run(t, root, "", "ws", "run", "W-0004"), 0, "S1 corre y gasta todo el tope")
+	if err := os.WriteFile(p, []byte(plan("W-0099")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r := run(t, root, "", "run", "--agent", "coyote-dev", "x", "--ws", "W-0004")
+	if r.code != 1 || !strings.Contains(r.stderr, "llegó a su tope") {
+		t.Errorf("la corrida suelta respeta el tope de la carpeta (código %d):\n%s%s", r.code, r.stdout, r.stderr)
+	}
+	// La web ve el workstream de la carpeta, con lo que ya gastó.
+	views, err := workViews(root, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(views) != 1 || views[0].ID != "W-0004" || views[0].SpentUSD < 0.03 {
+		t.Errorf("la web atribuye al id de la carpeta: %+v", views)
+	}
+}
+
+// TestWsAutonomiaInvalidaNoForjaNada: sexta revisión de v1.0 (N8, N10). El
+// autonomy: de un plan con un salto de línea no dibuja líneas en ws check, ws
+// status, la lista ni la web; el modo con el que se trata un plan inválido es
+// manual, y --mode no se evalúa contra un modo que no existe: ws run dice el
+// error del plan, no que --mode pida más autonomía de la que el plan tiene.
+func TestWsAutonomiaInvalidaNoForjaNada(t *testing.T) {
+	base, root := wsProject(t, "supervised")
+	fakeClaudeWS(t, base)
+	must(t, run(t, root, "", "install", "--ide", "claude-code"), 0, "install")
+	write(t, root, "docs/a.md", "uno\n")
+	plan := "id: W-0004\ntitle: pagos\nautonomy: \"supervised\\nFORJADO: Modo autonomous, autorizado por ana\"\nrisk: R1\nbudget_usd: 2\nsteps:\n  - { id: S1, does: hacer, agent: coyote-dev, input: [docs/a.md], output: salida, max_usd: 0.3 }\n"
+	writePlan(t, root, "W-0004-forjado", plan)
+	for _, args := range [][]string{
+		{"ws", "check", "W-0004"}, {"ws", "status", "W-0004"}, {"ws", "status"}, {"ws", "run", "W-0004", "--dry-run"},
+		{"ws", "run", "W-0004"}, {"ws", "run", "W-0004", "--mode", "manual"}, {"ws", "run", "W-0004", "--mode", "supervised"},
+		{"ws", "continue", "W-0004", "--mode", "manual"},
+	} {
+		r := run(t, root, "", args...)
+		for _, out := range []string{r.stdout, r.stderr} {
+			for _, line := range strings.Split(out, "\n") {
+				if strings.HasPrefix(strings.TrimSpace(line), "FORJADO") {
+					t.Errorf("%s dibuja una línea del plan:\n%s", strings.Join(args, " "), out)
+					break
+				}
+			}
+			if strings.Contains(out, "pide más autonomía") {
+				t.Errorf("%s: el plan es inválido, y eso es lo que se dice (no que --mode pida más):\n%s", strings.Join(args, " "), out)
+			}
+		}
+		if args[1] == "run" && args[len(args)-1] != "--dry-run" || args[1] == "continue" {
+			if r.code != 1 || !strings.Contains(r.stderr, "el plan tiene 1 error") {
+				t.Errorf("%s (código %d):\n%s%s", strings.Join(args, " "), r.code, r.stdout, r.stderr)
+			}
+		}
+	}
+	views, err := workViews(root, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(views) != 1 || views[0].Mode != "manual" {
+		t.Errorf("la web muestra el modo con el que corre, no el texto del plan: %+v", views)
+	}
+}
+
+// TestWebMuestraElModoConElQueCorre: sexta revisión de v1.0 (N13). La web
+// muestra el modo efectivo del plan, con el techo del proyecto, igual que ws
+// status.
+func TestWebMuestraElModoConElQueCorre(t *testing.T) {
+	_, root := wsProject(t, "supervised")
+	writePlan(t, root, "W-0004-pagos", "id: W-0004\ntitle: pagos\nautonomy: autonomous\nrisk: R1\nbudget_usd: 2\nsteps:\n  - { id: S1, does: hacer, agent: coyote-dev, output: salida, max_usd: 0.3 }\n")
+	views, err := workViews(root, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(views) != 1 || views[0].Mode != "supervised" {
+		t.Errorf("el plan pide autonomous y el proyecto permite supervised: %+v", views)
+	}
+	st := run(t, root, "", "ws", "status", "W-0004")
+	if !strings.Contains(st.stdout, "supervised") {
+		t.Errorf("ws status dice el mismo modo:\n%s", st.stdout)
+	}
+}
+
+// sinBandera devuelve las veces que out sugiere cmd sin lo que debe seguirle
+// (el --mode con el que se está corriendo): cada una es una orden que, copiada
+// tal cual, corre con otro modo del que la persona eligió.
+func sinBandera(out, cmd, flag string) []string {
+	var bad []string
+	for i := 0; ; {
+		j := strings.Index(out[i:], cmd)
+		if j < 0 {
+			return bad
+		}
+		i += j + len(cmd)
+		if !strings.HasPrefix(out[i:], flag) {
+			end := i + 40
+			if end > len(out) {
+				end = len(out)
+			}
+			bad = append(bad, out[i-len(cmd):end])
+		}
+	}
+}
+
+// TestWsLasPistasLlevanElModoConElQueSeCorre: sexta revisión de v1.0 (N13). Un
+// plan autonomous cuyo PRD lo escribe el primer paso, sin gate: human, no corre
+// en autonomous (R20), pero sí con --mode supervised. Las órdenes que coyote
+// sugiere llevan ese --mode (copiarlas sin él las rechazaría el plan, o correría
+// con más autonomía de la que la persona eligió), y el plan no "corrió en
+// autónomo" porque su modo declarado lo sea: lo que corrió fue supervised.
+func TestWsLasPistasLlevanElModoConElQueSeCorre(t *testing.T) {
+	base, root := wsProject(t, "autonomous")
+	fake, say := fakeClaudeWS(t, base)
+	must(t, run(t, root, "", "install", "--ide", "claude-code"), 0, "install")
+	writePlan(t, root, "W-0004-producto", `id: W-0004
+title: producto
+autonomy: autonomous
+risk: R2
+prd: step:P1
+budget_usd: 2
+steps:
+  - { id: P1, does: escribir el PRD, agent: coyote-pm, output: PRD, max_usd: 0.3 }
+  - { id: D1, does: implementar, agent: coyote-dev, input: [step:P1], output: parche, max_usd: 0.3 }
+`)
+	flag := " --mode supervised"
+	r := run(t, root, "", "ws", "check", "W-0004")
+	must(t, r, 1, "check")
+	if !strings.Contains(r.stdout, "en autonomous el PRD pasa por una persona") {
+		t.Fatalf("el plan autonomous sin gate: human en el PRD es un error:\n%s", r.stdout)
+	}
+	// Antes de correr: status no sugiere una orden que el plan rechaza.
+	r = run(t, root, "", "ws", "status", "W-0004")
+	must(t, r, 0, "status antes de correr")
+	if bad := sinBandera(r.stdout, "coyote ws run W-0004", flag); len(bad) > 0 || !strings.Contains(r.stdout, "coyote ws run W-0004"+flag) {
+		t.Errorf("status sugiere correr con el modo con el que el plan no tiene errores (%q):\n%s", bad, r.stdout)
+	}
+	if !strings.Contains(r.stdout, "El plan tiene 1 error: coyote ws check W-0004. Con --mode supervised no los tiene.") {
+		t.Errorf("status dice con qué modo no tiene errores:\n%s", r.stdout)
+	}
+	r = run(t, root, "", "ws", "status", "W-0004", "--json")
+	must(t, r, 0, "status --json antes de correr")
+	if !strings.Contains(r.stdout, `"mode": "supervised"`) || !strings.Contains(r.stdout, `"run": true`) {
+		t.Errorf("--json dice con qué modo se calcula lo que sigue:\n%s", r.stdout)
+	}
+	must(t, run(t, root, "", "ws", "run", "W-0004"), 1, "autonomous no corre")
+	if calls(t, fake) != 0 {
+		t.Fatal("el plan con errores no corre")
+	}
+
+	r = run(t, root, "", "ws", "run", "W-0004", "--mode", "supervised")
+	must(t, r, 0, "run supervised")
+	if !strings.Contains(r.stdout, "P1 espera tu revisión") {
+		t.Fatalf("parada:\n%s", r.stdout)
+	}
+	for _, cmd := range []string{"coyote ws continue W-0004", "coyote ws run W-0004"} {
+		if bad := sinBandera(r.stdout, cmd, flag); len(bad) > 0 {
+			t.Errorf("la parada sugiere una orden sin el modo con el que se corre: %q\n%s", bad, r.stdout)
+		}
+	}
+	// El estado no dice que corrió en autónomo: todo corrió en supervised.
+	r = run(t, root, "", "ws", "status", "W-0004")
+	must(t, r, 0, "status")
+	if strings.Contains(r.stdout, "corrió en autónomo") || !strings.Contains(r.stdout, "P1 espera tu revisión") {
+		t.Errorf("P1 corrió en supervised y espera la revisión:\n%s", r.stdout)
+	}
+	if bad := sinBandera(r.stdout, "coyote ws continue W-0004", flag); len(bad) > 0 {
+		t.Errorf("status sugiere continuar sin el modo: %q\n%s", bad, r.stdout)
+	}
+	r = run(t, root, "", "ws", "status")
+	must(t, r, 0, "lista")
+	if strings.Contains(r.stdout, "evaluar lo que corrió en autónomo") || !strings.Contains(r.stdout, "P1 · por revisar") {
+		t.Errorf("la lista no evalúa lo que no corrió en autónomo:\n%s", r.stdout)
+	}
+	r = run(t, root, "", "ws", "status", "W-0004", "--json")
+	must(t, r, 0, "status --json")
+	if !strings.Contains(r.stdout, `"reason": "review"`) || !strings.Contains(r.stdout, "coyote ws continue W-0004"+flag) {
+		t.Errorf("--json:\n%s", r.stdout)
+	}
+
+	say("## Propuesta\n\nparche")
+	r = run(t, root, "", "ws", "continue", "W-0004", "--mode", "supervised")
+	must(t, r, 0, "continue supervised")
+	if !strings.Contains(r.stdout, "✓ P1 aceptado") || !strings.Contains(r.stdout, "D1 espera tu revisión") || calls(t, fake) != 2 {
+		t.Fatalf("continue:\n%s", r.stdout)
+	}
+	if bad := sinBandera(r.stdout, "coyote ws continue W-0004", flag); len(bad) > 0 {
+		t.Errorf("la parada de continue sugiere una orden sin el modo: %q\n%s", bad, r.stdout)
+	}
+	r = run(t, root, "", "ws", "status", "W-0004")
+	must(t, r, 0, "status tras continue")
+	if strings.Contains(r.stdout, "corrió en autónomo") || !strings.Contains(r.stdout, "D1 espera tu revisión") {
+		t.Errorf("D1 corrió en supervised:\n%s", r.stdout)
+	}
+	r = run(t, root, "", "ws", "status")
+	if strings.Contains(r.stdout, "evaluar lo que corrió en autónomo") || !strings.Contains(r.stdout, "D1 · por revisar") {
+		t.Errorf("la lista tras continue:\n%s", r.stdout)
+	}
+}
+
+// TestWsLaPistaConservaElModoManual: bajar un plan válido a manual y copiar la
+// orden que sugiere coyote no lo sube de nuevo a autonomous; y si el modo con
+// el que se corre es el del plan, las pistas no llevan --mode.
+func TestWsLaPistaConservaElModoManual(t *testing.T) {
+	base, root := wsProject(t, "autonomous")
+	fakeClaudeWS(t, base)
+	must(t, run(t, root, "", "install", "--ide", "claude-code"), 0, "install")
+	plan := func(id, mode string) string {
+		return "id: " + id + "\ntitle: pagos\nautonomy: " + mode + "\nrisk: R1\nbudget_usd: 2\nsteps:\n" +
+			"  - { id: A1, does: analizar, agent: coyote-analyst, output: análisis, max_usd: 0.3 }\n" +
+			"  - { id: A2, does: resumir, agent: coyote-scribe, input: [step:A1], output: resumen, max_usd: 0.3 }\n"
+	}
+	writePlan(t, root, "W-0005-pagos", plan("W-0005", "autonomous"))
+	r := run(t, root, "", "ws", "run", "W-0005", "--mode", "manual")
+	must(t, r, 0, "run manual")
+	if bad := sinBandera(r.stdout, "coyote ws continue W-0005", " --mode manual"); len(bad) > 0 || !strings.Contains(r.stdout, "A1 espera tu revisión") {
+		t.Errorf("la parada de manual conserva el modo (%q):\n%s", bad, r.stdout)
+	}
+	r = run(t, root, "", "ws", "continue", "W-0005", "--mode", "manual")
+	must(t, r, 0, "continue manual")
+	if bad := sinBandera(r.stdout, "coyote ws run W-0005", " --mode manual"); len(bad) > 0 || !strings.Contains(r.stdout, "coyote ws run W-0005 --mode manual") {
+		t.Errorf("el paso siguiente se corre con el mismo modo (%q):\n%s", bad, r.stdout)
+	}
+	// Con el modo del plan no hace falta la bandera, aunque se pase igual.
+	writePlan(t, root, "W-0006-otro", plan("W-0006", "supervised"))
+	r = run(t, root, "", "ws", "run", "W-0006", "--mode", "supervised")
+	must(t, r, 0, "run supervised")
+	if strings.Contains(r.stdout, "--mode") || !strings.Contains(r.stdout, "coyote ws continue W-0006") {
+		t.Errorf("sin bajar el modo, las pistas no llevan --mode:\n%s", r.stdout)
+	}
+}
+
+// TestWsStatusConErroresNoSugiereLoQueSeRechaza: con errores en todos los
+// modos, ws status no dice "corre con coyote ws run" (se negaría): dice que se
+// corrige el plan.
+func TestWsStatusConErroresNoSugiereLoQueSeRechaza(t *testing.T) {
+	base, root := wsProject(t, "supervised")
+	fakeClaudeWS(t, base)
+	must(t, run(t, root, "", "install", "--ide", "claude-code"), 0, "install")
+	writePlan(t, root, "W-0005-pagos", "id: W-0005\ntitle: pagos\nautonomy: supervised\nrisk: R1\nbudget_usd: 2\nsteps:\n  - { id: A1, does: analizar, agent: coyote-noexiste, output: análisis, max_usd: 0.3 }\n")
+	r := run(t, root, "", "ws", "status", "W-0005")
+	must(t, r, 0, "status")
+	if strings.Contains(r.stdout, "corre con coyote ws run") || !strings.Contains(r.stdout, "Sigue: corrige el plan") {
+		t.Errorf("un plan con errores no se sugiere correr:\n%s", r.stdout)
+	}
+	r = run(t, root, "", "ws", "status", "W-0005", "--json")
+	if strings.Contains(r.stdout, "corre con coyote ws run") {
+		t.Errorf("--json:\n%s", r.stdout)
+	}
+}
+
+// TestWsLosMensajesDeContinueLlevanElModo: lo que ws continue dice cuando se
+// niega a algo también conserva el modo con el que se está corriendo.
+func TestWsLosMensajesDeContinueLlevanElModo(t *testing.T) {
+	base, root := wsProject(t, "autonomous")
+	fakeClaudeWS(t, base)
+	must(t, run(t, root, "", "install", "--ide", "claude-code"), 0, "install")
+	writePlan(t, root, "W-0005-pagos", `id: W-0005
+title: pagos
+autonomy: autonomous
+risk: R1
+budget_usd: 2
+steps:
+  - { id: A1, does: resumir, agent: coyote-scribe, output: resumen, sections: [Resumen], max_usd: 0.3 }
+  - { id: A2, does: probar en staging, agent: persona }
+`)
+	flag := " --mode manual"
+	r := run(t, root, "", "ws", "continue", "W-0005", "--mode", "manual")
+	must(t, r, 1, "nada que revisar")
+	if !strings.Contains(r.stderr, "corre el paso siguiente con coyote ws run W-0005"+flag) {
+		t.Errorf("nada que revisar:\n%s", r.stderr)
+	}
+	// A1 no trae su sección: falla.
+	r = run(t, root, "", "ws", "run", "W-0005", "--mode", "manual")
+	if !strings.Contains(r.stdout, "A1 falló") || len(sinBandera(r.stdout, "coyote ws continue W-0005", flag)) > 0 {
+		t.Errorf("A1 falla:\n%s%s", r.stdout, r.stderr)
+	}
+	r = run(t, root, "", "ws", "continue", "W-0005", "--mode", "manual")
+	must(t, r, 1, "continue de un paso que falló")
+	if !strings.Contains(r.stderr, "repítelo con coyote ws continue W-0005"+flag+" --retry") {
+		t.Errorf("paso que falló:\n%s", r.stderr)
+	}
+	r = run(t, root, "", "ws", "continue", "W-0005", "--retry", "--step", "A2", "--mode", "manual")
+	must(t, r, 1, "paso de la persona")
+	if !strings.Contains(r.stderr, "A2 lo haces tú: cuando termines, coyote ws continue W-0005"+flag) {
+		t.Errorf("paso de la persona:\n%s", r.stderr)
+	}
+}
+
+// ledgerEvents devuelve las líneas del ledger de un tipo (el campo 5 de CCF).
+func ledgerEvents(t *testing.T, root, typ string) []string {
+	t.Helper()
+	var out []string
+	for _, l := range strings.Split(ledgerText(t, root), "\n") {
+		if f := strings.Split(l, "|"); len(f) > 4 && f[4] == typ {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
+// TestWsLaDetencionA4QuedaEnElLedger: sexta revisión de v1.0 (N15). Cuando el
+// loop autónomo se detiene por A4 (el plan o la rama cambiaron, una entrada
+// cambió desde que la persona la autorizó), queda un evento en el ledger con
+// dónde y por qué: quien audita ve una detención, no un hueco entre dos
+// corridas (A3).
+func TestWsLaDetencionA4QuedaEnElLedger(t *testing.T) {
+	plan := func(id string) string {
+		return "id: " + id + "\ntitle: loop\nautonomy: autonomous\nrisk: R2\nbudget_usd: 2\nsteps:\n" +
+			"  - { id: D1, does: analizar, agent: coyote-analyst, input: [docs/a.md], output: análisis, max_usd: 0.3 }\n" +
+			"  - { id: D2, does: resumir, agent: coyote-scribe, input: [step:D1], output: resumen, max_usd: 0.3 }\n" +
+			"  - { id: D3, does: revisar, agent: coyote-reviewer, input: [docs/a.md], output: informe, max_usd: 0.3 }\n"
+	}
+	for _, c := range []struct {
+		name, id, mutate, stderr, stop, at string
+	}{
+		{"el plan cambia", "W-0014", `printf '# editado\n' >> "$PLAN"`, "el plan cambió desde que lo autorizaste", "authorization", "D2"},
+		{"la rama cambia", "W-0015", `git -C "$ROOT" symbolic-ref HEAD refs/heads/otra`, "la rama cambió a otra", "authorization", "D2"},
+		{"una entrada cambia", "W-0016", `printf 'otro contenido\n' > "$ROOT/docs/a.md"`, "docs/a.md cambió desde que lo autorizaste", "input", "D3"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			base, root := wsProject(t, "autonomous")
+			fake, _ := fakeClaudeWS(t, base)
+			must(t, run(t, root, "", "install", "--ide", "claude-code"), 0, "install")
+			write(t, root, "docs/a.md", "uno\n")
+			planPath := writePlan(t, root, c.id+"-loop", plan(c.id))
+			git(t, root, "symbolic-ref", "HEAD", "refs/heads/ws/"+c.id)
+			r := run(t, root, "", "ws", "run", c.id)
+			must(t, r, 1, "sin autorización")
+			must(t, run(t, root, "", "approve", propRe.FindString(r.stderr), "--uses", "5"), 0, "approve")
+			// El paso 1 corre; mientras tanto algo cambia lo que la persona autorizó. La
+			// entrada que cambia la lee D3, no D1 ni D2: el motor llega hasta D2.
+			script := "PLAN='" + planPath + "'; ROOT='" + root + "'\nif [ \"$1\" = 1 ] || { [ \"$1\" = 2 ] && [ '" + c.stop + "' = input ]; }; then " + c.mutate + "; fi\nexit 0\n"
+			if err := os.WriteFile(filepath.Join(fake, "mutate"), []byte(script), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			r = run(t, root, "", "ws", "run", c.id)
+			must(t, r, 1, "A4")
+			if !strings.Contains(r.stderr, c.stderr) {
+				t.Fatalf("la detención dice por qué (%q):\n%s", c.stderr, r.stderr)
+			}
+			events := ledgerEvents(t, root, "plan")
+			var halt string
+			for _, l := range events {
+				if strings.Contains(l, "stop:"+c.stop) {
+					halt = l
+				}
+			}
+			if want := "A4 detiene antes de " + c.at + ": " + c.stderr; !strings.Contains(halt, want) {
+				t.Errorf("el evento dice el paso y el motivo (%q):\n%s", want, halt)
+			}
+			if halt == "" || !strings.Contains(halt, "at:"+c.at) || !strings.Contains(halt, "mode:autonomous") || !strings.HasSuffix(halt, "|skip") {
+				t.Errorf("el ledger registra la detención A4 (stop:%s, at:%s):\n%s", c.stop, c.at, ledgerText(t, root))
+			}
+			if strings.Contains(ledgerText(t, root), "sin entrada") {
+				t.Error("detenerse por A4 no es un paso sin entrada")
+			}
+		})
 	}
 }
