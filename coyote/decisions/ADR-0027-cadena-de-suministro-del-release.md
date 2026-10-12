@@ -35,7 +35,7 @@ Referencias vigentes al 2026-09-29:
   - `buildDefinition`: el tipo de build documentado, la etiqueta, el commit y el comando;
   - `runDetails`: el builder, que es la máquina de la persona. Sin horas de inicio ni de fin: así la procedencia también es reproducible.
 
-  Antes de escribirla, `distmeta` revisa con el buildinfo que cada binario sea de su plataforma, salga del commit, no tenga cambios sin commit y no use opciones que `make dist` no usa (`-gcflags`, `-tags`, `GOEXPERIMENT`…). El SBOM y la procedencia llevan todas las opciones del build que registra Go; las que son de una arquitectura van por plataforma. Con `-trimpath` Go no registra las `-ldflags`: lo que prueba que no cambiaron es `make verify-dist`.
+  Antes de escribirla, `distmeta` revisa con el buildinfo que cada binario sea de su plataforma, salga del commit, no tenga cambios sin commit y solo traiga en su buildinfo lo que `make dist` fija: otra clave (`-gcflags`, `-tags`, `GOEXPERIMENT`…) o otro valor (`GOAMD64=v3`, `GOFIPS140=latest`, `-buildmode=pie`) se rechaza. El SBOM y la procedencia llevan todas las opciones del build que registra Go; las que son de una arquitectura van por plataforma. Con `-trimpath` Go no registra las `-ldflags`: lo que prueba que no cambiaron es `make verify-dist`.
 
   No va firmada, así que cumple Build L1.
 - **Verificación.** `docs/` explica cómo verificar un release:
