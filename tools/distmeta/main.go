@@ -98,14 +98,23 @@ func run(args []string, stdout io.Writer) error {
 	return nil
 }
 
-// notInMakeDist son las opciones del build que cambian el código y que
-// make dist nunca usa: un binario que las trae es de otro build.
-var notInMakeDist = []string{"-gcflags", "-asmflags", "-tags", "-race", "-msan", "-asan", "-cover", "-covermode", "-coverpkg", "-pgo"}
+// makeDistBuild son las únicas claves que el buildinfo de un binario de make
+// dist puede traer y, cuando make dist fija el valor, cuál es (vacío: el que
+// salga del commit o de la plataforma). Es una lista de lo permitido y no de
+// lo prohibido: GOAMD64=v3, GOFIPS140, GOEXPERIMENT, -buildmode=pie, -gcflags,
+// -tags, -pgo y cuanto Go agregue después cambian el código, y un binario que
+// los trae es de otro build.
+var makeDistBuild = map[string]string{
+	"-buildmode": "exe", "-compiler": "gc", "-trimpath": "true", "CGO_ENABLED": "0",
+	"GOOS": "", "GOARCH": "", "GOAMD64": "v1", "GOARM64": "v8.0",
+	"DefaultGODEBUG": "", // lo fijan go.mod y las directivas //go:debug del código
+	"vcs":            "", "vcs.revision": "", "vcs.time": "", "vcs.modified": "false",
+}
 
 // checkBinary revisa con el buildinfo que un binario sea de esa plataforma,
 // salga del commit con el árbol limpio y se haya compilado con las opciones
-// de make dist: -trimpath, CGO_ENABLED=0 y nada que cambie el código
-// (-gcflags, -tags, GOEXPERIMENT…). Devuelve sus opciones.
+// de make dist: -trimpath, CGO_ENABLED=0 y nada más que lo de makeDistBuild,
+// con los valores que make dist fija. Devuelve sus opciones.
 //
 // Es una verificación de lo que el buildinfo registra, no de cualquier
 // binario. Con -trimpath Go no registra las -ldflags (golang/go#52372), así
@@ -131,12 +140,14 @@ func checkBinary(bin, goos, goarch, commit string) (map[string]string, error) {
 		return nil, fmt.Errorf("%s se compiló con cambios sin commit", bin)
 	case got["-trimpath"] != "true" || got["CGO_ENABLED"] != "0":
 		return nil, fmt.Errorf("%s no se compiló con -trimpath y CGO_ENABLED=0", bin)
-	case got["GOEXPERIMENT"] != "":
-		return nil, fmt.Errorf("%s se compiló con GOEXPERIMENT=%s", bin, got["GOEXPERIMENT"])
 	}
-	for _, k := range notInMakeDist {
-		if _, ok := got[k]; ok {
-			return nil, fmt.Errorf("%s se compiló con %s, que make dist no usa", bin, k)
+	for _, k := range sortedKeys(got) {
+		want, ok := makeDistBuild[k]
+		switch {
+		case !ok:
+			return nil, fmt.Errorf("%s se compiló con %s=%s, que make dist no usa", bin, k, got[k])
+		case want != "" && got[k] != want:
+			return nil, fmt.Errorf("%s se compiló con %s=%s y make dist usa %s", bin, k, got[k], want)
 		}
 	}
 	return got, nil

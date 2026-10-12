@@ -101,3 +101,83 @@ func distMeta(t *testing.T, dest, name string) string {
 	}
 	return strings.TrimSpace(string(b))
 }
+
+// TestPreviaDeMakeDistSinElEntornoDeGit: quinta pasada de v1.0. Las
+// comprobaciones previas de make dist (carpeta ignorada, árbol limpio, HEAD)
+// miran el repo de la carpeta donde se corre, no el que elijan GIT_DIR,
+// GIT_WORK_TREE o GIT_INDEX_FILE: git los exporta en sus hooks, y con ellos
+// el release saldría de otro commit del que dice el árbol limpio.
+func TestPreviaDeMakeDistSinElEntornoDeGit(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git no está instalado")
+	}
+	tmp := t.TempDir()
+	mk := func(name string) (repo, head string) {
+		repo = filepath.Join(tmp, name)
+		if err := os.MkdirAll(repo, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(repo, ".gitignore"), []byte("dist/\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(repo, "a.txt"), []byte(name+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		for _, args := range [][]string{{"init", "-q", "-b", "main"}, {"add", "-A"}, {"commit", "-qm", "inicio " + name}} {
+			cmd := exec.Command("git", append([]string{"-C", repo, "-c", "user.name=Ana", "-c", "user.email=ana@example.com", "-c", "commit.gpgsign=false"}, args...)...)
+			if out, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("git %v: %v\n%s", args, err, out)
+			}
+		}
+		out, err := exec.Command("git", "-C", repo, "rev-parse", "HEAD").Output()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return repo, strings.TrimSpace(string(out))
+	}
+	aqui, headAqui := mk("aqui")
+	otro, headOtro := mk("otro")
+	script, _ := filepath.Abs(filepath.Join("..", "distpre.sh"))
+	previa := func(extra ...string) (string, error) {
+		cmd := exec.Command("sh", script, "dist")
+		cmd.Dir = aqui
+		cmd.Env = append(os.Environ(), append([]string{"GIT_DIR=" + filepath.Join(otro, ".git"), "GIT_WORK_TREE=" + otro, "GIT_INDEX_FILE=" + filepath.Join(otro, ".git", "index")}, extra...)...)
+		out, err := cmd.CombinedOutput()
+		return strings.TrimSpace(string(out)), err
+	}
+	// Con otro repo en el entorno, el HEAD es el de esta carpeta.
+	if out, err := previa(); err != nil || out != headAqui || out == headOtro {
+		t.Errorf("el HEAD tiene que ser el de la carpeta (%s), no el del entorno (%s): %q (%v)", headAqui, headOtro, out, err)
+	}
+	// Un archivo sin versionar aquí cuenta aunque el repo del entorno esté limpio.
+	if err := os.WriteFile(filepath.Join(aqui, "suelto.txt"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := previa(); err == nil || !strings.Contains(out, "árbol limpio") {
+		t.Errorf("el árbol de la carpeta está sucio: %q (%v)", out, err)
+	}
+	// Y al revés: sucio el del entorno y limpio el de aquí, pasa.
+	if err := os.Remove(filepath.Join(aqui, "suelto.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(otro, "suelto.txt"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := previa(); err != nil || out != headAqui {
+		t.Errorf("el árbol del entorno no cuenta: %q (%v)", out, err)
+	}
+	// La carpeta de salida sigue siendo una ruta sencilla dentro del repo.
+	for _, dist := range []string{"", "/tmp/x", "../x", ".git", "a b", "dist;rm"} {
+		cmd := exec.Command("sh", script, dist)
+		cmd.Dir = aqui
+		if out, err := cmd.CombinedOutput(); err == nil || !strings.Contains(string(out), "DIST tiene que ser una carpeta relativa") {
+			t.Errorf("DIST=%q debe rechazarse: %q (%v)", dist, out, err)
+		}
+	}
+	// Y la que no ignora git o tiene archivos versionados, también.
+	cmd := exec.Command("sh", script, "otra")
+	cmd.Dir = aqui
+	if out, err := cmd.CombinedOutput(); err == nil || !strings.Contains(string(out), "git ignora") {
+		t.Errorf("una carpeta que git no ignora debe rechazarse: %q (%v)", out, err)
+	}
+}

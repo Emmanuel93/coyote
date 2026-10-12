@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -9,6 +10,11 @@ import (
 	"strings"
 	"testing"
 )
+
+// buildEnv es el entorno de Go de make dist (DIST_GOENV): las pruebas compilan
+// igual, así que lo que tenga quien las corre (GOAMD64=v3, GOEXPERIMENT…) no
+// cambia el resultado.
+var buildEnv = []string{"CGO_ENABLED=0", "GOAMD64=v1", "GOARM64=v8.0", "GOEXPERIMENT=", "GOFIPS140=off", "GOFLAGS=-mod=mod", "GOPROXY=off", "GOWORK=off", "GOENV=off"}
 
 // buildDist compila un programa mínimo, desde un repo de git propio, para
 // las plataformas pedidas: binarios de Go de verdad, con su buildinfo y su
@@ -46,7 +52,7 @@ func buildDist(t *testing.T, platforms ...string) (dist, repo, commit string) {
 		out := filepath.Join(dist, "coyote_v1.0.0_"+goos+"_"+goarch, "coyote")
 		cmd := exec.Command("go", "build", "-trimpath", "-o", out, ".")
 		cmd.Dir = repo
-		cmd.Env = append(os.Environ(), "GOOS="+goos, "GOARCH="+goarch, "CGO_ENABLED=0", "GOFLAGS=-mod=mod", "GOPROXY=off", "GOWORK=off")
+		cmd.Env = append(os.Environ(), append([]string{"GOOS=" + goos, "GOARCH=" + goarch}, buildEnv...)...)
 		if b, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("go build %s: %v\n%s", p, err, b)
 		}
@@ -181,7 +187,7 @@ func TestSoloBinariosDelCommit(t *testing.T) {
 	}
 	cmd := exec.Command("go", "build", "-trimpath", "-o", filepath.Join(dist, "coyote_v1.0.0_linux_amd64", "coyote"), ".")
 	cmd.Dir = repo
-	cmd.Env = append(os.Environ(), "GOOS=linux", "GOARCH=amd64", "CGO_ENABLED=0", "GOFLAGS=-mod=mod", "GOPROXY=off", "GOWORK=off")
+	cmd.Env = append(os.Environ(), append([]string{"GOOS=linux", "GOARCH=amd64"}, buildEnv...)...)
 	if b, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("go build: %v\n%s", err, b)
 	}
@@ -190,30 +196,57 @@ func TestSoloBinariosDelCommit(t *testing.T) {
 	}
 }
 
-// TestOpcionesDelBuild: cuarta pasada de v1.0. Un binario compilado con
-// -gcflags, -tags o -asmflags, que make dist no usa, no entra en la
-// procedencia. Con -trimpath Go no registra las -ldflags: no se pueden ver.
+// TestOpcionesDelBuild: cuarta y quinta pasada de v1.0. Un binario compilado
+// con algo que make dist no usa no entra en la procedencia: -gcflags, -tags o
+// -asmflags, y también lo que el entorno cambia sin tocar la línea de
+// comandos (GOAMD64=v3, GOFIPS140, GOEXPERIMENT, -buildmode=pie). Con
+// -trimpath Go no registra las -ldflags: no se pueden ver.
 func TestOpcionesDelBuild(t *testing.T) {
 	dist, repo, commit := buildDist(t, "linux/amd64")
 	base := []string{"-dist", dist, "-version", "v1.0.0", "-commit", commit, "-date", "2026-10-10T12:00:00Z", "-platforms", "linux/amd64"}
-	rebuild := func(flags ...string) {
+	rebuild := func(env []string, flags ...string) error {
 		t.Helper()
 		out := filepath.Join(dist, "coyote_v1.0.0_linux_amd64", "coyote")
 		cmd := exec.Command("go", append(append([]string{"build", "-trimpath"}, flags...), "-o", out, ".")...)
 		cmd.Dir = repo
-		cmd.Env = append(os.Environ(), "GOOS=linux", "GOARCH=amd64", "CGO_ENABLED=0", "GOFLAGS=-mod=mod", "GOPROXY=off", "GOWORK=off")
+		cmd.Env = append(append(os.Environ(), append([]string{"GOOS=linux", "GOARCH=amd64"}, buildEnv...)...), env...)
 		if b, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("go build %v: %v\n%s", flags, err, b)
+			return fmt.Errorf("go build %v: %v\n%s", flags, err, b)
 		}
+		return nil
 	}
-	rebuild("-ldflags", "-s -w")
+	if err := rebuild(nil, "-ldflags", "-s -w"); err != nil {
+		t.Fatal(err)
+	}
 	if err := run(base, io.Discard); err != nil {
 		t.Errorf("las -ldflags no se registran con -trimpath y no estorban: %v", err)
 	}
-	for _, flags := range [][]string{{"-gcflags", "-N"}, {"-tags", "extra"}, {"-asmflags", "-D=x"}} {
-		rebuild(append([]string{"-ldflags", "-s -w"}, flags...)...)
-		if err := run(base, io.Discard); err == nil || !strings.Contains(err.Error(), flags[0]) {
-			t.Errorf("%s: %v", flags[0], err)
+	for _, c := range []struct {
+		name  string
+		env   []string
+		flags []string
+	}{
+		{"-gcflags", nil, []string{"-gcflags", "-N"}},
+		{"-tags", nil, []string{"-tags", "extra"}},
+		{"-asmflags", nil, []string{"-asmflags", "-D=x"}},
+		{"-buildmode", nil, []string{"-buildmode=pie"}},
+		{"GOAMD64", []string{"GOAMD64=v3"}, nil},
+		{"GOFIPS140", []string{"GOFIPS140=latest"}, nil},
+		{"GOEXPERIMENT", []string{"GOEXPERIMENT=noswissmap"}, nil},
+	} {
+		if err := rebuild(c.env, append([]string{"-ldflags", "-s -w"}, c.flags...)...); err != nil {
+			t.Logf("no se pudo armar el caso %s: %v", c.name, err)
+			continue
 		}
+		if err := run(base, io.Discard); err == nil || !strings.Contains(err.Error(), c.name) {
+			t.Errorf("%s: %v", c.name, err)
+		}
+	}
+	// Con las opciones de make dist vuelve a entrar.
+	if err := rebuild(nil, "-ldflags", "-s -w"); err != nil {
+		t.Fatal(err)
+	}
+	if err := run(base, io.Discard); err != nil {
+		t.Errorf("el build de make dist entra: %v", err)
 	}
 }

@@ -45,16 +45,16 @@ install:
 # un archivo ignorado entran al binario. La versión, el commit y la fecha se
 # leen de ese clon, y el entorno de Go queda fijo: ni el entorno ni la línea de
 # comandos los cambian.
+# Las comprobaciones previas (tools/distpre.sh: carpeta ignorada, árbol limpio y
+# HEAD) tampoco leen GIT_DIR, GIT_WORK_TREE ni GIT_INDEX_FILE: el release sale
+# del HEAD de esta carpeta.
 # La carpeta empieza vacía: SHA256SUMS y la procedencia cubren solo este build.
 override DIST_GOENV := CGO_ENABLED=0 GOAMD64=v1 GOARM64=v8.0 GOEXPERIMENT= GOWORK=off GOTOOLCHAIN=local GOFIPS140=off GOENV=off GOFLAGS=-mod=mod GOPROXY=off GOSUMDB=off
 override PLATFORMS := darwin/arm64 darwin/amd64 linux/amd64 linux/arm64
 override PKG := github.com/Emmanuel93/coyote/internal/version
 dist:
-	@case "$(DIST)" in ""|/*|*..*|.|./|.git|.git/*|*[!A-Za-z0-9._/-]*) echo "DIST tiene que ser una carpeta relativa dentro del repo, con letras, números, . _ - y /"; exit 1;; esac
-	@git check-ignore -q "$(DIST)/coyote" && test -z "$$(git ls-files -- "$(DIST)")" || { echo "DIST tiene que ser una carpeta que git ignora y sin archivos versionados (make dist la borra entera)"; exit 1; }
-	@test -z "$$(git status --porcelain --untracked-files=normal)" || { echo "make dist necesita el árbol limpio: haz commit o guarda los cambios (un release sale de un commit)"; exit 1; }
-	@rm -rf "./$(DIST)" && mkdir -p "./$(DIST)"
-	@out=$$(cd "./$(DIST)" && pwd) && head=$$(git rev-parse HEAD) && wt=$$(mktemp -d "$${TMPDIR:-/tmp}/coyote-dist.XXXXXX") && \
+	@head=$$(sh tools/distpre.sh "$(DIST)") && rm -rf "./$(DIST)" && mkdir -p "./$(DIST)" && \
+	out=$$(cd "./$(DIST)" && pwd) && wt=$$(mktemp -d "$${TMPDIR:-/tmp}/coyote-dist.XXXXXX") && \
 	trap 'rm -rf "$$wt"' EXIT && \
 	sh tools/distsrc.sh . "$$wt" "$$head" && cd "$$wt/src" && \
 	ver=$$(cat ../meta/ver) && commit=$$(cat ../meta/commit) && full=$$(cat ../meta/full) && \
