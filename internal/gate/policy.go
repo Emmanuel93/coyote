@@ -140,6 +140,20 @@ type Paths struct {
 	// coyote/, su .claude/ y lo demás que protege el gate valen también ahí, y el
 	// project.yaml de afuera decide lo que se bloquea en todo el subárbol.
 	Outer []string
+
+	// glob lleva el trabajo de los comodines de la evaluación en curso: Evaluate
+	// lo crea, y todo lo que expande un comodín gasta de la misma cuenta.
+	glob *globWork
+}
+
+// expand expande un comodín como lo haría el shell, con la cuenta de la
+// evaluación en curso; sin una, con topes propios. Devuelve también si la
+// expansión llegó hasta el final (globWork.expand).
+func (ps Paths) expand(pattern string) ([]string, bool) {
+	if ps.glob == nil {
+		return globAll(pattern)
+	}
+	return ps.glob.expand(pattern)
 }
 
 // GitDirsOf devuelve la carpeta .git de dir y, si es un archivo (worktree

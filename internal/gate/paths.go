@@ -252,15 +252,6 @@ func symbolic(seg []string, at int) bool {
 	return false
 }
 
-// glob expande un patrón como lo haría el shell en ese momento (shellGlob):
-// lo que del camino ya existe con ese nombre se toma literal, porque la
-// carpeta de un proyecto en "Mi app [v2]" no es una clase de caracteres, y un
-// comodín que no alcanza nada queda como nombre. Devuelve las coincidencias de
-// las dos lecturas.
-func glob(pattern string) []string {
-	return shellGlob(pattern)
-}
-
 // globRel expande un comodín como lo haría el shell en ese momento y devuelve
 // las rutas relativas al proyecto. Un comodín que no alcanza nada queda tal
 // cual, como en el shell.
@@ -272,7 +263,7 @@ func (ps Paths) globRel(p string) []string {
 	if !path.IsAbs(p) {
 		abs = filepath.Join(ps.Root, filepath.FromSlash(p))
 	}
-	matches := glob(abs)
+	matches, _ := ps.expand(abs)
 	var out []string
 	for i, m := range matches {
 		if i >= 100 {

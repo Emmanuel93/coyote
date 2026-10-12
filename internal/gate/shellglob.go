@@ -19,11 +19,20 @@ import (
 // coincidir, nunca al revés. Un * alcanza también los nombres que empiezan con
 // punto.
 
-const (
-	// maxGlobPaths acota cuántas rutas devuelve una expansión.
+// El shell expande un comodín sin tope y el gate no puede: corre dentro del hook
+// de un IDE, que corta el hook por tiempo y deja pasar la acción. La expansión
+// tiene topes de trabajo y, cuando uno la corta, lo dice (globAll devuelve
+// completa=false): quien la usa no da por vista una lista recortada, pide la
+// aprobación de una persona. Son variables para que las pruebas los bajen.
+var (
+	// maxGlobPaths acota cuántas rutas se siguen en cada tramo.
 	maxGlobPaths = 5000
 	// maxGlobDir acota cuántos nombres se leen de una carpeta.
 	maxGlobDir = 50000
+	// maxGlobReads acota cuántas carpetas se abren en toda la expansión.
+	maxGlobReads = 4000
+	// maxGlobNames acota cuántos nombres se leen en toda la expansión.
+	maxGlobNames = 400000
 )
 
 // globElem es un elemento de un patrón de nombres: un caracter, ?, * o una
@@ -274,32 +283,100 @@ func globUnquote(part string) string {
 	return b.String()
 }
 
-// dirNames lista los nombres de una carpeta, ordenados y acotados.
-func dirNames(dir string) []string {
+// globWork lleva el trabajo de las expansiones de una evaluación: las carpetas
+// y los nombres que se leyeron (los topes valen para el conjunto, no para cada
+// comodín), lo que ya se expandió y si algún tope cortó una expansión.
+type globWork struct {
+	reads int  // carpetas abiertas
+	names int  // nombres leídos
+	cut   bool // un tope dejó trabajo sin hacer: el shell habría alcanzado más
+	// cutAt es el primer patrón que un tope cortó.
+	cutAt string
+	memo  map[string]globOut
+}
+
+// globOut es una expansión hecha.
+type globOut struct {
+	matches  []string
+	complete bool
+}
+
+// open reserva la lectura de una carpeta. Falla, y lo anota, si ya se leyeron
+// todas las que el tope permite. Los nombres los acota dirNames.
+func (w *globWork) open() bool {
+	if w.reads >= maxGlobReads {
+		w.cut = true
+		return false
+	}
+	w.reads++
+	return true
+}
+
+// dirNames lista los nombres de una carpeta, ordenados y acotados. Solo abre
+// carpetas (openDir): un comodín alcanza archivos de todo tipo, y abrir una
+// tubería con nombre bloquea y abrir un terminal o un dispositivo puede tener
+// efectos.
+func (w *globWork) dirNames(dir string) []string {
 	if dir == "" {
 		dir = "."
 	}
-	f, err := os.Open(dir)
+	f, err := openDir(dir)
 	if err != nil {
 		return nil
 	}
 	defer f.Close()
-	names, _ := f.Readdirnames(maxGlobDir)
+	limit := min(maxGlobDir, maxGlobNames-w.names)
+	names, _ := f.Readdirnames(limit + 1)
+	if len(names) > limit {
+		names = names[:limit]
+		w.cut = true
+	}
+	w.names += len(names)
 	sort.Strings(names)
 	return names
 }
 
-// shellGlob expande un patrón de rutas como lo haría el shell en ese momento.
-// En cada tramo con comodines devuelve los nombres que alcanza y también el
+// globAll expande un patrón de rutas como lo haría el shell en ese momento,
+// con topes propios (globWork.expand).
+func globAll(pattern string) (matches []string, complete bool) {
+	return (&globWork{}).expand(pattern)
+}
+
+// expand expande un patrón de rutas como lo haría el shell en ese momento. En
+// cada tramo con comodines devuelve los nombres que alcanza y también el
 // nombre tal cual si existe: la carpeta de un proyecto en "Mi app [v2]" no es
 // una clase de caracteres, y cat [x].env lee ese archivo si no hay un x.env. Una
 // barra invertida cita el caracter que sigue (así llegan los corchetes que el
 // comando escribió entre comillas).
-func shellGlob(pattern string) []string {
+//
+// Devuelve también si la expansión llegó hasta el final. Si un tope la cortó
+// (rutas, nombres o carpetas de más), devuelve lo que alcanzó antes y false: el
+// shell habría alcanzado más. Un patrón ya expandido no vuelve a gastar trabajo.
+func (w *globWork) expand(pattern string) (matches []string, complete bool) {
 	if runtime.GOOS == "windows" {
 		m, _ := filepath.Glob(pattern)
-		return m
+		return m, true
 	}
+	if o, ok := w.memo[pattern]; ok {
+		return o.matches, o.complete
+	}
+	was := w.cut
+	w.cut = false
+	matches = w.run(pattern)
+	complete = !w.cut
+	if w.cut && w.cutAt == "" {
+		w.cutAt = pattern
+	}
+	w.cut = w.cut || was
+	if w.memo == nil {
+		w.memo = map[string]globOut{}
+	}
+	w.memo[pattern] = globOut{matches, complete}
+	return matches, complete
+}
+
+// run hace la expansión de expand.
+func (w *globWork) run(pattern string) []string {
 	bases := []string{""}
 	if strings.HasPrefix(pattern, "/") {
 		bases = []string{"/"}
@@ -320,10 +397,15 @@ func shellGlob(pattern string) []string {
 		var next []string
 		seen := map[string]bool{}
 		add := func(p string) {
-			if !seen[p] && len(next) < maxGlobPaths {
-				seen[p] = true
-				next = append(next, p)
+			if seen[p] {
+				return
 			}
+			if len(next) >= maxGlobPaths {
+				w.cut = true
+				return
+			}
+			seen[p] = true
+			next = append(next, p)
 		}
 		lit := globUnquote(part)
 		if !globHasMeta(part) {
@@ -333,7 +415,10 @@ func shellGlob(pattern string) []string {
 		} else {
 			elems := compileGlob(part)
 			for _, b := range bases {
-				for _, name := range dirNames(b) {
+				if !w.open() {
+					break
+				}
+				for _, name := range w.dirNames(b) {
 					if matchGlob(elems, []rune(name)) {
 						add(join(b, name))
 					}
@@ -359,7 +444,7 @@ func shellGlob(pattern string) []string {
 
 // quoteGlob antepone \ a los caracteres que un patrón de nombres lee como
 // comodín o como cita: así un corchete escrito entre comillas sigue siendo una
-// letra cuando shellGlob lee la palabra. Trabaja por bytes: los que cita son
+// letra cuando globAll lee la palabra. Trabaja por bytes: los que cita son
 // ASCII y el resto pasa tal cual.
 func quoteGlob(s string) string {
 	if !strings.ContainsAny(s, `*?[]\`) {

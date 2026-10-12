@@ -12,7 +12,7 @@ import (
 // word es una palabra de shell ya sin comillas. glob indica que trae comodines
 // fuera de comillas, que el shell expandiría; pat es la palabra como patrón de
 // nombres, con una barra invertida delante de lo que estaba entre comillas o
-// escapado (shellGlob la entiende).
+// escapado (globAll la entiende).
 type word struct {
 	s    string
 	glob bool

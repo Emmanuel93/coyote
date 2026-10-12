@@ -33,6 +33,7 @@ type Decision struct {
 // que solo lee y, para el resto, el hash de la acción exacta.
 func (ps Paths) Evaluate(a Action) Decision {
 	a = ps.absCwd(a)
+	ps.glob = &globWork{}
 	d := Decision{Kind: Classify(a)}
 	var h *Hard
 	switch d.Kind {
@@ -44,12 +45,18 @@ func (ps Paths) Evaluate(a Action) Decision {
 				d.Kind, d.Reason = KindOther, why
 				break
 			}
+			if ps.glob.cut {
+				d.Kind, d.Reason = KindOther, ps.globCutReason()
+				break
+			}
 			return d // Allow
 		}
 	case KindShell:
 		if h = ps.hardShell(a); h == nil {
 			ok, why, cred := ps.readShell(a)
 			switch {
+			case ok && ps.glob.cut:
+				d.Reason = ps.globCutReason()
 			case ok:
 				return d
 			case cred:
@@ -76,6 +83,12 @@ func (ps Paths) Evaluate(a Action) Decision {
 		d.Reason = fmt.Sprintf("%s con efectos", d.Kind)
 	}
 	return d
+}
+
+// globCutReason es por qué pide aprobación lo que se leería con un comodín que
+// el gate no alcanzó a expandir entero: lo que no vio no lo da por permitido.
+func (ps Paths) globCutReason() string {
+	return fmt.Sprintf("un comodín (%q) alcanza demasiadas carpetas o archivos para que el gate lo expanda entero; lo decide la persona, que ve el comando", ps.glob.cutAt)
 }
 
 // InfraEffect dice si un comando cambia infraestructura: su aprobación vale

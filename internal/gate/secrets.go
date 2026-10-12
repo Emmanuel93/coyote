@@ -342,14 +342,12 @@ func (ps Paths) secretGlobWord(pattern, cwd string) (string, bool) {
 		}
 		return "", false
 	}
-	// glob también lee el nombre tal cual: un comodín que no alcanza nada
-	// queda literal en el shell, y cat [x].env lee ese archivo si no hay un
-	// x.env.
-	matches := glob(resolve(pattern, cwd, ps.Home))
-	for i, m := range matches {
-		if i == 1000 {
-			break
-		}
+	// La expansión también lee el nombre tal cual: un comodín que no alcanza
+	// nada queda literal en el shell, y cat [x].env lee ese archivo si no hay un
+	// x.env. Si un tope la corta (demasiadas carpetas), lo que no se alcanzó no
+	// se juzga: Evaluate no deja pasar un comando así, lo pide a la persona.
+	matches, _ := ps.expand(resolve(pattern, cwd, ps.Home))
+	for _, m := range matches {
 		if kind, rel, ok := ps.secretFile(m); ok {
 			return "un comodín que alcanza " + kind + " (" + rel + ")", true
 		}

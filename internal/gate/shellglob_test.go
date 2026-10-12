@@ -101,7 +101,7 @@ func TestQuoteGlobYGlobUnquote(t *testing.T) {
 	}
 }
 
-// shellGlob alcanza, como mínimo, lo que alcanza bash. Que alcance de más
+// globAll alcanza, como mínimo, lo que alcanza bash. Que alcance de más
 // (una equivalencia con acento, el nombre tal cual si existe) es a propósito;
 // lo que no puede es dejar fuera algo que el shell sí expande.
 func TestShellGlobAlcanzaLoQueBash(t *testing.T) {
@@ -151,7 +151,11 @@ func TestShellGlobAlcanzaLoQueBash(t *testing.T) {
 			}
 		}
 		got := map[string]bool{}
-		for _, m := range shellGlob(dir + "/" + pat) {
+		matches, complete := globAll(dir + "/" + pat)
+		if !complete {
+			t.Errorf("%q: la expansión se cortó en un árbol de 30 archivos", pat)
+		}
+		for _, m := range matches {
 			got[strings.TrimPrefix(m, dir+"/")] = true
 		}
 		var missing []string
@@ -162,7 +166,7 @@ func TestShellGlobAlcanzaLoQueBash(t *testing.T) {
 		}
 		sort.Strings(missing)
 		if len(missing) > 0 {
-			t.Errorf("%q: bash alcanza %v y shellGlob no", pat, missing)
+			t.Errorf("%q: bash alcanza %v y globAll no", pat, missing)
 		}
 	}
 }

@@ -41,7 +41,7 @@ var (
 
 // lword es una palabra de shell sin comillas; quoted dice si traía comillas.
 // pat es el mismo texto como patrón de nombres: lo que traía entre comillas o
-// escapado lleva una barra invertida delante (shellGlob la entiende).
+// escapado lleva una barra invertida delante (globAll la entiende).
 type lword struct {
 	text   string
 	pat    string
