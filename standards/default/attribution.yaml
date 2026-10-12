@@ -15,6 +15,7 @@ vars:
   en: '(?:(?:entirely|partially|partly|mostly|fully)\s+)?(?:written|coded|generated|created|authored|produced|drafted|built|made|developed)\s+(?:entirely\s+|partially\s+|partly\s+|mostly\s+|fully\s+)?(?:with|by|using|via)\s+(?:the\s+help\s+of\s+)?\[?'
   es: '(?:(?:íntegramente|parcialmente|totalmente|en\s+parte)\s+)?(?:generad[oa]s?|escrit[oa]s?|codificad[oa]s?|cread[oa]s?|redactad[oa]s?|hech[oa]s?|programad[oa]s?|desarrollad[oa]s?)\s+(?:íntegramente\s+|parcialmente\s+|totalmente\s+|en\s+parte\s+)?(?:con|por|usando|mediante)\s+(?:(?:la\s+)?ayuda\s+de\s+)?\[?'
   bot: '[a-z0-9-]*(?:claude|cursor|copilot|codex|gemini|devin|chatgpt|jules|windsurf|codeium|tabnine|aider|amp)[a-z0-9-]*\[bot\]'
+  ai_tool: 'claude(?:\s+(?:code|opus|sonnet|haiku|fable|mythos)\b|-(?:code|opus|sonnet|haiku|fable|mythos|[0-9])|\s*\(\s*(?:claude|anthropic|ai\b|ia\b|llm\b|bot\b|opus|sonnet|haiku|fable|mythos|code\b|[0-9]+(?:[.-][0-9]+)*\b|via\s+(?:cursor|copilot|windsurf|claude|aider|codex|chatgpt|gemini)\b|(?:assistant|asistente|model|modelo)\b[^)]*\b(?:anthropic|ai|ia|llm)\b)|\s*<[^<>@\s]*@anthropic\.com\s*>)|cursor(?:\s*:|\s*agent\b|-agent\b|\s+(?:bugbot|ai|ide|tab|composer)\b|\s*/|\.sh\b|\s*,\s*claude\b|\s+with\s+claude\b|\s*\(\s*claude\b|\s*<[^<>@\s]*@cursor\.com\s*>|\s*$)|(?:chatgpt|(?:github\s+)?copilot|gemini|codex|windsurf|aider|codeium|tabnine|codewhisperer|amazon\s+q)\b|gpt-?[0-9]'
 
 identity:
   names: '(?i)(\bclaude\s+(?:code|opus|sonnet|haiku|fable|mythos|[0-9])|\bcursor\s*agent\b|\bcopilot\b|\bchatgpt\b|\bgpt-?[0-9]|\bgemini\b|\bcodeium\b|\bwindsurf\b|\bcodex\b|\baider\b|\btabnine\b|\bcodewhisperer\b|\bamazon\s+q\b|\b{{bot}})'
@@ -32,7 +33,7 @@ line_patterns:
   - id: ai-noreply
     pattern: '(?i)\bnoreply@anthropic\.com\b'
   - id: ai-assisted-by-trailer
-    pattern: '(?i)^\s*(?:ai[- ])?(?:assisted|helped|generated|written|drafted|authored|co-?developed|produced|coded)(?:\s*-\s*|\s+)by\s*:\s*\[?(?:claude(?:\s+(?:code|opus|sonnet|haiku|fable|mythos)\b|-(?:code|opus|sonnet|haiku|fable|mythos|[0-9])|\s*\(\s*(?:claude|anthropic|ai\b|llm\b|opus|sonnet|haiku|fable|mythos|code\b|[0-9])|\s*[:/0-9\[]|\s*$)|cursor(?:\s*:|\s*agent\b|\s+bugbot\b|\s*$)|(?:chatgpt|(?:github\s+)?copilot|gemini|codex|windsurf|aider|codeium|tabnine|codewhisperer|amazon\s+q)\b|gpt-?[0-9])'
+    pattern: '(?i)^\s*(?:(?:ai[- ])?(?:assisted|generated|written|drafted|authored|co-?developed|produced|coded)(?:\s*-\s*|\s+)by\s*:\s*\[?(?:{{ai_tool}}|claude(?:\s*[:/\[]|\s*[0-9]+(?:[.-][0-9]+)*\b|\s*$))|(?:ai[- ])?helped(?:\s*-\s*|\s+)by\s*:\s*\[?(?:{{ai_tool}}))'
 
 phrase_patterns:
   - id: en-made-with-ai

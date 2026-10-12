@@ -81,11 +81,111 @@ func TestFooters(t *testing.T) {
 		"Assisted-by: Cursor",
 		"Assisted-by: Cursor Agent",
 		"Assisted-by: Cursor Bugbot",
+		// Sexta revisión (H5): formas que la versión anterior de la regla veía y la
+		// anterior a esa no debía perder.
+		"Assisted-by: Cursor AI",
+		"Assisted-by: Cursor IDE",
+		"Assisted-by: Cursor Tab",
+		"Assisted-by: Cursor Composer",
+		"Generated-by: Cursor Composer",
+		"Assisted-by: Cursor-Agent",
+		"Assisted-by: CursorAgent",
+		"Assisted-by: Cursor/Claude",
+		"Assisted-by: Cursor.sh",
+		"Assisted-by: Cursor, Claude",
+		"Assisted-by: Cursor with Claude",
+		"Assisted-by: Cursor (Claude 4 Sonnet)",
+		"Assisted-by: Cursor <cursoragent@cursor.com>",
+		"Assisted-by: Claude <claude@anthropic.com>",
+		"Assisted-by: Claude (via Cursor)",
+		"Assisted-by: Claude (assistant IA)",
+		"Assisted-by: Claude (asistente de IA)",
+		"Assisted-by: Claude (modelo de Anthropic)",
+		"Co-developed-by: Claude (model by Anthropic)",
+		"Helped-by: Claude (Anthropic)",
+		"Helped-by: Claude-3-5-Sonnet",
+		"Helped-by: Cursor Agent",
+		"Helped-by: GitHub Copilot",
 	}
 	for _, f := range footers {
 		out, found := c.ScrubLines("feat: x\n\n"+f+"\n", true)
 		if len(found) != 1 || strings.TrimSpace(out) != "feat: x" {
 			t.Errorf("no se quitó %q: %+v -> %q", f, found, out)
+		}
+	}
+}
+
+// TestTrailersEnCruz cruza los verbos del trailer con las formas en que se nombra una
+// herramienta y con las de una persona. Añadir una forma a la regla no debe perder
+// ninguna de las que ya se veían (sexta revisión, H5): el corpus de la revisión
+// mezclaba 79 líneas de herramientas y 25 de personas.
+func TestTrailersEnCruz(t *testing.T) {
+	c := cfg(t)
+	fuertes := []string{
+		"Assisted-by", "AI-Assisted-By", "AI Assisted by", "assisted-by ", "Generated-by",
+		"Written-by", "Drafted-by", "Authored-by", "Co-developed-by", "Codeveloped-by",
+		"Produced-by", "Coded-by",
+	}
+	todos := append(append([]string{}, fuertes...), "Helped-by", "AI-Helped-By", "AI Helped by")
+	herramientas := []string{
+		"Claude Code", "Claude Opus 5", "Claude Sonnet 5.5", "Claude Haiku", "Claude Fable",
+		"Claude Mythos", "Claude-3-5-Sonnet", "claude-opus-5-5", "Claude (Anthropic)",
+		"Claude (Opus 5.5)", "Claude (4 Sonnet)", "Claude (claude-opus-5-5)", "Claude (AI)",
+		"Claude (IA)", "Claude (LLM)", "Claude (bot)", "Claude (assistant IA)", "Claude (asistente de IA)",
+		"Claude (modelo de Anthropic)", "Claude (model by Anthropic)", "Claude (via Cursor)",
+		"Claude (via Copilot)", "Claude <noreply@anthropic.com>", "Claude <claude@anthropic.com>",
+		"[Claude Code](https://claude.com/claude-code)", "Cursor", "Cursor Agent", "CursorAgent",
+		"Cursor-Agent", "Cursor Bugbot", "Cursor AI", "Cursor IDE", "Cursor Tab", "Cursor Composer",
+		"Cursor/Claude", "Cursor.sh", "Cursor, Claude", "Cursor with Claude",
+		"Cursor (Claude 4 Sonnet)", "Cursor <cursoragent@cursor.com>", "Cursor:gpt-5",
+		"Copilot", "GitHub Copilot", "ChatGPT", "GPT-5", "gpt4o", "Gemini", "Codex", "Windsurf",
+		"Aider", "Codeium", "Tabnine", "CodeWhisperer", "Amazon Q",
+	}
+	// Con los verbos de herramienta basta el nombre solo: «Assisted-by: Claude» nombra al
+	// modelo. Con Helped-by no: ahí un Claude suelto es un nombre de pila.
+	soloConVerbosFuertes := []string{"Claude", "Claude:claude-opus-5-5", "Claude/Opus", "Claude 3.5 Sonnet", "Claude3", "Claude [Opus]"}
+	personas := []string{
+		"Ana Ruiz", "the payments team", "Claude Dupont", "Claude Dupont <claude@example.fr>",
+		"Claude <claude.martin@acme.fr>", "Claude <claude@acme.fr>", "Claude-Henri Dupont <chd@acme.fr>",
+		"Claude (QA)", "Claude (assistant manager)", "Claude (3rd floor)", "Claude (via Paris)",
+		"Cursor Smith", "Cursor Smith <cs@acme.fr>", "Cursor Notes", "Devin Smith", "Jules Verne",
+		"Haider Ali",
+	}
+	pareja := func(verbo, forma string) string { return strings.TrimRight(verbo, " ") + ": " + forma }
+	veTrailer := func(linea string) bool {
+		out, found := c.ScrubLines("feat: x\n\n"+linea+"\n", true)
+		return len(found) == 1 && strings.TrimSpace(out) == "feat: x"
+	}
+	for _, v := range todos {
+		for _, f := range herramientas {
+			if l := pareja(v, f); !veTrailer(l) {
+				t.Errorf("no se quitó %q", l)
+			}
+		}
+		for _, f := range personas {
+			if l := pareja(v, f); len(c.Check(l, false)) != 0 {
+				t.Errorf("falso positivo en %q: %+v", l, c.Check(l, false))
+			}
+		}
+	}
+	for _, v := range fuertes {
+		for _, f := range soloConVerbosFuertes {
+			if l := pareja(v, f); !veTrailer(l) {
+				t.Errorf("no se quitó %q", l)
+			}
+		}
+	}
+	for _, v := range []string{"Helped-by", "AI-Helped-By", "AI Helped by"} {
+		for _, f := range []string{"Claude", "Claude 3rd floor", "Claude 3.5 Sonnet", "Claude/Opus", "Claude [Opus]"} {
+			if l := pareja(v, f); len(c.Check(l, false)) != 0 {
+				t.Errorf("falso positivo en %q: %+v", l, c.Check(l, false))
+			}
+		}
+	}
+	// Un Claude con un número que no es de versión sigue siendo un nombre de pila.
+	for _, v := range fuertes {
+		if l := pareja(v, "Claude 3rd floor"); len(c.Check(l, false)) != 0 {
+			t.Errorf("falso positivo en %q: %+v", l, c.Check(l, false))
 		}
 	}
 }
@@ -136,6 +236,16 @@ func TestNoFalsePositives(t *testing.T) {
 		"Assisted-by: Claude (QA)",
 		"Assisted-by: Cursor Smith <cs@acme.fr>",
 		"Helped-by: Claude Dupont",
+		// Sexta revisión (H5): Helped-by es el trailer de las personas que ayudaron;
+		// un Claude suelto es un nombre de pila.
+		"Helped-by: Claude",
+		"Helped-by: Claude 3rd floor",
+		"Helped-by: Claude <claude.martin@acme.fr>",
+		"Helped-by: Cursor Smith <cs@acme.fr>",
+		"Assisted-by: Claude (via Paris)",
+		"Assisted-by: Claude <claude@acme.fr>",
+		"Assisted-by: Cursor Smith",
+		"Assisted-by: Cursor Notes",
 		"AI-Assisted-By: Ana Ruiz",
 		"Assisted by: the payments team",
 		"Assisted-by: the payments team",

@@ -7,3 +7,4 @@
 2026-10-12T06:52Z|@eramirezhdez/coyote-security|W-0008|coyote|fix|secrets|un log UTF-16 con secuencias ANSI se escanea, las rutas con corchetes…|-|-|-|ok
 2026-10-12T07:18Z|@eramirezhdez/coyote-dev|W-0008|coyote|fix|ws|el workstream es el de su carpeta para todo, un autonomy inválido…|-|-|-|ok
 2026-10-12T07:55Z|@eramirezhdez/coyote-dev|W-0008|coyote|fix|audit|un merge no esconde su aviso con log.diffMerges, dos encabezados encoding o…|-|-|-|ok
+2026-10-12T07:55Z|@eramirezhdez/coyote-dev|W-0008|coyote|fix|atribucion|el trailer Assisted-by vuelve a ver Cursor AI, IDE, Tab, Composer, Cursor-Agent,…|-|-|-|ok
