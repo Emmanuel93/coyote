@@ -162,13 +162,26 @@ func (a *app) newGateRun(act gate.Action) (*gateRun, error) {
 	if err != nil {
 		return nil, err
 	}
-	state, err := userdir.StateDir()
+	paths, err := gatePaths(root, cfg)
 	if err != nil {
 		return nil, err
 	}
 	agent := identity.Sanitize(act.AgentType)
 	if act.AgentType == "" {
 		agent = act.IDE
+	}
+	return &gateRun{a: a, act: act, root: root, cfg: cfg, paths: paths,
+		person: identity.Resolve(root), agent: agent}, nil
+}
+
+// gatePaths arma las rutas y reglas con las que el gate juzga una acción de un
+// proyecto: el IDE, el hub, los secretos de cada proyecto del repo y el
+// inventario de infraestructura. Lo usan el gate y quien propone o aprueba un
+// comando, para que juzguen igual.
+func gatePaths(root string, cfg *project.Config) (gate.Paths, error) {
+	state, err := userdir.StateDir()
+	if err != nil {
+		return gate.Paths{}, err
 	}
 	paths := gate.NewPaths(root, gate.Home(), state)
 	if !cfg.Hub.Empty() {
@@ -187,16 +200,41 @@ func (a *app) newGateRun(act gate.Action) (*gateRun, error) {
 		}
 	}
 	paths.Secrets = cfg.Secrets
-	// Un monorepo abierto en su raíz: cada ruta lleva las reglas del proyecto
-	// que la contiene y las de los de afuera, como en el escaneo.
-	rs := newRuleSet(root)
+	// Un monorepo, abierto en su raíz o en un proyecto anidado: cada ruta del
+	// repo lleva las reglas del proyecto que la contiene y las de los de
+	// afuera, como en el escaneo del commit; una ruta fuera del repo, solo las
+	// de siempre. Se razona sobre rutas reales, sin enlaces.
+	phys := paths.Real(root)
+	top := repoTop(phys)
+	rs := newRuleSet(top)
 	paths.SecretsFor = func(rel string) (secrets.Rules, string, string, error) {
-		rules, near, err := rs.forPath(rel)
-		return rules, filepath.Join(root, filepath.FromSlash(strings.TrimSuffix(rel, near))), near, err
+		abs := filepath.Join(phys, filepath.FromSlash(rel))
+		if !within(top, abs) {
+			return secrets.Rules{}, "", filepath.ToSlash(abs), nil
+		}
+		git, _ := filepath.Rel(top, abs)
+		git = filepath.ToSlash(git)
+		rules, near, err := rs.forPath(git)
+		return rules, filepath.Join(top, filepath.FromSlash(strings.TrimSuffix(git, near))), near, err
 	}
 	paths.Infra, _, paths.InfraErr = infra.Load(root)
-	return &gateRun{a: a, act: act, root: root, cfg: cfg, paths: paths,
-		person: identity.Resolve(root), agent: agent}, nil
+	return paths, nil
+}
+
+// repoTop es la carpeta de más arriba que cuenta para las reglas de secretos
+// de un proyecto: la raíz de su repo de git, o el proyecto mismo si no está en
+// uno.
+func repoTop(root string) string {
+	for d := root; ; {
+		if _, err := os.Lstat(filepath.Join(d, ".git")); err == nil {
+			return d
+		}
+		parent := filepath.Dir(d)
+		if parent == d {
+			return root
+		}
+		d = parent
+	}
 }
 
 // gateRoot busca el proyecto del hook: el que abrió el IDE, luego las raíces

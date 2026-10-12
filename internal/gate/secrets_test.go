@@ -167,3 +167,121 @@ func TestCredentialCommands(t *testing.T) {
 		t.Errorf("MCP con credenciales: %s %s", d.Verdict, d.Reason)
 	}
 }
+
+// TestLecturaConCorchetesYComodinesLiterales: sexta revisión de v1.0. Una ruta
+// con [, ? o * se tomaba por un patrón y la herramienta de lectura no la
+// miraba: Read de "[x].env", de un archivo declarado en secrets.files con un
+// corchete en el nombre, o de cualquier archivo de un proyecto cuya carpeta
+// (o cuyo home) lleva corchetes ("Mi app [v2]") pasaba sin pedir nada.
+func TestLecturaConCorchetesYComodinesLiterales(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "Juan [Trabajo]")
+	root := filepath.Join(home, "Documents", "Mi app [v2]")
+	files := map[string]string{
+		filepath.Join(root, ".env"):                   "A=1\n",
+		filepath.Join(root, "[x].env"):                "A=1\n",
+		filepath.Join(root, "src", "app.go"):          "package app\n",
+		filepath.Join(root, "src", "[a].go"):          "package a\n",
+		filepath.Join(root, "claves", "[z].txt"):      "k\n",
+		filepath.Join(root, "claves", "ok?.txt"):      "k\n",
+		filepath.Join(root, ".git", "HEAD"):           "ref: refs/heads/main\n",
+		filepath.Join(home, ".ssh", "id_rsa"):         "x\n",
+		filepath.Join(home, ".config", "coyote", "k"): "x\n",
+	}
+	for p, content := range files {
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ps := NewPaths(root, home, filepath.Join(home, ".config", "coyote"))
+	ps.Secrets = secrets.Rules{Files: []string{"claves/*.txt"}}
+	read := func(tool, key, p string) Action {
+		return claude(t, tool, map[string]any{key: p}, root)
+	}
+	for _, a := range []Action{
+		read("Read", "file_path", filepath.Join(root, ".env")),
+		read("Read", "file_path", filepath.Join(root, "[x].env")),
+		read("Read", "file_path", "[x].env"),
+		read("Read", "file_path", filepath.Join(root, ".en?")),
+		read("Read", "file_path", ".e*"),
+		read("Read", "file_path", filepath.Join(root, "claves", "[z].txt")),
+		read("Read", "file_path", filepath.Join(root, "claves", "ok?.txt")),
+		read("Read", "file_path", filepath.Join(home, ".ssh", "id_rsa")),
+		read("Read", "file_path", filepath.Join(home, ".config", "coyote", "k")),
+	} {
+		if d := ps.Evaluate(a); d.Verdict != Block {
+			t.Errorf("%s %v debe bloquearse siempre: %s (%s)", a.Tool, a.Input, d.Verdict, d.Reason)
+		}
+	}
+	// Lo mismo en el shell: la carpeta con corchetes no es una clase de
+	// caracteres, y un comodín que no alcanza nada deja el nombre literal.
+	bash := func(cmd string) Action { return claude(t, "Bash", map[string]any{"command": cmd}, root) }
+	for _, c := range []string{"cat .e*", "cat ./.e?v", "cat .e[n]v", "cat [x].env", "cat claves/ok?.txt", "cat claves/*.txt",
+		"cat " + filepath.Join(home, ".ssh", "id_*")} {
+		if d := ps.Evaluate(bash(c)); d.Verdict != Block {
+			t.Errorf("%q debe bloquearse siempre: %s (%s)", c, d.Verdict, d.Reason)
+		}
+	}
+	// Y lo que protege el gate de cualquier escritura.
+	for _, c := range []string{"rm -r .g*", "rm -r ./.gi?"} {
+		if d := ps.Evaluate(bash(c)); d.Verdict != Block {
+			t.Errorf("%q debe bloquearse siempre: %s (%s)", c, d.Verdict, d.Reason)
+		}
+	}
+	for _, c := range []string{"cat src/*.go", "cat src/a*", "ls *", "wc -l src/[a].go"} {
+		if d := ps.Evaluate(bash(c)); d.Verdict != Allow {
+			t.Errorf("%q debe pasar: %s (%s)", c, d.Verdict, d.Reason)
+		}
+	}
+	for _, a := range []Action{
+		read("Read", "file_path", filepath.Join(root, "src", "app.go")),
+		read("Read", "file_path", filepath.Join(root, "src", "[a].go")),
+		claude(t, "LS", map[string]any{"path": root, "ignore": []any{"*.env", "[x].env"}}, root),
+		claude(t, "Grep", map[string]any{"pattern": "TODO", "path": filepath.Join(root, "src"), "exclude": "*.env"}, root),
+	} {
+		if d := ps.Evaluate(a); d.Verdict != Allow {
+			t.Errorf("%s %v debe pasar: %s (%s)", a.Tool, a.Input, d.Verdict, d.Reason)
+		}
+	}
+}
+
+// TestGobiernoDeProyectosAnidadosProtegido: sexta revisión de v1.0. Las
+// herramientas de archivos protegían el coyote/project.yaml, las aprobaciones
+// y el ledger de la raíz y no los de un proyecto anidado: un agente podía
+// escribir una dispensa en el project.yaml de svc/ y dejar de proteger sus
+// secretos.
+func TestGobiernoDeProyectosAnidadosProtegido(t *testing.T) {
+	ps, root, _ := testPaths(t)
+	w := func(tool, rel string) Action {
+		in := map[string]any{"file_path": filepath.Join(root, filepath.FromSlash(rel)), "content": "x"}
+		if tool == "Edit" {
+			in = map[string]any{"file_path": filepath.Join(root, filepath.FromSlash(rel)), "old_string": "a", "new_string": "b"}
+		}
+		return claude(t, tool, in, root)
+	}
+	for _, a := range []Action{
+		w("Write", "svc/coyote/project.yaml"),
+		w("Edit", "svc/coyote/project.yaml"),
+		w("Write", "svc/Coyote/Project.YAML"),
+		w("Write", "a/b/coyote/infra.yaml"),
+		w("Write", "a/b/coyote/hub.yaml"),
+		w("Write", "svc/coyote/approvals/P-0001.json"),
+		w("Write", "svc/coyote/ledger/2026/10/11-ana.ccf"),
+	} {
+		if d := ps.Evaluate(a); d.Verdict != Block {
+			t.Errorf("%s %v debe bloquearse siempre: %s (%s)", a.Tool, a.Input, d.Verdict, d.Reason)
+		}
+	}
+	for _, a := range []Action{
+		w("Write", "svc/src/main.go"),
+		w("Write", "svc/coyote/standards/propio.md"),
+		w("Write", "svc/docs/coyote/notas.md"),
+		w("Write", "svc/coyote"),
+	} {
+		if d := ps.Evaluate(a); d.Verdict == Block {
+			t.Errorf("%s %v no toca el gobierno de un proyecto: %s (%s)", a.Tool, a.Input, d.Verdict, d.Reason)
+		}
+	}
+}

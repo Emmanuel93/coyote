@@ -319,6 +319,36 @@ func TestGatePRCaracteresOcultosSinHunks(t *testing.T) {
 	}
 }
 
+// TestGatePRUTF16ConControlesPuestosAPosta: sexta revisión de v1.0. Unos
+// cuantos caracteres de control en un archivo en UTF-16 no lo vuelven
+// binario: con eso bastaba para que el Trojan Source que traía no se
+// buscara. Los controles no cuentan; un binario con BOM de mentira, sí.
+func TestGatePRUTF16ConControlesPuestosAPosta(t *testing.T) {
+	base := setup(t)
+	productoDemo(t, base)
+	svc := filepath.Join(base, "servicios")
+	baseSHA := strings.TrimSpace(git(t, svc, "rev-parse", "HEAD"))
+	git(t, svc, "checkout", "-qb", "pr")
+	ctl := strings.Repeat(string(rune(1)), 12)
+	trojan := "class A {\n\t/* " + ctl + " */\n\tbool Ok(string rol) { return rol != \"user\u202e \u2066// solo admins\u2069 \u2066\"; }\n}\n"
+	if err := os.MkdirAll(filepath.Join(svc, "tools"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(svc, "tools", "A.cs"), le16(trojan), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, svc, "add", "-A")
+	git(t, svc, "commit", "-qm", "cambios")
+	headSHA := strings.TrimSpace(git(t, svc, "rev-parse", "HEAD"))
+	r := run(t, base, "", "gate", "pr", "--repo", "servicios="+svc, "--self", "servicios", "--base", baseSHA, "--head", headSHA, "--event", "", "--policy", "warn")
+	must(t, r, 0, "gate pr")
+	for _, want := range []string{"tools/A.cs", "controles de dirección del texto en la línea 3"} {
+		if !strings.Contains(r.stdout, want) {
+			t.Errorf("reporte sin %q:\n%s", want, r.stdout)
+		}
+	}
+}
+
 // TestGatePRNoCulpaAlCambioDeLoQueYaEstaba: quinta revisión de v1.0. Leer
 // entero lo que git lista sin hunks no puede cargarle al PR lo que el archivo ya
 // traía en la base: un cambio de modo, un borrado de líneas o una línea

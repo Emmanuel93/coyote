@@ -297,6 +297,9 @@ func (ps Paths) protected(abs string) (string, bool) {
 			if what, ok := nestedHook(filepath.ToSlash(rel)); ok {
 				return what, true
 			}
+			if what, ok := nestedCoyote(filepath.ToSlash(rel)); ok {
+				return what, true
+			}
 		}
 	}
 	for _, g := range ps.Global {
@@ -367,6 +370,27 @@ func nestedHook(rel string) (string, bool) {
 	}
 	return "", false
 }
+
+// nestedCoyote reconoce, en una ruta relativa al proyecto, lo que gobierna a un
+// proyecto anidado: su coyote/project.yaml (autonomía, secretos y dispensas),
+// su inventario, su hub, sus aprobaciones y su ledger. Como en la raíz, un
+// agente no los escribe.
+func nestedCoyote(rel string) (string, bool) {
+	parts := strings.Split(rel, "/")
+	for i := 1; i+1 < len(parts); i++ {
+		if !strings.EqualFold(parts[i], "coyote") {
+			continue
+		}
+		switch strings.ToLower(parts[i+1]) {
+		case "project.yaml", "infra.yaml", "hub.yaml", "approvals", "ledger":
+			return strings.Join(parts[:i+2], "/"), true
+		}
+	}
+	return "", false
+}
+
+// Real devuelve p sin enlaces simbólicos, hasta donde existe.
+func (ps Paths) Real(p string) string { return resolve(p, "/", ps.Home) }
 
 // Rel devuelve abs relativa a la raíz del proyecto, con barras; si queda
 // fuera, la ruta absoluta.
@@ -618,7 +642,7 @@ func (ps Paths) hardShell(a Action) *Hard {
 		cwd = ps.Root
 	}
 	if what, ok := ps.secretWord(cmd, cwd); ok {
-		return hard("el comando toca %s: un agente no lee ni escribe archivos de secretos; pide los nombres con coyote secrets list", what)
+		return hard("%s", secretCommandReason("el comando", what))
 	}
 	if h := ps.hardInfra(cmd); h != nil {
 		return h
@@ -899,7 +923,7 @@ func (ps Paths) secretArg(w word, cwd string) (string, bool) {
 		return ps.secretGlobWord(w.s, cwd)
 	}
 	if kind, rel, ok := ps.secretFile(resolve(w.s, cwd, ps.Home)); ok {
-		return "lee un archivo de secretos: " + kind + " (" + rel + "); pide los nombres con coyote secrets list", true
+		return secretReason("lee", kind, rel), true
 	}
 	return "", false
 }
@@ -960,17 +984,26 @@ func (ps Paths) readTool(a Action) *Hard {
 		base = ps.Root
 	}
 	for k, v := range a.Input {
-		if patternFields[k] {
+		if patternFields[k] || excludeField(k) {
 			continue
 		}
 		var paths []string
 		allStrings(v, &paths)
 		for _, t := range paths {
-			if t == "" || strings.ContainsAny(t, "\n*?[") {
+			if t == "" || strings.Contains(t, "\n") || !looksLikePath(t) {
 				continue
 			}
-			if kind, rel, ok := ps.secretFile(resolve(t, base, ps.Home)); ok && looksLikePath(t) {
-				return hard("lee un archivo de secretos: %s (%s); pide los nombres con coyote secrets list", kind, rel)
+			// Una ruta con [, ? o * es, para una herramienta de lectura, el
+			// nombre literal de un archivo: "[x].env", o el proyecto en "Mi app
+			// [v2]". Se juzga tal cual y, si además puede ser un patrón, por
+			// los archivos que alcanza.
+			if kind, rel, ok := ps.secretFile(resolve(t, base, ps.Home)); ok {
+				return hard("%s", secretReason("lee", kind, rel))
+			}
+			if strings.ContainsAny(t, "*?[") {
+				if what, ok := ps.secretGlobWord(t, base); ok {
+					return hard("%s; pide los nombres con coyote secrets list", what)
+				}
 			}
 		}
 	}
@@ -1007,22 +1040,36 @@ func (ps Paths) readTool(a Action) *Hard {
 		if !(strings.HasPrefix(t, "/") || strings.HasPrefix(t, "~") || strings.Contains(t, "/") || strings.HasPrefix(t, ".")) {
 			continue
 		}
-		p := t
-		if i := strings.IndexAny(p, "*?[{"); i >= 0 {
-			p = path.Dir(p[:i] + "x")
+		// La ruta tal cual (un home o un proyecto con corchetes en el nombre) y,
+		// si trae un comodín, la carpeta donde empieza.
+		cands := []string{t}
+		if i := strings.IndexAny(t, "*?[{"); i >= 0 {
+			cands = append(cands, path.Dir(t[:i]+"x"))
 		}
-		abs := resolve(p, cwd, ps.Home)
-		if cred, ok := ps.sensitive(abs); ok {
-			return hard("lee credenciales (%s)", cred)
-		}
-		// La configuración de git del proyecto puede llevar un token en la URL
-		// de un remoto: leerla se bloquea igual que cat .git/config. Buscar en
-		// el proyecto sigue libre (los buscadores no entran a .git).
-		if ps.gitConfig(abs) {
-			return hard("lee la configuración de un repo de git, que puede llevar credenciales")
+		for _, p := range cands {
+			abs := resolve(p, cwd, ps.Home)
+			if cred, ok := ps.sensitive(abs); ok {
+				return hard("lee credenciales (%s)", cred)
+			}
+			// La configuración de git del proyecto puede llevar un token en la
+			// URL de un remoto: leerla se bloquea igual que cat .git/config.
+			// Buscar en el proyecto sigue libre (los buscadores no entran a .git).
+			if ps.gitConfig(abs) {
+				return hard("lee la configuración de un repo de git, que puede llevar credenciales")
+			}
 		}
 	}
 	return nil
+}
+
+// excludeField dice si un campo de una herramienta lista lo que deja fuera de
+// su recorrido (ignore, exclude): no lee nada, así que no es una ruta leída.
+func excludeField(k string) bool {
+	switch strings.ToLower(strings.ReplaceAll(k, "_", "")) {
+	case "ignore", "exclude", "excludes", "excludepattern", "excludepatterns", "ignorepattern", "ignorepatterns", "exclusions":
+		return true
+	}
+	return false
 }
 
 // hardFile revisa los archivos que una herramienta escribiría.
@@ -1058,7 +1105,7 @@ func (ps Paths) hardFile(a Action) *Hard {
 			return hard("escribir en %s desarmaría el gate o tocaría credenciales", what)
 		}
 		if kind, rel, ok := ps.secretFile(abs); ok {
-			return hard("escribe un archivo de secretos: %s (%s); los valores los pone la persona", kind, rel)
+			return hard("%s", secretReason("escribe", kind, rel))
 		}
 		// La configuración de VS Code se edita, pero no para apagar sus hooks
 		// ni para aprobar herramientas solas.
@@ -1409,7 +1456,7 @@ func (ps Paths) hardOther(a Action) *Hard {
 			return hard("la herramienta imprime o crea %s", what)
 		}
 		if what, ok := ps.secretWord(t, ps.Root); ok {
-			return hard("la herramienta toca %s", what)
+			return hard("%s", secretCommandReason("la herramienta", what))
 		}
 		if why, ok := ps.protectedIn(t, false, ps.Root); ok {
 			return hard("la herramienta toca %s", why)

@@ -138,12 +138,12 @@ func newLines(text, old string, hadOld bool) []AddedLine {
 	var seen map[string]int
 	if hadOld {
 		seen = map[string]int{}
-		for _, l := range strings.Split(old, "\n") {
+		for _, l := range textLines(old) {
 			seen[l]++
 		}
 	}
 	var out []AddedLine
-	for i, l := range strings.Split(text, "\n") {
+	for i, l := range textLines(text) {
 		if seen[l] > 0 {
 			seen[l]--
 			continue
@@ -151,6 +151,15 @@ func newLines(text, old string, hadOld bool) []AddedLine {
 		out = append(out, AddedLine{Line: i + 1, Text: l})
 	}
 	return out
+}
+
+// textLines parte un texto en líneas: el salto final no abre una línea vacía.
+func textLines(s string) []string {
+	lines := strings.Split(s, "\n")
+	if n := len(lines); n > 0 && lines[n-1] == "" {
+		lines = lines[:n-1]
+	}
+	return lines
 }
 
 // safeGitPath rechaza rutas que git leería como opción o fuera de la raíz del

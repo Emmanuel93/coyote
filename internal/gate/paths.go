@@ -5,6 +5,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 )
 
@@ -248,6 +249,74 @@ func symbolic(seg []string, at int) bool {
 	return false
 }
 
+// glob expande un patrón como lo haría el shell en ese momento. Lo que del
+// camino ya existe con ese nombre se toma literal: la carpeta de un proyecto
+// en "Mi app [v2]" no es una clase de caracteres, y leerla así hacía que
+// `cat .e*` no alcanzara nada. Devuelve las coincidencias de las dos lecturas.
+func glob(pattern string) []string {
+	var out []string
+	seen := map[string]bool{}
+	pats := []string{pattern}
+	if lit := literalPrefix(pattern); lit != pattern {
+		pats = append(pats, lit)
+	}
+	for _, pat := range pats {
+		matches, _ := filepath.Glob(pat)
+		for _, m := range matches {
+			if !seen[m] {
+				seen[m] = true
+				out = append(out, m)
+			}
+		}
+	}
+	return out
+}
+
+// literalPrefix escapa los comodines del tramo inicial de pattern que existe en
+// el disco con ese mismo nombre. En Windows no hay escape: queda igual.
+func literalPrefix(pattern string) string {
+	if runtime.GOOS == "windows" || !strings.ContainsAny(pattern, "*?[") {
+		return pattern
+	}
+	sep := string(filepath.Separator)
+	parts := strings.Split(pattern, sep)
+	cur := ""
+	if strings.HasPrefix(pattern, sep) {
+		cur = sep
+	}
+	n := 0
+	for i, part := range parts {
+		if part == "" {
+			n = i + 1
+			continue
+		}
+		next := filepath.Join(cur, part)
+		if strings.ContainsAny(part, "*?[") {
+			if _, err := os.Lstat(next); err != nil {
+				break
+			}
+		}
+		cur = next
+		n = i + 1
+	}
+	if n >= len(parts) {
+		return escapeMeta(cur)
+	}
+	return filepath.Join(escapeMeta(cur), strings.Join(parts[n:], sep))
+}
+
+// escapeMeta antepone \ a los caracteres de comodín de s.
+func escapeMeta(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if r == '*' || r == '?' || r == '[' || r == '\\' {
+			b.WriteByte('\\')
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
 // globRel expande un comodín como lo haría el shell en ese momento y devuelve
 // las rutas relativas al proyecto. Un comodín que no alcanza nada queda tal
 // cual, como en el shell.
@@ -259,10 +328,7 @@ func (ps Paths) globRel(p string) []string {
 	if !path.IsAbs(p) {
 		abs = filepath.Join(ps.Root, filepath.FromSlash(p))
 	}
-	matches, err := filepath.Glob(abs)
-	if err != nil {
-		return nil
-	}
+	matches := glob(abs)
 	var out []string
 	for i, m := range matches {
 		if i >= 100 {

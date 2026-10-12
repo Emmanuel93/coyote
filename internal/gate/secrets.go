@@ -1,6 +1,7 @@
 package gate
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -326,7 +327,10 @@ func (ps Paths) secretGlobWord(pattern, cwd string) (string, bool) {
 		}
 		return "", false
 	}
-	matches, _ := filepath.Glob(resolve(pattern, cwd, ps.Home))
+	// glob también lee el nombre tal cual: un comodín que no alcanza nada
+	// queda literal en el shell, y cat [x].env lee ese archivo si no hay un
+	// x.env.
+	matches := glob(resolve(pattern, cwd, ps.Home))
 	for i, m := range matches {
 		if i == 1000 {
 			break
@@ -338,19 +342,57 @@ func (ps Paths) secretGlobWord(pattern, cwd string) (string, bool) {
 	return "", false
 }
 
+// rulesUnreadable encabeza lo que secretFile devuelve en lugar del tipo cuando
+// no pudo juzgar el archivo: las reglas de secretos de un proyecto que lo
+// contiene no se leen. El gate falla cerrado, pero lo dice como es.
+const rulesUnreadable = "un proyecto cuyas reglas no se pueden leer: "
+
+// secretReason arma el motivo del bloqueo de un archivo que lee o escribe una
+// herramienta: es de secretos, o no se puede saber si lo es.
+func secretReason(verb, kind, rel string) string {
+	if detail, ok := strings.CutPrefix(kind, rulesUnreadable); ok {
+		return fmt.Sprintf("%s %s: el gate no puede saber si es un archivo de secretos, porque no se pueden leer las reglas del proyecto que lo contiene (%s); la persona corrige ese coyote/project.yaml", verb, rel, detail)
+	}
+	if verb == "escribe" {
+		return fmt.Sprintf("escribe un archivo de secretos: %s (%s); los valores los pone la persona", kind, rel)
+	}
+	return fmt.Sprintf("%s un archivo de secretos: %s (%s); pide los nombres con coyote secrets list", verb, kind, rel)
+}
+
+// secretCommandReason arma el motivo del bloqueo de un comando o una
+// herramienta que toca algo que secretWord reconoció.
+func secretCommandReason(who, what string) string {
+	if detail, ok := strings.CutPrefix(what, rulesUnreadable); ok {
+		return fmt.Sprintf("%s toca un archivo de un proyecto cuyas reglas de secretos no se pueden leer (%s); la persona corrige ese coyote/project.yaml", who, detail)
+	}
+	return fmt.Sprintf("%s toca %s: un agente no lee ni escribe archivos de secretos; pide los nombres con coyote secrets list", who, what)
+}
+
 // secretFile dice si abs es un archivo de secretos: por su nombre, por las
 // reglas del proyecto (secrets.files) y salvo sus dispensas.
 func (ps Paths) secretFile(abs string) (kind, rel string, ok bool) {
 	rel = ps.Rel(abs)
 	if filepath.IsAbs(filepath.FromSlash(rel)) {
-		// Fuera del proyecto cuentan el nombre y, si hace falta, el contenido.
+		// Fuera del proyecto cuentan el nombre y, si hace falta, el contenido;
+		// y, si la ruta es del mismo repo, las reglas de los proyectos que la
+		// contienen (un hermano del proyecto, en un monorepo).
+		if ps.SecretsFor != nil {
+			if r, err := filepath.Rel(ps.Real(ps.Root), abs); err == nil {
+				rules, dir, prel, err := ps.SecretsFor(filepath.ToSlash(r))
+				if err != nil {
+					return rulesUnreadable + err.Error(), rel, true
+				}
+				kind, ok = rules.KindAt(dir, prel)
+				return kind, rel, ok
+			}
+		}
 		kind, ok = secrets.Rules{}.KindAt("", rel)
 		return kind, rel, ok
 	}
 	if ps.SecretsFor != nil {
 		rules, dir, prel, err := ps.SecretsFor(rel)
 		if err != nil {
-			return "un proyecto cuyas reglas no se pueden leer: " + err.Error(), rel, true
+			return rulesUnreadable + err.Error(), rel, true
 		}
 		kind, ok = rules.KindAt(dir, prel)
 		return kind, rel, ok

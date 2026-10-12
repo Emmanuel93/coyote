@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -876,5 +877,237 @@ func TestMergeRulesNombresConComodines(t *testing.T) {
 	// Y no alcanza a otro archivo con otra forma.
 	if _, ok := rules.Kind("lib/claves/otro.txt"); ok {
 		t.Errorf("no declara nada más: %+v", rules)
+	}
+}
+
+// TestSecretosUTF16ConSecuenciasAnsi: sexta revisión de v1.0. Un log de
+// PowerShell en UTF-16 trae secuencias ANSI (ESC): contarlas como basura lo
+// dejaba por binario, y el token que traía pasaba sin escanear en secrets
+// scan y en el commit. Un binario con BOM de mentira sigue sin ser texto.
+func TestSecretosUTF16ConSecuenciasAnsi(t *testing.T) {
+	_, root := gateProject(t)
+	write(t, root, ".gitignore", ".coyote/\n")
+	git(t, root, "add", "-A")
+	git(t, root, "commit", "-qm", "inicio", "--no-verify")
+	esc := string(rune(0x1b))
+	log := ""
+	for i := 0; i < 30; i++ {
+		log += esc + "[32mok" + esc + "[0m paso\r\n"
+	}
+	log += "GITHUB_TOKEN=" + cliGitHub + "\r\n"
+	if err := os.WriteFile(filepath.Join(root, "salida.txt"), le16(log), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, root, "add", "salida.txt")
+	if s := run(t, root, "", "secrets", "scan", "--staged"); s.code != 1 || !strings.Contains(s.stdout, "token de GitHub") {
+		t.Errorf("un log en UTF-16 con ANSI y un token: %d\n%s", s.code, s.stdout)
+	}
+	if c := run(t, root, "", "commit", "-m", "chore(build): salida del pipeline"); c.code != 1 || !strings.Contains(c.stderr, "R18") {
+		t.Errorf("el commit de ese log: %d\n%s", c.code, c.stderr)
+	}
+}
+
+// TestGateAbiertoEnUnProyectoAnidado: sexta revisión de v1.0. Un IDE abierto en
+// un proyecto dentro de un monorepo tomaba las reglas del proyecto más cercano
+// y olvidaba los secrets.files del de afuera, que el commit sí aplica: el
+// agente leía lo que el commit habría bloqueado. Las rutas hermanas, dentro
+// del mismo repo, también.
+func TestGateAbiertoEnUnProyectoAnidado(t *testing.T) {
+	_, root := gateProject(t)
+	cfg := readFile(t, filepath.Join(root, "coyote", "project.yaml"))
+	write(t, root, "coyote/project.yaml", cfg+"secrets:\n  files: [\"svc/config/prod/*.yaml\", \"otro/claves/*.txt\"]\n")
+	must(t, run(t, root, "", "init", "svc", "--no-git", "--type", "backend", "--purpose", "servicio de pagos de la tienda"), 0, "init anidado")
+	write(t, root, "svc/config/prod/db.yaml", "password: corta\n")
+	write(t, root, "svc/README.md", "# servicio\n")
+	write(t, root, "otro/claves/k.txt", "uno\n")
+	write(t, root, "otro/README.md", "# otro\n")
+	svc := filepath.Join(root, "svc")
+	fuera := filepath.Join(filepath.Dir(root), "fuera")
+	write(t, fuera, ".env", "A=1\n")
+	write(t, fuera, "notas.txt", "hola\n")
+	check := func(tool string, input map[string]any) result {
+		t.Helper()
+		return run(t, root, hook(t, svc, tool, input, nil), "gate", "check")
+	}
+	for name, r := range map[string]result{
+		"Read de lo que declara el proyecto de afuera": check("Read", map[string]any{"file_path": filepath.Join(svc, "config", "prod", "db.yaml")}),
+		"cat de lo mismo": check("Bash", map[string]any{"command": "cat config/prod/db.yaml", "description": "x"}),
+		"Read de una ruta hermana que declara el de afuera": check("Read", map[string]any{"file_path": filepath.Join(root, "otro", "claves", "k.txt")}),
+		"cat de la ruta hermana":                            check("Bash", map[string]any{"command": "cat ../otro/claves/k.txt", "description": "x"}),
+		"un .env fuera del repo, por su nombre":             check("Read", map[string]any{"file_path": filepath.Join(fuera, ".env")}),
+	} {
+		if r.code != 2 || !strings.Contains(r.stderr, "bloqueado siempre") {
+			t.Errorf("%s (código %d):\n%s", name, r.code, r.stderr)
+		}
+	}
+	for name, r := range map[string]result{
+		"un archivo común del proyecto":   check("Read", map[string]any{"file_path": filepath.Join(svc, "README.md")}),
+		"un archivo común del hermano":    check("Read", map[string]any{"file_path": filepath.Join(root, "otro", "README.md")}),
+		"un archivo común fuera del repo": check("Read", map[string]any{"file_path": filepath.Join(fuera, "notas.txt")}),
+	} {
+		if r.code != 0 {
+			t.Errorf("%s (código %d):\n%s", name, r.code, r.stderr)
+		}
+	}
+}
+
+// TestSecretsListIncluyeLoVersionadoEnDependencias: sexta revisión de v1.0.
+// list no recorre vendor, node_modules ni build, pero scan sí reporta lo que
+// git sigue ahí: un archivo de secretos versionado en una dependencia se
+// lista, y uno sin versionar en esas carpetas, no.
+func TestSecretsListIncluyeLoVersionadoEnDependencias(t *testing.T) {
+	_, root := gateProject(t)
+	write(t, root, ".gitignore", ".coyote/\nnode_modules/sin-git/\n")
+	write(t, root, "vendor/lib/.env", "A=1\n")
+	write(t, root, "node_modules/pkg/server.key", "-----BEGIN "+"RSA PRIVATE KEY-----\nabc\n")
+	write(t, root, "node_modules/sin-git/.env", "B=2\n")
+	write(t, root, "build/.env", "C=3\n")
+	write(t, root, ".env", "D=4\n")
+	if err := os.Symlink(filepath.Join(root, ".env"), filepath.Join(root, "vendor", "lib", "enlace.env")); err != nil {
+		t.Skip("sin enlaces simbólicos")
+	}
+	git(t, root, "add", "-f", "vendor", "node_modules/pkg", ".gitignore", "coyote", ".env")
+	git(t, root, "commit", "-qm", "chore: inicio", "--no-verify")
+
+	r := run(t, root, "", "secrets", "list", "--no-names")
+	must(t, r, 0, "secrets list")
+	for _, want := range []string{"vendor/lib/.env", "node_modules/pkg/server.key", ".env"} {
+		if !strings.Contains(r.stdout, want) {
+			t.Errorf("list no muestra %q:\n%s", want, r.stdout)
+		}
+	}
+	for _, not := range []string{"node_modules/sin-git/.env", "build/.env", "enlace.env"} {
+		if strings.Contains(r.stdout, not) {
+			t.Errorf("list no recorre las dependencias sin versionar (%q):\n%s", not, r.stdout)
+		}
+	}
+	// Cada archivo sale una sola vez.
+	j := run(t, root, "", "secrets", "list", "--no-names", "--json")
+	must(t, j, 0, "secrets list --json")
+	var entries []secretEntry
+	if err := json.Unmarshal([]byte(j.stdout), &entries); err != nil {
+		t.Fatalf("json: %v\n%s", err, j.stdout)
+	}
+	count := map[string]int{}
+	for _, e := range entries {
+		count[e.Path]++
+	}
+	for p, c := range count {
+		if c != 1 {
+			t.Errorf("%s sale %d veces", p, c)
+		}
+	}
+	if len(count) != 3 {
+		t.Errorf("deben ser 3 archivos: %v", count)
+	}
+}
+
+// TestProposeYApproveVenLosSecretosAnidados: sexta revisión de v1.0. propose y
+// approve --bash juzgan el comando con las mismas reglas que el gate: un
+// comando que lee los secretos de un proyecto anidado no es "de solo lectura".
+func TestProposeYApproveVenLosSecretosAnidados(t *testing.T) {
+	_, root := gateProject(t)
+	must(t, run(t, root, "", "init", "svc", "--no-git", "--type", "backend", "--purpose", "servicio de pagos de la tienda"), 0, "init anidado")
+	cfg := readFile(t, filepath.Join(root, "svc", "coyote", "project.yaml"))
+	write(t, root, "svc/coyote/project.yaml", cfg+"secrets:\n  files: [\"secretos/*.txt\"]\n")
+	write(t, root, "svc/secretos/a.txt", "algo\n")
+	for _, args := range [][]string{
+		{"propose", "--bash", "cat svc/secretos/a.txt"},
+		{"approve", "--bash", "cat svc/secretos/a.txt"},
+	} {
+		r := run(t, root, "", args...)
+		if r.code != 1 || !strings.Contains(r.stderr, "se bloquea siempre") {
+			t.Errorf("%v (código %d):\n%s%s", args, r.code, r.stdout, r.stderr)
+		}
+	}
+	if r := run(t, root, "", "propose", "--bash", "cat README.md"); r.code != 0 || !strings.Contains(r.stdout, "solo lectura") {
+		t.Errorf("leer lo común sigue siendo de solo lectura (código %d):\n%s%s", r.code, r.stdout, r.stderr)
+	}
+}
+
+// TestMergeRulesDispensasDeProyectosAnidados: sexta revisión de v1.0. La
+// dispensa del proyecto más cercano vale para lo suyo, como dice la
+// especificación; solo no tapa lo que el proyecto de afuera declara como
+// secreto y no dispensa.
+func TestMergeRulesDispensasDeProyectosAnidados(t *testing.T) {
+	allow := func(p string) []secrets.Allow {
+		return []secrets.Allow{{Path: p, Reason: "llaves de prueba generadas por el pipeline"}}
+	}
+	// El de afuera no dice nada de esa ruta: la dispensa de adentro vale.
+	rules, near := mergeRules("svc/testdata/server.key", []layer{
+		{rules: secrets.Rules{Allow: allow("testdata/**")}, rel: "testdata/server.key"},
+		{rules: secrets.Rules{Files: []string{"otro/*.yaml"}}, rel: "svc/testdata/server.key"},
+	})
+	if near != "testdata/server.key" || !rules.Allowed(near) {
+		t.Errorf("la dispensa del proyecto más cercano vale: %+v %q", rules, near)
+	}
+	// El de afuera declara el archivo y no lo dispensa: no se tapa.
+	rules, near = mergeRules("svc/config/prod/db.yaml", []layer{
+		{rules: secrets.Rules{Allow: allow("config/prod/*.yaml")}, rel: "config/prod/db.yaml"},
+		{rules: secrets.Rules{Files: []string{"svc/config/prod/*.yaml"}}, rel: "svc/config/prod/db.yaml"},
+	})
+	if rules.Allowed(near) {
+		t.Errorf("el proyecto de adentro no dispensa lo que el de afuera declara: %+v %q", rules, near)
+	}
+	if _, ok := rules.Kind(near); !ok {
+		t.Errorf("sigue siendo un archivo de secretos: %+v %q", rules, near)
+	}
+	// Si el de afuera también lo dispensa, vale.
+	rules, near = mergeRules("svc/config/prod/db.yaml", []layer{
+		{rules: secrets.Rules{Allow: allow("config/prod/*.yaml")}, rel: "config/prod/db.yaml"},
+		{rules: secrets.Rules{Files: []string{"svc/config/prod/*.yaml"}, Allow: allow("svc/config/prod/*.yaml")}, rel: "svc/config/prod/db.yaml"},
+	})
+	if !rules.Allowed(near) {
+		t.Errorf("los dos dispensan: %+v %q", rules, near)
+	}
+}
+
+// TestGateProyectoAnidadoConReglasIlegibles: sexta revisión de v1.0. Con el
+// project.yaml de un proyecto anidado roto, el gate no puede saber qué es
+// secreto ahí y bloquea; el motivo lo dice, en vez de afirmar que el
+// archivo es de secretos y mandar a secrets list, que tampoco puede.
+func TestGateProyectoAnidadoConReglasIlegibles(t *testing.T) {
+	_, root := gateProject(t)
+	must(t, run(t, root, "", "init", "svc", "--no-git", "--type", "backend", "--purpose", "servicio de pagos de la tienda"), 0, "init anidado")
+	write(t, root, "svc/README.md", "# servicio\n")
+	write(t, root, "svc/coyote/project.yaml", "name: [\n  roto\n")
+	for name, r := range map[string]result{
+		"Read":  run(t, root, hook(t, root, "Read", map[string]any{"file_path": filepath.Join(root, "svc", "README.md")}, nil), "gate", "check"),
+		"Write": run(t, root, hook(t, root, "Write", map[string]any{"file_path": filepath.Join(root, "svc", "notas.md"), "content": "x"}, nil), "gate", "check"),
+		"cat":   run(t, root, hook(t, root, "Bash", map[string]any{"command": "cat svc/README.md", "description": "x"}, nil), "gate", "check"),
+	} {
+		if r.code != 2 || !strings.Contains(r.stderr, "no se pueden leer") || !strings.Contains(r.stderr, "svc/coyote/project.yaml") || !strings.Contains(r.stderr, "la persona corrige") {
+			t.Errorf("%s (código %d):\n%s", name, r.code, r.stderr)
+		}
+		if strings.Contains(r.stderr, "archivo de secretos: un proyecto") || strings.Contains(r.stderr, "pide los nombres con coyote secrets list") {
+			t.Errorf("%s: el motivo no es que el archivo sea de secretos ni hay lista que pedir:\n%s", name, r.stderr)
+		}
+	}
+}
+
+// TestSecretosCambioDeModoNoCargaLoQueYaEstaba: sexta revisión de v1.0. Lo que
+// git lista sin hunks se compara con HEAD en lo preparado para el commit,
+// como en un PR: hacer ejecutable un script no acusa el token que ya tenía,
+// y una línea nueva con un token en un archivo con -diff, sí.
+func TestSecretosCambioDeModoNoCargaLoQueYaEstaba(t *testing.T) {
+	_, root := gateProject(t)
+	write(t, root, ".gitignore", ".coyote/\n")
+	write(t, root, ".gitattributes", "*.min.js -diff\n")
+	write(t, root, "scripts/deploy.sh", "#!/bin/sh\nTOKEN="+cliGitHub+"\n")
+	write(t, root, "web/app.min.js", "var a=1;\n")
+	git(t, root, "add", "-A")
+	git(t, root, "commit", "-qm", "inicio", "--no-verify")
+	if err := os.Chmod(filepath.Join(root, "scripts", "deploy.sh"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	git(t, root, "add", "scripts/deploy.sh")
+	must(t, run(t, root, "", "secrets", "scan", "--staged"), 0, "solo cambia el modo")
+	must(t, run(t, root, "", "commit", "-m", "chore(scripts): hace ejecutable el script"), 0, "commit de un cambio de modo")
+
+	// Una línea nueva con un token en un archivo con -diff sí se acusa.
+	write(t, root, "web/app.min.js", "var a=1;\nvar t='"+cliGitHub+"';\n")
+	git(t, root, "add", "web/app.min.js")
+	if s := run(t, root, "", "secrets", "scan", "--staged"); s.code != 1 || !strings.Contains(s.stdout, "web/app.min.js:2") {
+		t.Errorf("la línea nueva de un archivo con -diff: %d\n%s", s.code, s.stdout)
 	}
 }

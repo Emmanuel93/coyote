@@ -182,9 +182,12 @@ func Text(data []byte) (string, bool) {
 
 // utf16Text decodifica un UTF-16 con BOM. Si lo decodificado no tiene forma de
 // texto, no lo es: bytes cualquiera que casualmente empiezan con FF FE (un
-// binario) darían miles de caracteres de control, de ancho cero o de dirección
-// que no escribió nadie. Se tolera una fracción mínima de controles y de
-// pares de sustitución rotos.
+// binario) dan 3 de cada 100 unidades como pares de sustitución rotos, y un
+// texto no los trae. Los caracteres de control no cuentan: un log de PowerShell
+// con secuencias ANSI, o un archivo con controles puestos a propósito, siguen
+// siendo texto y se escanean; contarlos los dejaba por binarios. Se tolera
+// menos de un 1 % de rotos y menos de cuatro, que es lo que trae un texto
+// cortado a media letra.
 func utf16Text(b []byte, big bool) (string, bool) {
 	u := make([]uint16, len(b)/2)
 	for i := range u {
@@ -197,11 +200,11 @@ func utf16Text(b []byte, big bool) (string, bool) {
 	rs := utf16.Decode(u)
 	bad := 0
 	for _, r := range rs {
-		if r == utf8.RuneError || r == 0 || (r < 0x20 && r != '\t' && r != '\n' && r != '\r') {
+		if r == utf8.RuneError || r == 0 {
 			bad++
 		}
 	}
-	if bad*200 > len(rs) {
+	if bad >= 4 && bad*100 > len(rs) {
 		return "", false
 	}
 	return string(rs), true

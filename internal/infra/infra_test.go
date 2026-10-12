@@ -25,7 +25,11 @@ func write(t *testing.T, root, rel, content string) {
 // var-files, un stack activo con backend remoto y otros de andamiaje.
 func demoRepo(t *testing.T) string {
 	t.Helper()
-	root := t.TempDir()
+	return demoRepoAt(t, t.TempDir())
+}
+
+func demoRepoAt(t *testing.T, root string) string {
+	t.Helper()
 	write(t, root, ".tool-versions", "terraform 1.9.8\nkubectl 1.31.0\n")
 	write(t, root, "environments/demo.tfvars", "env = \"demo\"\n")
 	write(t, root, "environments/prod.tfvars", "env = \"prod\"\n")
@@ -160,6 +164,22 @@ func TestProposeAndDetect(t *testing.T) {
 	text := findingsText(Check(root, back, nil))
 	if !strings.Contains(text, "presupuesto pendiente") || !strings.Contains(text, "sin dueños") {
 		t.Errorf("la revisión de la propuesta:\n%s", text)
+	}
+}
+
+// TestProposeEnUnaCarpetaConCorchetes: sexta revisión de v1.0. El nombre de la
+// carpeta del repo no es un patrón: con corchetes, los var-files no se hallaban
+// y la propuesta salía sin ambientes.
+func TestProposeEnUnaCarpetaConCorchetes(t *testing.T) {
+	root := demoRepoAt(t, filepath.Join(t.TempDir(), "Mi infra [v2]"))
+	inv, err := Propose(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, env := range []string{"demo", "prod"} {
+		if e := inv.Environments[env]; e == nil || e.VarFile != "environments/"+env+".tfvars" {
+			t.Errorf("ambiente %s: %+v", env, e)
+		}
 	}
 }
 

@@ -1287,6 +1287,60 @@ func TestRefineSoloLoNuevo(t *testing.T) {
 	}
 }
 
+// TestStagedAddedSoloLoNuevo: sexta revisión de v1.0. Lo preparado para el
+// commit, con git de verdad: un archivo sin hunks (con -diff, o que solo
+// cambia de modo) queda con las líneas que HEAD no tenía; uno cuyos hunks solo
+// borran no se toma por entero (Whole sale de los hunks, no de que no haya
+// líneas), aunque no se pueda leer como texto.
+func TestStagedAddedSoloLoNuevo(t *testing.T) {
+	dir := t.TempDir()
+	put(t, dir, ".gitattributes", "*.dat diff\n*.js -diff\n")
+	put(t, dir, "modo.sh", "#!/bin/sh\necho viejo\n")
+	put(t, dir, "min.js", "a\nb\n")
+	put(t, dir, "nul.dat", "x\x00y\nz\nw\n")
+	put(t, dir, "otro.txt", "uno\n")
+	gitRepo(t, dir)
+	if err := os.Chmod(filepath.Join(dir, "modo.sh"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	put(t, dir, "min.js", "a\nb\nc\n")
+	put(t, dir, "nul.dat", "x\x00y\nw\n")
+	put(t, dir, "otro.txt", "uno\ndos\n")
+	put(t, dir, "nuevo.js", "p\nq\n")
+	for _, args := range [][]string{{"add", "-A"}} {
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		cmd.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1", "HOME="+dir)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	files, err := StagedAdded(dir, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]AddedFile{}
+	for _, f := range files {
+		got[f.Path] = f
+	}
+	text := func(f AddedFile) string {
+		var parts []string
+		for _, l := range f.Lines {
+			parts = append(parts, strconv.Itoa(l.Line)+":"+l.Text)
+		}
+		return strings.Join(parts, "|")
+	}
+	for path, want := range map[string]string{"modo.sh": "", "min.js": "3:c", "nul.dat": "", "otro.txt": "2:dos", "nuevo.js": "1:p|2:q"} {
+		f, ok := got[path]
+		if !ok {
+			t.Errorf("%s no está en lo preparado: %v", path, got)
+			continue
+		}
+		if text(f) != want || f.Whole {
+			t.Errorf("%s: líneas %q (queda por entero: %v), debían ser %q", path, text(f), f.Whole, want)
+		}
+	}
+}
+
 func TestSafeGitPath(t *testing.T) {
 	for p, ok := range map[string]bool{"dos..puntos.txt": true, "a/b..c/d": true, "src/main.go": true,
 		"../x": false, "a/../b": false, "./x": false, "-x": false, "/etc/passwd": false, "a//b": false, "": false} {

@@ -68,13 +68,18 @@ func Propose(root string) (*Inventory, error) {
 	}
 	// Ambientes: los var-files compartidos (environments/*.tfvars o envs/).
 	for _, dir := range []string{"environments", "envs", "env", "vars"} {
-		files, _ := filepath.Glob(filepath.Join(root, dir, "*.tfvars"))
+		// Se lista la carpeta en vez de expandir un patrón: el nombre de la
+		// carpeta del repo ("Mi infra [v2]") no es una clase de caracteres.
+		files, _ := os.ReadDir(filepath.Join(root, dir))
 		for _, f := range files {
-			name := strings.TrimSuffix(filepath.Base(f), ".tfvars")
+			if f.IsDir() || !strings.HasSuffix(f.Name(), ".tfvars") {
+				continue
+			}
+			name := strings.TrimSuffix(f.Name(), ".tfvars")
 			if !envNameRe.MatchString(name) {
 				continue
 			}
-			rel := dir + "/" + filepath.Base(f)
+			rel := dir + "/" + f.Name()
 			inv.Environments[name] = &Environment{VarFile: rel, Apply: Reviewed, Match: []string{"ENV=" + name}}
 		}
 	}

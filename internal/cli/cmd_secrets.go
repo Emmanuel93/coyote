@@ -94,10 +94,39 @@ func secretsList(a *app, args []string) error {
 	// Cada archivo con las reglas del proyecto que lo contiene: los que el
 	// árbol de trabajo tiene y los que git sigue, como en scan.
 	rs := newRuleSet(root)
-	if files, err := product.TrackedFiles(root); err == nil {
-		rs.track(files)
+	tracked, trackErr := product.TrackedFiles(root)
+	if trackErr == nil {
+		rs.track(tracked)
 	}
 	var list []secretEntry
+	seen := map[string]bool{}
+	consider := func(p, rel string, info fs.FileInfo) {
+		seen[rel] = true
+		rules, prel := rs.For(rel)
+		kind, ok := rules.Kind(prel)
+		if !ok {
+			return
+		}
+		// Un .pem sin llave privada (un certificado, una llave pública) no es
+		// secreto; con --no-names no se abre nada y se lista igual.
+		if !*noNames {
+			proj := strings.TrimSuffix(filepath.ToSlash(p), prel)
+			if _, ok := rules.KindAt(filepath.FromSlash(proj), prel); !ok {
+				return
+			}
+		}
+		e := secretEntry{Path: rel, Kind: kind}
+		if *noNames {
+			list = append(list, e)
+			return
+		}
+		if info != nil && info.Size() <= 1<<20 {
+			if data, err := fsx.ReadCapped(p, fsx.MaxText); err == nil {
+				e.Names = secrets.Names(rel, data)
+			}
+		}
+		list = append(list, e)
+	}
 	n := 0
 	walkErr := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -118,35 +147,26 @@ func secretsList(a *app, args []string) error {
 			return nil
 		}
 		rel, _ := filepath.Rel(root, p)
-		rel = filepath.ToSlash(rel)
-		rules, prel := rs.For(rel)
-		kind, ok := rules.Kind(prel)
-		if !ok {
-			return nil
-		}
-		// Un .pem sin llave privada (un certificado, una llave pública) no es
-		// secreto; con --no-names no se abre nada y se lista igual.
-		if !*noNames {
-			proj := strings.TrimSuffix(filepath.ToSlash(p), prel)
-			if _, ok := rules.KindAt(filepath.FromSlash(proj), prel); !ok {
-				return nil
-			}
-		}
-		e := secretEntry{Path: rel, Kind: kind}
-		if *noNames {
-			list = append(list, e)
-			return nil
-		}
-		if info, err := d.Info(); err == nil && info.Size() <= 1<<20 {
-			if data, err := fsx.ReadCapped(p, fsx.MaxText); err == nil {
-				e.Names = secrets.Names(rel, data)
-			}
-		}
-		list = append(list, e)
+		info, _ := d.Info()
+		consider(p, filepath.ToSlash(rel), info)
 		return nil
 	})
 	if walkErr != nil {
 		return walkErr
+	}
+	// Lo que git sigue dentro de dependencias o compilación no se recorre,
+	// pero scan lo reporta: la lista lo trae igual.
+	for _, f := range tracked {
+		if seen[f] {
+			continue
+		}
+		if n++; n > secretsListLimit {
+			break
+		}
+		p := filepath.Join(root, filepath.FromSlash(f))
+		if info, err := os.Lstat(p); err == nil && info.Mode().IsRegular() {
+			consider(p, f, info)
+		}
 	}
 	sort.Slice(list, func(i, j int) bool { return list[i].Path < list[j].Path })
 	// La lista sale igual; sin las reglas de un proyecto no está completa.
@@ -351,10 +371,12 @@ type layer struct {
 
 // mergeRules junta los proyectos que contienen una ruta, del más cercano al
 // de afuera. Las reglas son las del proyecto más cercano, más los archivos
-// que declaran como secretos los proyectos que lo contienen (un proyecto
-// anidado no tapa las del de afuera); una dispensa vale solo si la dan todos.
-// Un proyecto dentro de dependencias solo suma archivos de secretos: no
-// dispensa nada, y un archivo que declara no desaparece por estar en vendor.
+// que declaran como secretos los proyectos que lo contienen: un proyecto
+// anidado no tapa lo que el de afuera declara, así que su dispensa no vale
+// para un archivo que el de afuera declara y no dispensa; para lo demás vale,
+// como dice la especificación. Un proyecto dentro de dependencias solo suma
+// archivos de secretos: no dispensa nada, y un archivo que declara no
+// desaparece por estar en vendor.
 func mergeRules(gitPath string, layers []layer) (secrets.Rules, string) {
 	var own, deps []layer
 	for _, l := range layers {
@@ -371,9 +393,9 @@ func mergeRules(gitPath string, layers []layer) (secrets.Rules, string) {
 		for _, outer := range own[1:] {
 			if glob.Any(outer.rules.Files, outer.rel) {
 				rules.Files = append(rules.Files, literalPattern(near))
-			}
-			if rules.Allowed(near) && !outer.rules.Allowed(outer.rel) {
-				rules.Allow = nil
+				if !outer.rules.Allowed(outer.rel) {
+					rules.Allow = nil
+				}
 			}
 		}
 	}

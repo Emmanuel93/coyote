@@ -4,3 +4,4 @@
 2026-10-12T05:39Z|@eramirezhdez/coyote-dev|W-0008|coyote|fix|audit|una fecha futura llega con el commit que le sigue y no…|-|-|-|ok
 2026-10-12T05:39Z|@eramirezhdez/coyote-devsecops|W-0008|coyote|fix|release|distmeta solo acepta en el buildinfo lo que make dist fija (GOAMD64,…|-|-|-|ok
 2026-10-12T05:41Z|@eramirezhdez/coyote-devsecops|W-0008|coyote|fix|release|make dist quita GIT_DIR, GIT_WORK_TREE e índice del entorno antes de las…|-|-|-|ok
+2026-10-12T06:52Z|@eramirezhdez/coyote-security|W-0008|coyote|fix|secrets|un log UTF-16 con secuencias ANSI se escanea, las rutas con corchetes…|-|-|-|ok

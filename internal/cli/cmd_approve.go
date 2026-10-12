@@ -15,7 +15,6 @@ import (
 	"github.com/Emmanuel93/coyote/internal/fsx"
 	"github.com/Emmanuel93/coyote/internal/gate"
 	"github.com/Emmanuel93/coyote/internal/identity"
-	"github.com/Emmanuel93/coyote/internal/infra"
 	"github.com/Emmanuel93/coyote/internal/ledger"
 	"github.com/Emmanuel93/coyote/internal/project"
 	"github.com/Emmanuel93/coyote/internal/standards"
@@ -62,13 +61,10 @@ func (a *app) approvalCtx() (*approvalCtx, error) {
 	if err != nil {
 		return nil, err
 	}
-	state, err := userdir.StateDir()
+	paths, err := gatePaths(root, cfg)
 	if err != nil {
 		return nil, err
 	}
-	paths := gate.NewPaths(root, gate.Home(), state)
-	paths.Secrets = cfg.Secrets
-	paths.Infra, _, paths.InfraErr = infra.Load(root)
 	return &approvalCtx{root: root, cfg: cfg, person: identity.Resolve(root),
 		store: &approval.Store{Root: root, Project: cfg.Name, Key: key, Now: a.now},
 		paths: paths}, nil
