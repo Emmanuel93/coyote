@@ -15,3 +15,4 @@
 2026-10-12T08:49Z|@eramirezhdez/coyote-devsecops|W-0008|coyote|doc|release|make dist lee DIST del entorno, descarta GIT_DIR y el índice, y…|-|-|-|ok
 2026-10-12T08:49Z|@eramirezhdez/coyote-scribe|W-0008|coyote|doc|ws|workstream por su carpeta, modo con el que se corre, autorización por…|-|-|-|ok
 2026-10-12T08:49Z|@eramirezhdez/coyote-dev|W-0008|coyote|doc|cli|repo add, ws continue e install dicen que los hace una persona…|-|-|-|ok
+2026-10-12T08:49Z|@eramirezhdez/coyote-security|W-0008|coyote|doc|seguridad|modelo de amenazas con las pasadas cuarta a sexta: secretos anidados, build,…|-|-|-|ok
