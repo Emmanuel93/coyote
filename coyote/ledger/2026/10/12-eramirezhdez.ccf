@@ -26,3 +26,4 @@
 2026-10-12T16:48Z|@eramirezhdez/coyote-scribe|W-0008|coyote|doc|auditoria|las especificaciones de auditoría y de atribución con la séptima pasada: el…|-|-|-|ok
 2026-10-12T16:48Z|@eramirezhdez/coyote-scribe|W-0008|coyote|doc|release|el reporte de v1.0.0 con la séptima pasada (23 hallazgos, 160 en…|-|-|-|ok
 2026-10-12T17:19Z|@eramirezhdez/coyote-dev|W-0008|coyote|fix|gate|el motor de comodines solo abre carpetas y lleva topes de trabajo…|-|-|-|ok
+2026-10-12T17:22Z|@eramirezhdez/coyote-scribe|W-0008|coyote|doc|gate|los topes de la expansión de comodines en la especificación del gate…|-|-|-|ok
