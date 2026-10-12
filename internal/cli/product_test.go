@@ -72,6 +72,7 @@ class PedidosClient {
 
 func TestProductoMultiRepo(t *testing.T) {
 	base := setup(t)
+	asHuman(t)
 	productoDemo(t, base)
 	root := filepath.Join(base, "producto")
 	must(t, run(t, base, "", "init", "producto", "--type", "product", "--purpose", "tienda demo en tres repos"), 0, "init product")

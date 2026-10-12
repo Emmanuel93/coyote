@@ -19,8 +19,11 @@ type AddedLine struct {
 }
 
 // AddedFile son las líneas que un cambio agrega a un archivo. Whole marca un
-// archivo que git lista sin hunks (binario, vacío o con -diff en
-// .gitattributes): hay que leerlo completo en la revisión nueva.
+// archivo que git lista sin hunks (binario, vacío, con -diff en
+// .gitattributes o que solo cambia de modo): lo que agrega se saca de leerlo
+// completo y compararlo con la revisión anterior, y al terminar queda en
+// false con sus líneas (refine). Si sigue en true no se pudo leer como texto
+// (un binario de verdad, o más grande que el tope).
 type AddedFile struct {
 	Path   string
 	Status byte // A, M, T…
@@ -33,7 +36,15 @@ type AddedFile struct {
 // línea agregada que empieza con "++ " se ve en el parche como "+++ " y no es
 // el encabezado de otro archivo. Lee líneas de cualquier largo.
 func ParseAdded(r io.Reader) (map[string][]AddedLine, error) {
+	out, _, err := parseAdded(r)
+	return out, err
+}
+
+// parseAdded es ParseAdded con el conjunto de archivos que traen hunks:
+// uno que solo borra líneas tiene hunks y ninguna línea agregada.
+func parseAdded(r io.Reader) (map[string][]AddedLine, map[string]bool, error) {
 	out := map[string][]AddedLine{}
+	hunks := map[string]bool{}
 	br := bufio.NewReaderSize(r, 1<<16)
 	name, next := "", 0
 	oldLeft, newLeft := 0, 0
@@ -66,6 +77,9 @@ func ParseAdded(r io.Reader) (map[string][]AddedLine, error) {
 				if m == nil {
 					break
 				}
+				if name != "" {
+					hunks[name] = true
+				}
 				next, _ = strconv.Atoi(m[3])
 				oldLeft, newLeft = 1, 1
 				if m[2] != "" {
@@ -77,12 +91,66 @@ func ParseAdded(r io.Reader) (map[string][]AddedLine, error) {
 			}
 		}
 		if err == io.EOF {
-			return out, nil
+			return out, hunks, nil
 		}
 		if err != nil {
-			return out, err
+			return out, hunks, err
 		}
 	}
+}
+
+// refine deja en Lines lo que de verdad agrega un archivo que git lista sin
+// hunks (un binario para git, vacío, con -diff o que solo cambia de modo) o
+// con bytes 0 (un UTF-16 marcado con diff): las líneas del texto nuevo que el
+// anterior no tenía. Así un cambio de modo, o una línea limpia en un archivo
+// con -diff, no cargan al cambio lo que el archivo ya traía. now y was dan el
+// texto, decodificado, en la revisión nueva y en la anterior; un archivo que
+// no se lee como texto queda sin revisar (Whole sigue en true).
+func refine(files []AddedFile, now, was func(string) (string, bool)) {
+	for i := range files {
+		f := &files[i]
+		nul := false
+		for _, l := range f.Lines {
+			if strings.IndexByte(l.Text, 0) >= 0 {
+				nul = true
+				break
+			}
+		}
+		if !f.Whole && !nul {
+			continue
+		}
+		text, ok := now(f.Path)
+		if !ok {
+			continue
+		}
+		old, hadOld := "", false
+		if f.Status != 'A' {
+			old, hadOld = was(f.Path)
+		}
+		f.Lines, f.Whole = newLines(text, old, hadOld), false
+	}
+}
+
+// newLines son las líneas de text que old no tiene, con su número en text: se
+// descuentan una a una las que old repite. Sin old (un archivo nuevo, o que
+// antes no era texto), son todas.
+func newLines(text, old string, hadOld bool) []AddedLine {
+	var seen map[string]int
+	if hadOld {
+		seen = map[string]int{}
+		for _, l := range strings.Split(old, "\n") {
+			seen[l]++
+		}
+	}
+	var out []AddedLine
+	for i, l := range strings.Split(text, "\n") {
+		if seen[l] > 0 {
+			seen[l]--
+			continue
+		}
+		out = append(out, AddedLine{Line: i + 1, Text: l})
+	}
+	return out
 }
 
 // safeGitPath rechaza rutas que git leería como opción o fuera de la raíz del
@@ -139,7 +207,7 @@ func AddedText(dir, diff string) ([]AddedFile, string, error) {
 	if err := cmd.Run(); err != nil {
 		return nil, "", fmt.Errorf("git diff %s: %v %s", diff, err, strings.TrimSpace(stderr.String()))
 	}
-	lines, err := ParseAdded(&stdout)
+	lines, hunks, err := parseAdded(&stdout)
 	if err != nil {
 		return nil, "", err
 	}
@@ -148,11 +216,11 @@ func AddedText(dir, diff string) ([]AddedFile, string, error) {
 		if n.status == 'D' {
 			continue
 		}
-		f := AddedFile{Path: n.path, Status: n.status, Lines: lines[n.path]}
-		// Lo que git lista sin hunks se lee completo en la revisión nueva.
-		f.Whole = len(f.Lines) == 0
-		out = append(out, f)
+		// Sin hunks (binario, vacío, con -diff, solo el modo) hay que leer los
+		// dos lados para saber qué agrega; con hunks que solo borran, nada.
+		out = append(out, AddedFile{Path: n.path, Status: n.status, Lines: lines[n.path], Whole: !hunks[n.path]})
 	}
+	refine(out, func(p string) (string, bool) { return FileAt(dir, right, p) }, func(p string) (string, bool) { return FileAt(dir, left, p) })
 	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
 	return out, right, nil
 }
@@ -219,7 +287,7 @@ func StagedAdded(dir string, worktree bool) ([]AddedFile, error) {
 	if err := cmd.Run(); err != nil {
 		return nil, fmt.Errorf("git diff-index: %v %s", err, strings.TrimSpace(stderr.String()))
 	}
-	lines, err := ParseAdded(&patch)
+	lines, hunks, err := parseAdded(&patch)
 	if err != nil {
 		return nil, err
 	}
@@ -229,10 +297,13 @@ func StagedAdded(dir string, worktree bool) ([]AddedFile, error) {
 		if parts[i] == "" || parts[i+1] == "" || parts[i][0] == 'D' {
 			continue
 		}
-		f := AddedFile{Path: parts[i+1], Status: parts[i][0], Lines: lines[parts[i+1]]}
-		f.Whole = len(f.Lines) == 0
-		out = append(out, f)
+		out = append(out, AddedFile{Path: parts[i+1], Status: parts[i][0], Lines: lines[parts[i+1]], Whole: !hunks[parts[i+1]]})
 	}
+	now := func(p string) (string, bool) { return IndexText(dir, p) }
+	if worktree {
+		now = func(p string) (string, bool) { return WorktreeText(dir, p) }
+	}
+	refine(out, now, func(p string) (string, bool) { return FileAt(dir, base, p) })
 	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
 	return out, nil
 }

@@ -347,8 +347,25 @@ func (ps Paths) secretFile(abs string) (kind, rel string, ok bool) {
 		kind, ok = secrets.Rules{}.KindAt("", rel)
 		return kind, rel, ok
 	}
+	if ps.SecretsFor != nil {
+		rules, dir, prel, err := ps.SecretsFor(rel)
+		if err != nil {
+			return "un proyecto cuyas reglas no se pueden leer: " + err.Error(), rel, true
+		}
+		kind, ok = rules.KindAt(dir, prel)
+		return kind, rel, ok
+	}
 	kind, ok = ps.Secrets.KindAt(ps.Root, rel)
 	return kind, rel, ok
+}
+
+// projectFile es el archivo de un proyecto coyote (project.ConfigPath).
+const projectFile = "coyote/project.yaml"
+
+// hasProject dice si la carpeta dir es la raíz de un proyecto coyote.
+func hasProject(dir string) bool {
+	_, err := os.Stat(filepath.Join(dir, filepath.FromSlash(projectFile)))
+	return err == nil
 }
 
 // contentTools devuelven el contenido de lo que buscan, no solo nombres.
@@ -411,7 +428,8 @@ func (ps Paths) dirSecret(dir string) (string, bool) {
 			return stop
 		}
 		if d.IsDir() {
-			if p != dir && skipDirs[d.Name()] {
+			// Un proyecto que se llama vendor no es una dependencia.
+			if p != dir && skipDirs[d.Name()] && !hasProject(p) {
 				return filepath.SkipDir
 			}
 			return nil

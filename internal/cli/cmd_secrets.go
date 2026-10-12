@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -53,6 +54,12 @@ func secretRules(dir string) (secrets.Rules, string, error) {
 	return cfg.Secrets, root, nil
 }
 
+// isProjectDir dice si dir es la raíz de un proyecto coyote.
+func isProjectDir(dir string) bool {
+	_, err := os.Stat(filepath.Join(dir, filepath.FromSlash(project.ConfigPath)))
+	return err == nil
+}
+
 // secretSkipDirs no se recorren al listar: dependencias y compilación.
 var secretSkipDirs = map[string]bool{".git": true, "node_modules": true, "vendor": true, "build": true, "dist": true,
 	"target": true, ".gradle": true, ".dart_tool": true, "Pods": true, ".venv": true, "venv": true,
@@ -84,8 +91,12 @@ func secretsList(a *app, args []string) error {
 	if root == "" {
 		root = dir
 	}
-	// Cada archivo con las reglas del proyecto que lo contiene.
+	// Cada archivo con las reglas del proyecto que lo contiene: los que el
+	// árbol de trabajo tiene y los que git sigue, como en scan.
 	rs := newRuleSet(root)
+	if files, err := product.TrackedFiles(root); err == nil {
+		rs.track(files)
+	}
 	var list []secretEntry
 	n := 0
 	walkErr := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
@@ -97,7 +108,8 @@ func secretsList(a *app, args []string) error {
 			return filepath.SkipAll
 		}
 		if d.IsDir() {
-			if p != root && secretSkipDirs[d.Name()] {
+			// Un proyecto que se llama vendor no es una dependencia.
+			if p != root && secretSkipDirs[d.Name()] && !isProjectDir(p) {
 				return filepath.SkipDir
 			}
 			return nil
@@ -306,12 +318,13 @@ type ruleSet struct {
 	top     string
 	roots   map[string]string // carpeta → raíz del proyecto ("" si no hay)
 	rules   map[string]secrets.Rules
-	tracked map[string]bool // raíces de proyectos versionados; nil: se buscan en el árbol de trabajo
+	tracked map[string]bool // raíces de proyectos versionados; nil: solo los del árbol de trabajo
 	err     error           // el primer project.yaml que no se pudo leer
+	bad     map[string]error
 }
 
 func newRuleSet(top string) *ruleSet {
-	return &ruleSet{top: top, roots: map[string]string{}, rules: map[string]secrets.Rules{}}
+	return &ruleSet{top: top, roots: map[string]string{}, rules: map[string]secrets.Rules{}, bad: map[string]error{}}
 }
 
 // track hace que los proyectos salgan de lo versionado y no de lo que haya en
@@ -357,7 +370,7 @@ func mergeRules(gitPath string, layers []layer) (secrets.Rules, string) {
 		rules = secrets.Rules{Files: append([]string(nil), own[0].rules.Files...), Allow: own[0].rules.Allow}
 		for _, outer := range own[1:] {
 			if glob.Any(outer.rules.Files, outer.rel) {
-				rules.Files = append(rules.Files, near)
+				rules.Files = append(rules.Files, literalPattern(near))
 			}
 			if rules.Allowed(near) && !outer.rules.Allowed(outer.rel) {
 				rules.Allow = nil
@@ -366,26 +379,47 @@ func mergeRules(gitPath string, layers []layer) (secrets.Rules, string) {
 	}
 	for _, d := range deps {
 		if glob.Any(d.rules.Files, d.rel) {
-			rules.Files = append(rules.Files, near)
+			rules.Files = append(rules.Files, literalPattern(near))
 		}
 	}
 	return rules, near
+}
+
+// literalPattern vuelve un patrón la ruta de un archivo concreto. El glob no
+// tiene escapes: un asterisco, un signo de pregunta o una llave del nombre
+// pasan a ser un comodín de un carácter, que sigue alcanzando ese archivo
+// (y, si acaso, uno parecido: para un secreto, de más es de menos riesgo).
+func literalPattern(p string) string {
+	return strings.NewReplacer("*", "?", "{", "?", "}", "?").Replace(p)
 }
 
 // For devuelve las reglas para una ruta relativa a la raíz del repo y la
 // ruta relativa al proyecto. Un project.yaml que no se puede leer queda en
 // err, con su ruta, y sus archivos se revisan con las reglas de siempre.
 func (r *ruleSet) For(gitPath string) (secrets.Rules, string) {
+	rules, near, _ := r.forPath(gitPath)
+	return rules, near
+}
+
+// forPath es For con el error del primer proyecto que contiene la ruta y no
+// se pudo leer: quien decide sobre una sola ruta (el gate) no puede seguir
+// como si ese proyecto no declarara nada.
+func (r *ruleSet) forPath(gitPath string) (secrets.Rules, string, error) {
 	abs := filepath.Join(r.top, filepath.FromSlash(gitPath))
 	var layers []layer
+	var bad error
 	for _, c := range r.chain(filepath.Dir(abs)) {
 		rel, err := filepath.Rel(c.root, abs)
 		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 			continue
 		}
 		layers = append(layers, layer{rules: r.load(c.root, c.dep), rel: filepath.ToSlash(rel), dep: c.dep})
+		if bad == nil {
+			bad = r.bad[c.root]
+		}
 	}
-	return mergeRules(gitPath, layers)
+	rules, near := mergeRules(gitPath, layers)
+	return rules, near, bad
 }
 
 type chained struct {
@@ -393,22 +427,27 @@ type chained struct {
 	dep  bool
 }
 
-// find busca el proyecto que contiene d: entre los versionados si hay
-// lista, y si no, en el árbol de trabajo.
+// find busca el proyecto más cercano que contiene d: entre los del árbol de
+// trabajo y, si hay lista, entre los versionados. Un proyecto que git sigue y
+// falta en el disco cuenta, y también uno que está en el disco y todavía no
+// se versiona: sus secrets.files protegen lo que se prepara para el commit.
 func (r *ruleSet) find(d string) string {
+	root, _ := project.FindRoot(d)
 	if r.tracked == nil {
-		root, _ := project.FindRoot(d)
 		return root
 	}
-	for ; within(r.top, d); d = filepath.Dir(d) {
-		if r.tracked[d] {
-			return d
+	for e := d; within(r.top, e); e = filepath.Dir(e) {
+		if r.tracked[e] {
+			if len(e) > len(root) {
+				root = e
+			}
+			break
 		}
-		if d == r.top || filepath.Dir(d) == d {
+		if e == r.top || filepath.Dir(e) == e {
 			break
 		}
 	}
-	return ""
+	return root
 }
 
 // chain son los proyectos que contienen dir, del más cercano al de afuera,
@@ -443,13 +482,16 @@ func (r *ruleSet) load(root string, dep bool) secrets.Rules {
 		case err == nil:
 			rules = cfg.Secrets
 		case dep:
-		case r.err == nil:
+		default:
 			rel, _ := filepath.Rel(r.top, root)
 			shown := filepath.ToSlash(filepath.Join(rel, project.ConfigPath))
 			if errors.Is(err, project.ErrNotProject) && r.tracked != nil {
 				err = errors.New("está versionado y no está en el árbol de trabajo")
 			}
-			r.err = fmt.Errorf("%s: %v; sus archivos se revisaron con las reglas de siempre, sin las del proyecto", shown, err)
+			r.bad[root] = fmt.Errorf("%q: %v", shown, err)
+			if r.err == nil {
+				r.err = fmt.Errorf("%q: %v; sus archivos se revisaron con las reglas de siempre, sin las del proyecto", shown, err)
+			}
 		}
 		r.rules[root] = rules
 	}

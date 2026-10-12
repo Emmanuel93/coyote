@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"unicode/utf16"
+	"unicode/utf8"
 )
 
 // NoSymlinks verifica que rel quede dentro de root y que ninguno de sus
@@ -163,9 +164,9 @@ func WriteAtomic(path string, data []byte, perm os.FileMode) error {
 func Text(data []byte) (string, bool) {
 	switch {
 	case len(data) >= 2 && data[0] == 0xFF && data[1] == 0xFE:
-		return utf16Text(data[2:], false), true
+		return utf16Text(data[2:], false)
 	case len(data) >= 2 && data[0] == 0xFE && data[1] == 0xFF:
-		return utf16Text(data[2:], true), true
+		return utf16Text(data[2:], true)
 	case len(data) >= 3 && data[0] == 0xEF && data[1] == 0xBB && data[2] == 0xBF:
 		data = data[3:]
 	}
@@ -179,7 +180,12 @@ func Text(data []byte) (string, bool) {
 	return string(data), true
 }
 
-func utf16Text(b []byte, big bool) string {
+// utf16Text decodifica un UTF-16 con BOM. Si lo decodificado no tiene forma de
+// texto, no lo es: bytes cualquiera que casualmente empiezan con FF FE (un
+// binario) darían miles de caracteres de control, de ancho cero o de dirección
+// que no escribió nadie. Se tolera una fracción mínima de controles y de
+// pares de sustitución rotos.
+func utf16Text(b []byte, big bool) (string, bool) {
 	u := make([]uint16, len(b)/2)
 	for i := range u {
 		if big {
@@ -188,5 +194,15 @@ func utf16Text(b []byte, big bool) string {
 			u[i] = uint16(b[2*i+1])<<8 | uint16(b[2*i])
 		}
 	}
-	return string(utf16.Decode(u))
+	rs := utf16.Decode(u)
+	bad := 0
+	for _, r := range rs {
+		if r == utf8.RuneError || r == 0 || (r < 0x20 && r != '\t' && r != '\n' && r != '\r') {
+			bad++
+		}
+	}
+	if bad*200 > len(rs) {
+		return "", false
+	}
+	return string(rs), true
 }

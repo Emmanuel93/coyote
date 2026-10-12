@@ -1,9 +1,12 @@
 package fsx
 
 import (
+	"math/rand"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"unicode/utf16"
 )
 
 func TestNoSymlinks(t *testing.T) {
@@ -102,6 +105,38 @@ func TestText(t *testing.T) {
 	}
 	if _, ok := Text([]byte{'a', 0, 'b'}); ok {
 		t.Error("un binario sin BOM no es texto")
+	}
+}
+
+// TestTextUTF16DeVerdad: un UTF-16 con BOM se lee como texto; bytes cualquiera
+// que casualmente empiezan con FF FE no (decodificados serían basura, y una
+// basura con controles de dirección o ancho cero se tomaría por un ataque).
+func TestTextUTF16DeVerdad(t *testing.T) {
+	le := func(s string) []byte {
+		out := []byte{0xFF, 0xFE}
+		for _, u := range utf16.Encode([]rune(s)) {
+			out = append(out, byte(u), byte(u>>8))
+		}
+		return out
+	}
+	texto := "línea uno\r\nñandú 😀 日本語\r\n\tfin\r\n"
+	if s, ok := Text(le(texto)); !ok || s != texto {
+		t.Errorf("UTF-16 de verdad: %q %v", s, ok)
+	}
+	// Bytes sin forma de texto con el BOM delante.
+	rnd := rand.New(rand.NewSource(7))
+	for i := 0; i < 20; i++ {
+		data := make([]byte, 64<<10)
+		rnd.Read(data)
+		data[0], data[1] = 0xFF, 0xFE
+		if s, ok := Text(data); ok {
+			t.Fatalf("bytes al azar con BOM no son texto (%d caracteres)", len([]rune(s)))
+		}
+	}
+	// Un par de caracteres de control en un texto largo no lo vuelven binario.
+	largo := strings.Repeat("hola mundo\n", 500) + "\x0c"
+	if _, ok := Text(le(largo)); !ok {
+		t.Error("un salto de página suelto en un texto largo")
 	}
 }
 

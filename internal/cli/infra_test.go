@@ -133,6 +133,7 @@ func TestGatePRConPlan(t *testing.T) {
 
 func TestExtractInfra(t *testing.T) {
 	base := setup(t)
+	asHuman(t)
 	productoDemo(t, base)
 	iac := filepath.Join(base, "infra")
 	iacRepo(t, iac)

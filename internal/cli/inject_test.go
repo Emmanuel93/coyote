@@ -3,6 +3,7 @@ package cli
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"unicode/utf16"
@@ -315,5 +316,57 @@ func TestGatePRCaracteresOcultosSinHunks(t *testing.T) {
 	}
 	if strings.Contains(r.stdout, "tools/limpio.go") {
 		t.Errorf("un archivo sin caracteres ocultos no tiene riesgo:\n%s", r.stdout)
+	}
+}
+
+// TestGatePRNoCulpaAlCambioDeLoQueYaEstaba: quinta revisión de v1.0. Leer
+// entero lo que git lista sin hunks no puede cargarle al PR lo que el archivo ya
+// traía en la base: un cambio de modo, un borrado de líneas o una línea
+// limpia en un archivo con -diff no suben el riesgo; una línea con el carácter
+// nuevo, sí.
+func TestGatePRNoCulpaAlCambioDeLoQueYaEstaba(t *testing.T) {
+	base := setup(t)
+	productoDemo(t, base)
+	svc := filepath.Join(base, "servicios")
+	git(t, svc, "checkout", "-qb", "base")
+	trojan := "package tools\n\nconst viejo = 1\n\nfunc permitido(rol string) bool {\n\treturn rol != \"user\u202e \u2066// solo admins\u2069 \u2066\" // x\n}\n"
+	write(t, svc, ".gitattributes", "dist/*.js -diff\n")
+	write(t, svc, "tools/saludo.go", trojan)
+	write(t, svc, "tools/run.sh", "#!/bin/sh\necho \"ad\u200bmin\"\n")
+	write(t, svc, "dist/app.min.js", "var a=/\u200f(x)/;\n")
+	git(t, svc, "add", "-A")
+	git(t, svc, "commit", "-qm", "base con caracteres que ya estaban")
+	baseSHA := strings.TrimSpace(git(t, svc, "rev-parse", "HEAD"))
+	pr := func(name, msg string, change func()) string {
+		git(t, svc, "checkout", "-q", "-B", name, baseSHA)
+		change()
+		git(t, svc, "add", "-A")
+		git(t, svc, "commit", "-qm", msg)
+		head := strings.TrimSpace(git(t, svc, "rev-parse", "HEAD"))
+		r := run(t, base, "", "gate", "pr", "--repo", "servicios="+svc, "--self", "servicios", "--base", baseSHA, "--head", head, "--event", "", "--policy", "fail")
+		return strconv.Itoa(r.code) + "\n" + r.stdout
+	}
+	limpio := func(what, out string) {
+		t.Helper()
+		if !strings.HasPrefix(out, "0\n") || !strings.Contains(out, "R1, sin revisión extra") {
+			t.Errorf("%s: el PR no agrega nada oculto y debería quedar en R1:\n%s", what, out)
+		}
+	}
+	limpio("borra una línea", pr("borra", "borra una línea", func() {
+		write(t, svc, "tools/saludo.go", strings.Replace(trojan, "const viejo = 1\n\n", "", 1))
+	}))
+	limpio("cambia el modo", pr("modo", "cambia el modo", func() {
+		if err := os.Chmod(filepath.Join(svc, "tools", "run.sh"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}))
+	limpio("agrega una línea limpia a un archivo con -diff", pr("limpia", "agrega una línea limpia", func() {
+		write(t, svc, "dist/app.min.js", "var a=/\u200f(x)/;\nvar b=1;\n")
+	}))
+	out := pr("nueva", "agrega un carácter nuevo", func() {
+		write(t, svc, "dist/app.min.js", "var a=/\u200f(x)/;\nvar b=\"\u202e\";\n")
+	})
+	if !strings.HasPrefix(out, "1\n") || !strings.Contains(out, "dist/app.min.js") || !strings.Contains(out, "controles de dirección del texto en la línea 2") {
+		t.Errorf("un carácter nuevo en un archivo con -diff sigue siendo R3:\n%s", out)
 	}
 }

@@ -19,6 +19,7 @@ import (
 	"github.com/Emmanuel93/coyote/internal/infra"
 	"github.com/Emmanuel93/coyote/internal/ledger"
 	"github.com/Emmanuel93/coyote/internal/project"
+	"github.com/Emmanuel93/coyote/internal/secrets"
 	"github.com/Emmanuel93/coyote/internal/userdir"
 )
 
@@ -186,6 +187,13 @@ func (a *app) newGateRun(act gate.Action) (*gateRun, error) {
 		}
 	}
 	paths.Secrets = cfg.Secrets
+	// Un monorepo abierto en su raíz: cada ruta lleva las reglas del proyecto
+	// que la contiene y las de los de afuera, como en el escaneo.
+	rs := newRuleSet(root)
+	paths.SecretsFor = func(rel string) (secrets.Rules, string, string, error) {
+		rules, near, err := rs.forPath(rel)
+		return rules, filepath.Join(root, filepath.FromSlash(strings.TrimSuffix(rel, near))), near, err
+	}
 	paths.Infra, _, paths.InfraErr = infra.Load(root)
 	return &gateRun{a: a, act: act, root: root, cfg: cfg, paths: paths,
 		person: identity.Resolve(root), agent: agent}, nil

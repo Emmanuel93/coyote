@@ -115,6 +115,13 @@ type Paths struct {
 	Global    []string // configuración fuera del proyecto que desarma el gate (absolutas)
 	// Secrets son las reglas de archivos de secretos del proyecto (ADR-0016).
 	Secrets secrets.Rules
+	// SecretsFor, si existe, da las reglas de una ruta (relativa a Root) con
+	// las de los proyectos coyote que la contienen, el más cercano y los de
+	// afuera: esas reglas, la carpeta de ese proyecto y la ruta relativa a él.
+	// Un error (un project.yaml que no se puede leer) hace de la ruta un
+	// archivo de secretos: sin sus reglas no se sabe qué declara. Sin ella
+	// valen solo las del proyecto raíz, Secrets.
+	SecretsFor func(rel string) (rules secrets.Rules, dir, prel string, err error)
 	// Infra es el inventario de la infraestructura (ADR-0017); InfraErr, si
 	// existe pero no se puede leer.
 	Infra    *infra.Inventory

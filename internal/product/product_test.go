@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -1233,6 +1234,56 @@ func TestParseAddedCuentaElHunk(t *testing.T) {
 	}
 	if b := got["b.txt"]; len(b) != 1 || len(b[0].Text) != 70<<10 || b[0].Line != 1 {
 		t.Errorf("una línea larga se lee completa: %d líneas", len(b))
+	}
+}
+
+// TestRefineSoloLoNuevo: un archivo que git lista sin hunks queda con las
+// líneas que el anterior no tenía; uno que solo borra tiene hunks y no
+// agrega nada; un binario no cambia.
+func TestRefineSoloLoNuevo(t *testing.T) {
+	patch := "diff --git a/borra.go b/borra.go\n--- a/borra.go\n+++ b/borra.go\n@@ -2 +1,0 @@\n-viejo\n" +
+		"diff --git a/modo.sh b/modo.sh\nold mode 100644\nnew mode 100755\n" +
+		"diff --git a/b.bin b/b.bin\nindex 1..2 100644\nBinary files a/b.bin and b/b.bin differ\n"
+	lines, hunks, err := parseAdded(strings.NewReader(patch))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hunks["borra.go"] || hunks["modo.sh"] || hunks["b.bin"] || len(lines["borra.go"]) != 0 {
+		t.Fatalf("hunks: %v líneas: %v", hunks, lines)
+	}
+	files := []AddedFile{
+		{Path: "borra.go", Status: 'M', Whole: !hunks["borra.go"]},
+		{Path: "modo.sh", Status: 'M', Whole: !hunks["modo.sh"]},
+		{Path: "min.js", Status: 'M', Whole: true},
+		{Path: "nuevo.js", Status: 'A', Whole: true},
+		{Path: "b.bin", Status: 'M', Whole: true},
+	}
+	now := map[string]string{"borra.go": "a\n", "modo.sh": "x\ny\n", "min.js": "a\nb\nb\nc\n", "nuevo.js": "a\nb"}
+	was := map[string]string{"borra.go": "a\nviejo\n", "modo.sh": "x\ny\n", "min.js": "a\nb\n"}
+	refine(files, func(p string) (string, bool) { s, ok := now[p]; return s, ok },
+		func(p string) (string, bool) { s, ok := was[p]; return s, ok })
+	got := map[string][]string{}
+	for _, f := range files {
+		for _, l := range f.Lines {
+			got[f.Path] = append(got[f.Path], strconv.Itoa(l.Line)+":"+l.Text)
+		}
+	}
+	if len(got["borra.go"]) != 0 || len(got["modo.sh"]) != 0 {
+		t.Errorf("un borrado o un cambio de modo no agregan nada: %v", got)
+	}
+	if strings.Join(got["min.js"], "|") != "3:b|4:c" {
+		t.Errorf("min.js agrega la segunda b y la c: %v", got["min.js"])
+	}
+	if strings.Join(got["nuevo.js"], "|") != "1:a|2:b" {
+		t.Errorf("un archivo nuevo agrega todo: %v", got["nuevo.js"])
+	}
+	for _, f := range files {
+		if f.Path == "b.bin" && !f.Whole {
+			t.Error("un binario no se lee como texto: sigue sin revisar")
+		}
+		if f.Path != "b.bin" && f.Whole {
+			t.Errorf("%s ya tiene sus líneas", f.Path)
+		}
 	}
 }
 

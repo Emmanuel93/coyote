@@ -412,7 +412,7 @@ func (b *baseRules) For(f string) (secrets.Rules, string) {
 				if cfg, err := project.Parse([]byte(text), b.name); err == nil {
 					l.rules = cfg.Secrets
 				} else if b.err == nil && !l.dep {
-					b.err = fmt.Errorf("%s%s de la rama base: %v", prefix, project.ConfigPath, err)
+					b.err = fmt.Errorf("%q de la rama base: %v", prefix+project.ConfigPath, err)
 				}
 			}
 			b.cache[prefix] = l

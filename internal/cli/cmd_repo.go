@@ -47,6 +47,10 @@ func repoAdd(a *app, args []string) error {
 		fs.Usage()
 		return fail(2, "")
 	}
+	// Reescribe coyote/project.yaml, que el gate protege: lo hace una persona.
+	if err := a.human("repo add"); err != nil {
+		return err
+	}
 	r := project.RepoRef{Name: pos[0], Path: *path, Branch: *branch}
 	if len(pos) == 2 {
 		r.URL = pos[1]

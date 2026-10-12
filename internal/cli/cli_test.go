@@ -562,6 +562,7 @@ func TestContextoYPreguntas(t *testing.T) {
 
 func TestContextoDeOtroRepo(t *testing.T) {
 	base := setup(t)
+	asHuman(t)
 	// Repo remoto (bare) con documentos coyote y código que no debe bajarse.
 	src := filepath.Join(base, "pagos-src")
 	must(t, run(t, base, "", "init", "pagos-src", "--type", "backend", "--purpose", "servicio de pagos"), 0, "init remoto")

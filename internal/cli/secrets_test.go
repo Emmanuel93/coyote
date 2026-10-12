@@ -673,3 +673,208 @@ func TestMergeRulesDependencias(t *testing.T) {
 		t.Errorf("solo una dependencia: %+v %q", rules, near)
 	}
 }
+
+// TestGateSecretosDeProyectosAnidados: quinta revisión de v1.0. Un agente
+// abierto en la raíz de un monorepo no lee los archivos que declaran como
+// secretos los proyectos anidados, también los que viven en dependencias.
+func TestGateSecretosDeProyectosAnidados(t *testing.T) {
+	_, root := gateProject(t)
+	must(t, run(t, root, "", "init", "svc", "--no-git", "--type", "backend", "--purpose", "servicio de pagos de la tienda"), 0, "init anidado")
+	cfg := readFile(t, filepath.Join(root, "svc", "coyote", "project.yaml"))
+	write(t, root, "svc/coyote/project.yaml", cfg+"secrets:\n  files: [\"secretos/*.txt\"]\n")
+	write(t, root, "svc/secretos/a.txt", "algo\n")
+	write(t, root, "svc/README.md", "# servicio\n")
+	write(t, root, "apps/vendor/coyote/project.yaml", cfg+"secrets:\n  files: [\"config/prod.yaml\"]\n")
+	write(t, root, "apps/vendor/config/prod.yaml", "password: corta\n")
+	write(t, root, "third_party/lib/coyote/project.yaml", cfg+"secrets:\n  files: [\"claves/*.txt\"]\n")
+	write(t, root, "third_party/lib/claves/k.txt", "uno\n")
+
+	read := func(rel string) result {
+		return run(t, root, hook(t, root, "Read", map[string]any{"file_path": filepath.Join(root, rel)}, nil), "gate", "check")
+	}
+	for _, rel := range []string{"svc/secretos/a.txt", "apps/vendor/config/prod.yaml", "third_party/lib/claves/k.txt"} {
+		if r := read(rel); r.code != 2 || !strings.Contains(r.stderr, "bloqueado siempre") {
+			t.Errorf("leer %s: el proyecto anidado lo declara como secreto (código %d):\n%s", rel, r.code, r.stderr)
+		}
+		cat := run(t, root, hook(t, root, "Bash", map[string]any{"command": "cat " + rel, "description": "x"}, nil), "gate", "check")
+		if cat.code != 2 || !strings.Contains(cat.stderr, "bloqueado siempre") {
+			t.Errorf("cat %s (código %d):\n%s", rel, cat.code, cat.stderr)
+		}
+	}
+	// Un comodín que alcanza el archivo.
+	cmd := run(t, root, hook(t, root, "Bash", map[string]any{"command": "cat svc/secretos/*.txt", "description": "x"}, nil), "gate", "check")
+	if cmd.code != 2 || !strings.Contains(cmd.stderr, "bloqueado siempre") {
+		t.Errorf("cat con comodín (código %d):\n%s", cmd.code, cmd.stderr)
+	}
+	// Una búsqueda recursiva que recorre una carpeta con esos archivos pide la
+	// aprobación de una persona, también si el proyecto se llama vendor.
+	write(t, root, "svc/src/main.go", "package main\n")
+	for _, c := range []string{"grep -r algo svc", "grep -r uno third_party", "grep -r password apps"} {
+		if r := run(t, root, hook(t, root, "Bash", map[string]any{"command": c, "description": "x"}, nil), "gate", "check"); r.code != 2 {
+			t.Errorf("%q (código %d):\n%s", c, r.code, r.stderr)
+		}
+	}
+	if r := run(t, root, hook(t, root, "Bash", map[string]any{"command": "grep -r package svc/src", "description": "x"}, nil), "gate", "check"); r.code != 0 {
+		t.Errorf("una carpeta sin secretos se busca con normalidad (código %d):\n%s", r.code, r.stderr)
+	}
+	// Lo demás del proyecto anidado se lee con normalidad.
+	if r := read("svc/README.md"); r.code != 0 {
+		t.Errorf("leer un archivo común del proyecto anidado (código %d):\n%s", r.code, r.stderr)
+	}
+}
+
+// TestSecretsListProyectosAnidados: quinta revisión de v1.0. list ve los
+// mismos proyectos que scan: uno que se llama vendor no se salta y un
+// project.yaml versionado que no se puede leer se nombra.
+func TestSecretsListProyectosAnidados(t *testing.T) {
+	base := setup(t)
+	must(t, run(t, base, "", "init", "mono", "--type", "backend", "--purpose", "API de pedidos de la tienda demo"), 0, "init")
+	root := filepath.Join(base, "mono")
+	must(t, run(t, root, "", "init", "svc", "--no-git", "--type", "backend", "--purpose", "servicio de pagos de la tienda"), 0, "init anidado")
+	cfg := readFile(t, filepath.Join(root, "svc", "coyote", "project.yaml"))
+	write(t, root, "svc/coyote/project.yaml", cfg+"secrets:\n  files: [\"secretos/*.txt\"]\n")
+	write(t, root, "svc/secretos/a.txt", "algo\n")
+	write(t, root, "apps/vendor/coyote/project.yaml", cfg+"secrets:\n  files: [\"config/prod.yaml\"]\n")
+	write(t, root, "apps/vendor/config/prod.yaml", "password: corta\n")
+	git(t, root, "add", "-A")
+	git(t, root, "commit", "-qm", "chore: inicio", "--no-verify")
+
+	r := run(t, root, "", "secrets", "list", "--no-names")
+	for _, want := range []string{"svc/secretos/a.txt", "apps/vendor/config/prod.yaml"} {
+		if r.code != 0 || !strings.Contains(r.stdout, want) {
+			t.Errorf("list no muestra %q (código %d):\n%s%s", want, r.code, r.stdout, r.stderr)
+		}
+	}
+
+	// Un project.yaml versionado que es un enlace roto: la lista sale
+	// incompleta y lo dice, como scan.
+	if err := os.Remove(filepath.Join(root, "svc", "coyote", "project.yaml")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(root, "no-existe.yaml"), filepath.Join(root, "svc", "coyote", "project.yaml")); err != nil {
+		t.Skip("sin enlaces simbólicos")
+	}
+	r = run(t, root, "", "secrets", "list", "--no-names")
+	if r.code != 1 || !strings.Contains(r.stderr, "svc/coyote/project.yaml") {
+		t.Errorf("list con un project.yaml roto (código %d):\n%s%s", r.code, r.stdout, r.stderr)
+	}
+}
+
+// TestSecretosProyectoSinVersionar: quinta revisión de v1.0. Un proyecto que
+// está en el disco y todavía no se versiona protege lo que se prepara para el
+// commit: sus secrets.files cuentan junto con los de los proyectos que git
+// sigue.
+func TestSecretosProyectoSinVersionar(t *testing.T) {
+	base := setup(t)
+	t.Setenv("COYOTE_STATE_DIR", filepath.Join(base, "state"))
+	old := isTerminal
+	isTerminal = func() bool { return true }
+	t.Cleanup(func() { isTerminal = old })
+	must(t, run(t, base, "", "init", "mono", "--type", "backend", "--purpose", "API de pedidos de la tienda demo"), 0, "init")
+	root := filepath.Join(base, "mono")
+	git(t, root, "add", "-A")
+	git(t, root, "commit", "-qm", "chore: inicio", "--no-verify")
+	must(t, run(t, root, "", "init", "nuevo", "--no-git", "--type", "backend", "--purpose", "servicio nuevo de la tienda"), 0, "init anidado")
+	cfg := readFile(t, filepath.Join(root, "nuevo", "coyote", "project.yaml"))
+	write(t, root, "nuevo/coyote/project.yaml", cfg+"secrets:\n  files: [\"secretos/*.txt\"]\n")
+	write(t, root, "nuevo/secretos/b.txt", "algo\n")
+	git(t, root, "add", "nuevo/secretos/b.txt") // el project.yaml queda sin versionar
+
+	s := run(t, root, "", "secrets", "scan", "--staged")
+	if s.code != 1 || !strings.Contains(s.stdout, "nuevo/secretos/b.txt") {
+		t.Errorf("scan --staged con un proyecto sin versionar (código %d):\n%s%s", s.code, s.stdout, s.stderr)
+	}
+	c := run(t, root, "", "commit", "-m", "feat(nuevo): configuración")
+	if c.code != 1 || !strings.Contains(c.stderr, "nuevo/secretos/b.txt") {
+		t.Errorf("commit con un proyecto sin versionar (código %d):\n%s%s", c.code, c.stdout, c.stderr)
+	}
+}
+
+// TestSecretosProyectoVersionadoQueFalta: quinta revisión de v1.0. Lo que se
+// prepara para el commit, un rango de git y el commit mismo también salen de
+// los proyectos que git sigue: uno cuyo project.yaml falta en el disco no da el
+// visto bueno, no se vuelve invisible.
+func TestSecretosProyectoVersionadoQueFalta(t *testing.T) {
+	base := setup(t)
+	t.Setenv("COYOTE_STATE_DIR", filepath.Join(base, "state"))
+	old := isTerminal
+	isTerminal = func() bool { return true }
+	t.Cleanup(func() { isTerminal = old })
+	must(t, run(t, base, "", "init", "mono", "--type", "backend", "--purpose", "API de pedidos de la tienda demo"), 0, "init")
+	root := filepath.Join(base, "mono")
+	must(t, run(t, root, "", "init", "svc", "--no-git", "--type", "backend", "--purpose", "servicio de pagos de la tienda"), 0, "init anidado")
+	cfg := readFile(t, filepath.Join(root, "svc", "coyote", "project.yaml"))
+	write(t, root, "svc/coyote/project.yaml", cfg+"secrets:\n  files: [\"secretos/*.txt\"]\n")
+	git(t, root, "add", "-A")
+	git(t, root, "commit", "-qm", "chore: inicio", "--no-verify")
+	baseSHA := strings.TrimSpace(git(t, root, "rev-parse", "HEAD"))
+	write(t, root, "svc/secretos/c.txt", "algo\n")
+	git(t, root, "add", "svc/secretos/c.txt")
+	git(t, root, "commit", "-qm", "chore: configuración", "--no-verify")
+	headSHA := strings.TrimSpace(git(t, root, "rev-parse", "HEAD"))
+	proj := filepath.Join(root, "svc", "coyote", "project.yaml")
+	if err := os.Remove(proj); err != nil {
+		t.Fatal(err)
+	}
+	faltaProyecto := func(what string, r result) {
+		t.Helper()
+		if r.code != 1 || !strings.Contains(r.stderr, "svc/coyote/project.yaml") || !strings.Contains(r.stderr, "versionado") {
+			t.Errorf("%s (código %d):\n%s%s", what, r.code, r.stdout, r.stderr)
+		}
+	}
+	faltaProyecto("scan --range", run(t, root, "", "secrets", "scan", "--range", baseSHA+"..."+headSHA))
+
+	write(t, root, "svc/secretos/b.txt", "otro\n")
+	git(t, root, "add", "svc/secretos/b.txt")
+	faltaProyecto("scan --staged", run(t, root, "", "secrets", "scan", "--staged"))
+	c := run(t, root, "", "commit", "-m", "feat(svc): configuración")
+	if c.code != 1 || !strings.Contains(c.stderr, "svc/coyote/project.yaml") {
+		t.Errorf("commit con un project.yaml versionado que falta (código %d):\n%s%s", c.code, c.stdout, c.stderr)
+	}
+}
+
+// TestGatePRDependenciasEnLaBase: quinta revisión de v1.0. gate pr toma de la
+// base los archivos que declara un proyecto dentro de dependencias, y sus
+// dispensas no valen.
+func TestGatePRDependenciasEnLaBase(t *testing.T) {
+	base := setup(t)
+	productoDemo(t, base)
+	svc := filepath.Join(base, "servicios")
+	write(t, svc, "third_party/lib/coyote/project.yaml", "name: lib\nsecrets:\n  files: [\"claves/*.txt\"]\n  allow:\n    - path: \"**\"\n      reason: \"la dependencia dispensa todo lo suyo\"\n")
+	git(t, svc, "add", "-A")
+	git(t, svc, "commit", "-qm", "una dependencia con un proyecto coyote")
+	baseSHA := strings.TrimSpace(git(t, svc, "rev-parse", "HEAD"))
+	write(t, svc, "third_party/lib/claves/k.txt", "uno\n")
+	git(t, svc, "add", "-A")
+	git(t, svc, "commit", "-qm", "claves")
+	headSHA := strings.TrimSpace(git(t, svc, "rev-parse", "HEAD"))
+	r := run(t, base, "", "gate", "pr", "--repo", "servicios="+svc, "--self", "servicios", "--base", baseSHA, "--head", headSHA, "--event", "", "--policy", "fail")
+	if r.code != 1 || !strings.Contains(r.stdout, "third_party/lib/claves/k.txt") {
+		t.Errorf("gate pr con secrets.files de una dependencia: %d\n%s%s", r.code, r.stdout, r.stderr)
+	}
+}
+
+// TestMergeRulesNombresConComodines: quinta revisión de v1.0. La ruta de un
+// archivo que declara un proyecto de afuera pasa a ser un patrón del proyecto
+// más cercano: un nombre con llaves, comas o asteriscos sigue siendo ese
+// archivo, no un patrón que ya no lo alcanza.
+func TestMergeRulesNombresConComodines(t *testing.T) {
+	name := "claves/k{1},x*.txt"
+	rules, near := mergeRules("svc/"+name, []layer{
+		{rules: secrets.Rules{}, rel: name},
+		{rules: secrets.Rules{Files: []string{"svc/claves/*.txt"}}, rel: "svc/" + name},
+	})
+	if _, ok := rules.Kind(near); !ok {
+		t.Errorf("el archivo que declara el proyecto de afuera es de secretos: %+v %q", rules, near)
+	}
+	rules, near = mergeRules("lib/"+name, []layer{
+		{rules: secrets.Rules{Files: []string{"claves/*.txt"}}, rel: name, dep: true},
+	})
+	if _, ok := rules.Kind(near); !ok {
+		t.Errorf("el archivo que declara una dependencia es de secretos: %+v %q", rules, near)
+	}
+	// Y no alcanza a otro archivo con otra forma.
+	if _, ok := rules.Kind("lib/claves/otro.txt"); ok {
+		t.Errorf("no declara nada más: %+v", rules)
+	}
+}

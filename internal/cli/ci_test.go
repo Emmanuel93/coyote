@@ -268,6 +268,7 @@ func TestInstallCI(t *testing.T) {
 // una sesión de agente, no se escribe nada. Revisar y simular siguen libres.
 func TestInstallCISoloPersona(t *testing.T) {
 	base := setup(t)
+	asHuman(t)
 	productoDemo(t, base)
 	root := filepath.Join(base, "producto")
 	must(t, run(t, base, "", "init", "producto", "--type", "product", "--purpose", "tienda demo"), 0, "init")
@@ -481,5 +482,45 @@ func TestComentarioSinInyeccion(t *testing.T) {
 	}
 	if !strings.Contains(md, "expone `GET /x/[clic](https://malo.example)/<img src=x>`") || !strings.Contains(md, `\[aquí\]`) || !strings.Contains(md, "&lt;b&gt;") {
 		t.Errorf("la ruta va como código y el texto escapado:\n%s", md)
+	}
+}
+
+// TestRepoAddSoloPersona: quinta revisión de v1.0. repo add reescribe
+// coyote/project.yaml, que el gate protege: lo corre una persona en su
+// terminal, aunque un agente llegue por un comando que el gate no alcanza a
+// leer (una variable, una sustitución).
+func TestRepoAddSoloPersona(t *testing.T) {
+	base := setup(t)
+	productoDemo(t, base)
+	root := filepath.Join(base, "producto")
+	must(t, run(t, base, "", "init", "producto", "--type", "product", "--purpose", "tienda demo"), 0, "init")
+	cfg := filepath.Join(root, "coyote", "project.yaml")
+	before := readFile(t, cfg)
+	add := []string{"repo", "add", "servicios", "--path", "../servicios"}
+
+	old := isTerminal
+	t.Cleanup(func() { isTerminal = old })
+	isTerminal = func() bool { return false }
+	r := run(t, root, "", add...)
+	must(t, r, 1, "sin terminal")
+	if !strings.Contains(r.stderr, "necesita una terminal interactiva") || readFile(t, cfg) != before {
+		t.Errorf("sin terminal no se escribe:\n%s", r.stderr)
+	}
+	isTerminal = func() bool { return true }
+	t.Setenv("CLAUDECODE", "1")
+	r = run(t, root, "", add...)
+	must(t, r, 1, "dentro de una sesión de agente")
+	if !strings.Contains(r.stderr, "sesión de agente") || readFile(t, cfg) != before {
+		t.Errorf("un agente no registra repos:\n%s", r.stderr)
+	}
+	// Leer la lista no es de la persona.
+	isTerminal = func() bool { return false }
+	must(t, run(t, root, "", "repo", "list"), 0, "repo list")
+	// La persona sí los registra.
+	t.Setenv("CLAUDECODE", "")
+	isTerminal = func() bool { return true }
+	must(t, run(t, root, "", add...), 0, "la persona registra el repo")
+	if readFile(t, cfg) == before {
+		t.Error("la persona registra el repo en project.yaml")
 	}
 }
