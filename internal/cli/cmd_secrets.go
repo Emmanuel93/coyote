@@ -60,6 +60,33 @@ func isProjectDir(dir string) bool {
 	return err == nil
 }
 
+// repoView es el repo de un proyecto visto desde su carpeta: la raíz del repo
+// (donde las reglas de los proyectos de afuera empiezan a contar) y la ruta de
+// la carpeta del proyecto relativa a ella, con barra al final ("" si es la
+// misma).
+func repoView(root string) (top, prefix string) {
+	top = repoTop(root)
+	if rel, err := filepath.Rel(top, root); err == nil && rel != "." {
+		prefix = filepath.ToSlash(rel) + "/"
+	}
+	return top, prefix
+}
+
+// under deja los archivos de git (relativos a la raíz del repo) que están
+// dentro de prefix, relativos a él.
+func under(files []string, prefix string) []string {
+	if prefix == "" {
+		return files
+	}
+	var out []string
+	for _, f := range files {
+		if rest, ok := strings.CutPrefix(f, prefix); ok {
+			out = append(out, rest)
+		}
+	}
+	return out
+}
+
 // secretSkipDirs no se recorren al listar: dependencias y compilación.
 var secretSkipDirs = map[string]bool{".git": true, "node_modules": true, "vendor": true, "build": true, "dist": true,
 	"target": true, ".gradle": true, ".dart_tool": true, "Pods": true, ".venv": true, "venv": true,
@@ -91,18 +118,22 @@ func secretsList(a *app, args []string) error {
 	if root == "" {
 		root = dir
 	}
-	// Cada archivo con las reglas del proyecto que lo contiene: los que el
-	// árbol de trabajo tiene y los que git sigue, como en scan.
-	rs := newRuleSet(root)
-	tracked, trackErr := product.TrackedFiles(root)
+	// Cada archivo con las reglas de los proyectos que lo contienen, también los
+	// de afuera hasta la raíz del repo, como el gate y el commit: los que el
+	// árbol de trabajo tiene y los que git sigue, como en scan. Las rutas salen
+	// relativas a este proyecto.
+	top, prefix := repoView(root)
+	rs := newRuleSet(top)
+	tracked, trackErr := product.TrackedFiles(top)
 	if trackErr == nil {
 		rs.track(tracked)
+		tracked = under(tracked, prefix)
 	}
 	var list []secretEntry
 	seen := map[string]bool{}
 	consider := func(p, rel string, info fs.FileInfo) {
 		seen[rel] = true
-		rules, prel := rs.For(rel)
+		rules, prel := rs.For(prefix + rel)
 		kind, ok := rules.Kind(prel)
 		if !ok {
 			return
@@ -262,21 +293,24 @@ func secretsScan(a *app, args []string) error {
 		if root != "" {
 			dir = root
 		}
-		files, err := product.TrackedFiles(dir)
+		// Cada archivo con las reglas de los proyectos que lo contienen: desde la
+		// raíz de un monorepo, un proyecto en una subcarpeta aplica las suyas, y
+		// desde un proyecto anidado, también las de los de afuera, como el gate y
+		// el commit.
+		top, prefix := repoView(dir)
+		rs := newRuleSet(top)
+		files, err := product.TrackedFiles(top)
 		viaGit := err == nil
-		if err != nil {
+		if viaGit {
+			rs.track(files)
+			files = under(files, prefix)
+		} else {
 			// Fuera de git se recorren los archivos, sin dependencias ni compilación.
 			if files, err = standards.ListFiles(dir); err != nil {
 				return fail(1, "%v", err)
 			}
 		}
-		// Cada archivo con las reglas del proyecto que lo contiene: desde la
-		// raíz de un monorepo, un proyecto en una subcarpeta aplica las suyas.
-		rs := newRuleSet(dir)
-		if viaGit {
-			rs.track(files)
-		}
-		found = scanTracked(dir, files, rs.For)
+		found = scanTracked(dir, files, func(f string) (secrets.Rules, string) { return rs.For(prefix + f) })
 		rulesErr = rs.err
 	}
 	if *asJSON {

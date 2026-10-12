@@ -206,19 +206,102 @@ func gatePaths(root string, cfg *project.Config) (gate.Paths, error) {
 	// de siempre. Se razona sobre rutas reales, sin enlaces.
 	phys := paths.Real(root)
 	top := repoTop(phys)
-	rs := newRuleSet(top)
+	// Cada checkout del repo (el principal y los worktrees enlazados) con las
+	// reglas de sus proyectos: la ruta de un archivo lleva las del checkout que
+	// la contiene, el más cercano.
+	type checkout struct {
+		dir string
+		rs  *ruleSet
+	}
+	checkouts := []checkout{{top, newRuleSet(top)}}
+	others := repoCheckouts(top)
+	for _, o := range others {
+		checkouts = append(checkouts, checkout{o, newRuleSet(o)})
+	}
 	paths.SecretsFor = func(rel string) (secrets.Rules, string, string, error) {
 		abs := filepath.Join(phys, filepath.FromSlash(rel))
-		if !within(top, abs) {
+		var c *checkout
+		for i := range checkouts {
+			if within(checkouts[i].dir, abs) && (c == nil || len(checkouts[i].dir) > len(c.dir)) {
+				c = &checkouts[i]
+			}
+		}
+		if c == nil {
 			return secrets.Rules{}, "", filepath.ToSlash(abs), nil
 		}
-		git, _ := filepath.Rel(top, abs)
+		git, _ := filepath.Rel(c.dir, abs)
 		git = filepath.ToSlash(git)
-		rules, near, err := rs.forPath(git)
-		return rules, filepath.Join(top, filepath.FromSlash(strings.TrimSuffix(git, near))), near, err
+		rules, near, err := c.rs.forPath(git)
+		return rules, filepath.Join(c.dir, filepath.FromSlash(strings.TrimSuffix(git, near))), near, err
 	}
+	// Con el IDE en un proyecto anidado, el gobierno de los de afuera, dentro
+	// del mismo repo, y el de los otros checkouts se protege igual que el propio.
+	paths.Outer = append(outerDirs(phys, top), others...)
 	paths.Infra, _, paths.InfraErr = infra.Load(root)
 	return paths, nil
+}
+
+// outerDirs son las carpetas entre un proyecto anidado y la raíz de su repo,
+// ésta incluida: los proyectos de afuera.
+func outerDirs(phys, top string) []string {
+	var out []string
+	for d := filepath.Dir(phys); d != phys && within(top, d); {
+		out = append(out, d)
+		up := filepath.Dir(d)
+		if up == d {
+			break
+		}
+		d = up
+	}
+	return out
+}
+
+// maxCheckouts acota cuántos worktrees de un repo se consideran.
+const maxCheckouts = 64
+
+// repoCheckouts devuelve, sin enlaces, los otros checkouts del repo de top: el
+// principal y los worktrees enlazados (git worktree add), que comparten la
+// carpeta común de git. Cada uno tiene su propio árbol de trabajo, con lo que
+// git no sigue (los secretos ignorados) y con el project.yaml de su rama.
+func repoCheckouts(top string) []string {
+	dirs := gate.GitDirsOf(top)
+	if len(dirs) == 0 {
+		return nil
+	}
+	common := dirs[len(dirs)-1]
+	var out []string
+	seen := map[string]bool{top: true}
+	add := func(d string) {
+		d = filepath.Clean(d)
+		if real, err := filepath.EvalSymlinks(d); err == nil {
+			d = real
+		} else {
+			return
+		}
+		if !seen[d] && len(out) < maxCheckouts {
+			seen[d] = true
+			out = append(out, d)
+		}
+	}
+	if filepath.Base(common) == ".git" {
+		add(filepath.Dir(common))
+	}
+	entries, _ := os.ReadDir(filepath.Join(common, "worktrees"))
+	for _, e := range entries {
+		data, err := fsx.ReadCapped(filepath.Join(common, "worktrees", e.Name(), "gitdir"), 4096)
+		if err != nil {
+			continue
+		}
+		gd := strings.TrimSpace(string(data))
+		if gd == "" {
+			continue
+		}
+		if !filepath.IsAbs(gd) {
+			gd = filepath.Join(common, "worktrees", e.Name(), gd)
+		}
+		add(filepath.Dir(gd)) // gitdir apunta al .git del worktree
+	}
+	return out
 }
 
 // repoTop es la carpeta de más arriba que cuenta para las reglas de secretos

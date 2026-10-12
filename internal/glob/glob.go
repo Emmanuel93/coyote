@@ -109,3 +109,61 @@ func toRegexp(p string) string {
 	b.WriteString("$")
 	return b.String()
 }
+
+// BracketsAsAny sustituye cada expresión entre corchetes ([abc], [!x],
+// [[:alpha:]], []x]) por un ?: este paquete no entiende los corchetes, y para
+// saber si un patrón de búsqueda (rg -g '.e[n]v') puede alcanzar un nombre
+// basta leerlos de más. Una barra invertida cita el caracter que sigue, y un
+// [ que no cierra queda como está.
+func BracketsAsAny(p string) string {
+	if !strings.Contains(p, "[") {
+		return p
+	}
+	var b strings.Builder
+	for i := 0; i < len(p); {
+		switch {
+		case p[i] == '\\' && i+1 < len(p):
+			b.WriteString(p[i : i+2])
+			i += 2
+		case p[i] == '[':
+			if n := bracketLen(p[i:]); n > 0 {
+				b.WriteByte('?')
+				i += n
+				continue
+			}
+			b.WriteByte('[')
+			i++
+		default:
+			b.WriteByte(p[i])
+			i++
+		}
+	}
+	return b.String()
+}
+
+// bracketLen es el largo de la expresión entre corchetes que empieza en s[0],
+// o 0 si no cierra. El primer ] (tras el [ o el [!) es un miembro más, y
+// [:clase:], [=c=] y [.c.] llevan su propio cierre.
+func bracketLen(s string) int {
+	i := 1
+	if i < len(s) && (s[i] == '!' || s[i] == '^') {
+		i++
+	}
+	for first := true; i < len(s); first = false {
+		switch c := s[i]; {
+		case c == ']' && !first:
+			return i + 1
+		case c == '[' && i+1 < len(s) && (s[i+1] == ':' || s[i+1] == '=' || s[i+1] == '.'):
+			if j := strings.Index(s[i+2:], string(s[i+1])+"]"); j >= 0 {
+				i += 2 + j + 2
+			} else {
+				i++
+			}
+		case c == '\\' && i+1 < len(s):
+			i += 2
+		default:
+			i++
+		}
+	}
+	return 0
+}

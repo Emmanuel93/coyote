@@ -135,6 +135,11 @@ type Paths struct {
 	// escribe coyote/project.yaml: un comando con efectos sobre el clon se
 	// bloquea (ADR-0018).
 	HubDir, HubPath string
+	// Outer son las carpetas de los proyectos de afuera, dentro del mismo repo,
+	// cuando el IDE se abrió en un proyecto anidado (absolutas, sin enlaces): su
+	// coyote/, su .claude/ y lo demás que protege el gate valen también ahí, y el
+	// project.yaml de afuera decide lo que se bloquea en todo el subárbol.
+	Outer []string
 }
 
 // GitDirsOf devuelve la carpeta .git de dir y, si es un archivo (worktree
@@ -284,10 +289,22 @@ func (ps Paths) sensitive(abs string) (string, bool) {
 // protected dice si escribir en abs desarmaría el gate.
 func (ps Paths) protected(abs string) (string, bool) {
 	root := resolve(ps.Root, "/", ps.Home)
-	for _, r := range []string{ps.Root, root} {
+	// Lo del proyecto y, si el IDE se abrió en uno anidado, lo de los de afuera.
+	roots := append([]string{ps.Root, root}, ps.Outer...)
+	for n, r := range roots {
+		// Para lo de afuera el motivo dice dónde queda respecto del proyecto.
+		show := func(rel string) string {
+			if n < 2 {
+				return rel
+			}
+			if s, err := filepath.Rel(ps.Root, filepath.Join(r, filepath.FromSlash(rel))); err == nil {
+				return filepath.ToSlash(s)
+			}
+			return rel
+		}
 		for _, rel := range ps.Protected {
 			if within(abs, filepath.Join(r, filepath.FromSlash(rel))) {
-				return rel, true
+				return show(rel), true
 			}
 		}
 		// Los hooks de un IDE en una subcarpeta también cuentan: Codex carga
@@ -295,10 +312,10 @@ func (ps Paths) protected(abs string) (string, bool) {
 		// el hook subiendo desde ahí.
 		if rel, err := filepath.Rel(r, abs); err == nil && !strings.HasPrefix(rel, "..") {
 			if what, ok := nestedHook(filepath.ToSlash(rel)); ok {
-				return what, true
+				return show(what), true
 			}
-			if what, ok := nestedCoyote(filepath.ToSlash(rel)); ok {
-				return what, true
+			if what, ok := ps.nestedCoyote(r, filepath.ToSlash(rel)); ok {
+				return show(what), true
 			}
 		}
 	}
@@ -371,19 +388,26 @@ func nestedHook(rel string) (string, bool) {
 	return "", false
 }
 
-// nestedCoyote reconoce, en una ruta relativa al proyecto, lo que gobierna a un
-// proyecto anidado: su coyote/project.yaml (autonomía, secretos y dispensas),
-// su inventario, su hub, sus aprobaciones y su ledger. Como en la raíz, un
-// agente no los escribe.
-func nestedCoyote(rel string) (string, bool) {
+// nestedCoyote reconoce, en una ruta relativa a base (la raíz del proyecto o
+// la de uno de afuera), lo que gobierna a un proyecto anidado: su
+// coyote/project.yaml (autonomía, secretos y dispensas), su inventario, su hub,
+// sus aprobaciones y su ledger. Como en la raíz, un agente no los escribe.
+// El project.yaml se protege siempre, para que un agente no cree un proyecto
+// con sus propias dispensas; lo demás, donde hay un proyecto: una carpeta
+// pkg/coyote/ledger con código de cualquiera no es el ledger de nadie.
+func (ps Paths) nestedCoyote(base, rel string) (string, bool) {
 	parts := strings.Split(rel, "/")
 	for i := 1; i+1 < len(parts); i++ {
 		if !strings.EqualFold(parts[i], "coyote") {
 			continue
 		}
 		switch strings.ToLower(parts[i+1]) {
-		case "project.yaml", "infra.yaml", "hub.yaml", "approvals", "ledger":
+		case "project.yaml":
 			return strings.Join(parts[:i+2], "/"), true
+		case "infra.yaml", "hub.yaml", "approvals", "ledger":
+			if isProjectDir(filepath.Join(base, filepath.FromSlash(strings.Join(parts[:i+1], "/")))) {
+				return strings.Join(parts[:i+2], "/"), true
+			}
 		}
 	}
 	return "", false
@@ -920,7 +944,11 @@ func excludesGit(args []string) bool {
 // secretos, o un comodín que los alcanza.
 func (ps Paths) secretArg(w word, cwd string) (string, bool) {
 	if w.glob {
-		return ps.secretGlobWord(w.s, cwd)
+		pat := w.pat
+		if pat == "" {
+			pat = w.s
+		}
+		return ps.secretGlobWord(pat, cwd)
 	}
 	if kind, rel, ok := ps.secretFile(resolve(w.s, cwd, ps.Home)); ok {
 		return secretReason("lee", kind, rel), true

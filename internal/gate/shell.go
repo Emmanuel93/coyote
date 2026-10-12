@@ -10,10 +10,13 @@ import (
 )
 
 // word es una palabra de shell ya sin comillas. glob indica que trae comodines
-// fuera de comillas, que el shell expandiría.
+// fuera de comillas, que el shell expandiría; pat es la palabra como patrón de
+// nombres, con una barra invertida delante de lo que estaba entre comillas o
+// escapado (shellGlob la entiende).
 type word struct {
 	s    string
 	glob bool
+	pat  string
 }
 
 // splitShell parte un comando en segmentos (separados por ;, &&, || o |) de
@@ -24,13 +27,16 @@ type word struct {
 func splitShell(cmd string) ([][]word, error) {
 	var segs [][]word
 	var cur []word
-	var b strings.Builder
+	var b, pb strings.Builder
+	lit := func(s string) { b.WriteString(s); pb.WriteString(quoteGlob(s)) }
+	raw := func(s string) { b.WriteString(s); pb.WriteString(s) }
 	inWord, glob := false, false
 	flushWord := func() {
 		if inWord {
-			cur = append(cur, word{b.String(), glob})
+			cur = append(cur, word{s: b.String(), glob: glob, pat: pb.String()})
 		}
 		b.Reset()
+		pb.Reset()
 		inWord, glob = false, false
 	}
 	flushSeg := func(strict bool) error {
@@ -57,7 +63,7 @@ func splitShell(cmd string) ([][]word, error) {
 			if j >= len(r) {
 				return nil, errors.New("comilla sin cerrar")
 			}
-			b.WriteString(string(r[i+1 : j]))
+			lit(string(r[i+1 : j]))
 			inWord, i = true, j
 		case c == '"':
 			j := i + 1
@@ -73,7 +79,7 @@ func splitShell(cmd string) ([][]word, error) {
 				if r[j] < 0x20 && r[j] != '\t' && r[j] != '\n' {
 					return nil, errors.New("caracter de control")
 				}
-				b.WriteRune(r[j])
+				lit(string(r[j]))
 			}
 			if j >= len(r) {
 				return nil, errors.New("comilla sin cerrar")
@@ -87,7 +93,7 @@ func splitShell(cmd string) ([][]word, error) {
 			if r[i] == '\n' {
 				continue
 			}
-			b.WriteRune(r[i])
+			lit(string(r[i]))
 			inWord = true
 		case c == ' ' || c == '\t':
 			flushWord()
@@ -118,6 +124,7 @@ func splitShell(cmd string) ([][]word, error) {
 			if inWord {
 				if s := b.String(); s == "1" || s == "2" {
 					b.Reset() // descriptor de la redirección, no un argumento
+					pb.Reset()
 					inWord, glob = false, false
 				} else {
 					flushWord()
@@ -155,12 +162,12 @@ func splitShell(cmd string) ([][]word, error) {
 			return nil, errors.New("comentario de shell")
 		case c == '*' || c == '?' || c == '[':
 			glob = true
-			b.WriteRune(c)
+			raw(string(c))
 			inWord = true
 		case c < 0x20 || c == 0x7f:
 			return nil, errors.New("caracter de control")
 		default:
-			b.WriteRune(c)
+			raw(string(c))
 			inWord = true
 		}
 	}

@@ -42,3 +42,28 @@ func TestMatch(t *testing.T) {
 		}
 	}
 }
+
+func TestBracketsAsAny(t *testing.T) {
+	for in, want := range map[string]string{
+		"a":                     "a",
+		".e[n]v":                ".e?v",
+		".e[[:alpha:]]v":        ".e?v",
+		".e[]n]v":               ".e?v",
+		".e[!x]v":               ".e?v",
+		".e[^x]v":               ".e?v",
+		".e[[=n=]]v":            ".e?v",
+		".e[[.n.]]v":            ".e?v",
+		"**/[a-z]*.txt":         "**/?*.txt",
+		`\[x\].env`:             `\[x\].env`,
+		"a[b":                   "a[b",
+		"[a":                    "[a",
+		"a[":                    "a[",
+		"[[]x[]]":               "?x?",
+		"[[:alpha:][:digit:]]x": "?x",
+		"[a][b]":                "??",
+	} {
+		if got := BracketsAsAny(in); got != want {
+			t.Errorf("BracketsAsAny(%q) = %q, quiero %q", in, got, want)
+		}
+	}
+}

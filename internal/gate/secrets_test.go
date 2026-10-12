@@ -254,6 +254,9 @@ func TestLecturaConCorchetesYComodinesLiterales(t *testing.T) {
 // secretos.
 func TestGobiernoDeProyectosAnidadosProtegido(t *testing.T) {
 	ps, root, _ := testPaths(t)
+	// Son proyectos: tienen su project.yaml. Donde no lo hay, un ledger o una
+	// carpeta approvals es código de cualquiera (TestCarpetasConNombreDeGobiernoSinProyecto).
+	mkTree(t, root, map[string]string{"svc/coyote/project.yaml": "x\n", "a/b/coyote/project.yaml": "x\n"})
 	w := func(tool, rel string) Action {
 		in := map[string]any{"file_path": filepath.Join(root, filepath.FromSlash(rel)), "content": "x"}
 		if tool == "Edit" {

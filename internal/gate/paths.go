@@ -5,7 +5,6 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"strings"
 )
 
@@ -253,72 +252,13 @@ func symbolic(seg []string, at int) bool {
 	return false
 }
 
-// glob expande un patrón como lo haría el shell en ese momento. Lo que del
-// camino ya existe con ese nombre se toma literal: la carpeta de un proyecto
-// en "Mi app [v2]" no es una clase de caracteres, y leerla así hacía que
-// `cat .e*` no alcanzara nada. Devuelve las coincidencias de las dos lecturas.
+// glob expande un patrón como lo haría el shell en ese momento (shellGlob):
+// lo que del camino ya existe con ese nombre se toma literal, porque la
+// carpeta de un proyecto en "Mi app [v2]" no es una clase de caracteres, y un
+// comodín que no alcanza nada queda como nombre. Devuelve las coincidencias de
+// las dos lecturas.
 func glob(pattern string) []string {
-	var out []string
-	seen := map[string]bool{}
-	pats := []string{pattern}
-	if lit := literalPrefix(pattern); lit != pattern {
-		pats = append(pats, lit)
-	}
-	for _, pat := range pats {
-		matches, _ := filepath.Glob(pat)
-		for _, m := range matches {
-			if !seen[m] {
-				seen[m] = true
-				out = append(out, m)
-			}
-		}
-	}
-	return out
-}
-
-// literalPrefix escapa los comodines del tramo inicial de pattern que existe en
-// el disco con ese mismo nombre. En Windows no hay escape: queda igual.
-func literalPrefix(pattern string) string {
-	if runtime.GOOS == "windows" || !strings.ContainsAny(pattern, "*?[") {
-		return pattern
-	}
-	sep := string(filepath.Separator)
-	parts := strings.Split(pattern, sep)
-	cur := ""
-	if strings.HasPrefix(pattern, sep) {
-		cur = sep
-	}
-	n := 0
-	for i, part := range parts {
-		if part == "" {
-			n = i + 1
-			continue
-		}
-		next := filepath.Join(cur, part)
-		if strings.ContainsAny(part, "*?[") {
-			if _, err := os.Lstat(next); err != nil {
-				break
-			}
-		}
-		cur = next
-		n = i + 1
-	}
-	if n >= len(parts) {
-		return escapeMeta(cur)
-	}
-	return filepath.Join(escapeMeta(cur), strings.Join(parts[n:], sep))
-}
-
-// escapeMeta antepone \ a los caracteres de comodín de s.
-func escapeMeta(s string) string {
-	var b strings.Builder
-	for _, r := range s {
-		if r == '*' || r == '?' || r == '[' || r == '\\' {
-			b.WriteByte('\\')
-		}
-		b.WriteRune(r)
-	}
-	return b.String()
+	return shellGlob(pattern)
 }
 
 // globRel expande un comodín como lo haría el shell en ese momento y devuelve
@@ -501,29 +441,102 @@ func findExecs(args []string) bool {
 var protectedParents = map[string]string{"coyote": "coyote/, con el ledger, las aprobaciones y la configuración del proyecto",
 	".claude": ".claude/, con la configuración de Claude Code", ".git": ".git/, la carpeta de git", ".coyote": ".coyote/, el estado del gate"}
 
-// nestedParent dice si c, una ruta limpia de un comando, es la carpeta
-// coyote/ de un proyecto anidado: la que tiene adentro su project.yaml, su
-// inventario, su hub, sus aprobaciones o su ledger. Moverla o borrarla saca a
-// ese proyecto del gate y del escaneo de secretos, igual que la de la raíz
-// (protectedParents). Una carpeta que se llama coyote y no tiene esos archivos
-// (cmd/coyote), o que queda fuera del proyecto, es una carpeta cualquiera.
-func (ps Paths) nestedParent(c string) (string, bool) {
-	rel := c
-	if filepath.IsAbs(c) {
-		if rel = ps.Rel(filepath.Clean(c)); filepath.IsAbs(rel) {
-			return "", false
-		}
-	}
+// nestedParent dice si rel, una ruta limpia relativa a base, es la carpeta
+// coyote/ de un proyecto anidado: la que tiene adentro su project.yaml. Moverla
+// o borrarla saca a ese proyecto del gate y del escaneo de secretos, igual que
+// la de la raíz (protectedParents). Una carpeta que se llama coyote y no es un
+// proyecto (cmd/coyote, pkg/coyote con un paquete ledger), o que queda fuera,
+// es una carpeta cualquiera.
+func (ps Paths) nestedParent(base, rel string) (string, bool) {
 	parts := strings.Split(rel, "/")
 	if len(parts) < 2 || parts[0] == ".." || !strings.EqualFold(parts[len(parts)-1], "coyote") {
 		return "", false
 	}
-	for _, name := range []string{"project.yaml", "infra.yaml", "hub.yaml", "approvals", "ledger"} {
-		if _, err := os.Lstat(filepath.Join(ps.Root, filepath.FromSlash(rel), name)); err == nil {
-			return rel + "/, con el project.yaml, el ledger y las aprobaciones de un proyecto anidado", true
+	if !isProjectDir(filepath.Join(base, filepath.FromSlash(rel))) {
+		return "", false
+	}
+	return rel + "/, con el project.yaml, el ledger y las aprobaciones de un proyecto anidado", true
+}
+
+// isProjectDir dice si dir, una carpeta que se llama coyote, tiene su
+// project.yaml: lo que hace de ella la de un proyecto.
+func isProjectDir(dir string) bool {
+	_, err := os.Lstat(filepath.Join(dir, "project.yaml"))
+	return err == nil
+}
+
+// parentRoots son las carpetas contra las que se lee la ruta de un comando: la
+// raíz del proyecto, la misma sin enlaces y los proyectos de afuera, si el IDE
+// se abrió en uno anidado.
+func (ps Paths) parentRoots() []string {
+	roots := []string{ps.Root}
+	if r := ps.Real(ps.Root); r != ps.Root {
+		roots = append(roots, r)
+	}
+	return append(roots, ps.Outer...)
+}
+
+// protectedParent dice si c, una ruta limpia de un comando (relativa al
+// proyecto o absoluta), es una carpeta que contiene lo protegido: coyote/,
+// .claude/, .git/ o .coyote/ del proyecto o de uno de afuera, o la coyote/ de
+// un proyecto anidado. La ruta absoluta de una carpeta es la misma carpeta que
+// la relativa, y el nombre en otras mayúsculas también (el disco de macOS no
+// las distingue).
+func (ps Paths) protectedParent(roots []string, c string) (string, bool) {
+	abs := c
+	if !filepath.IsAbs(abs) {
+		abs = filepath.Join(ps.Root, filepath.FromSlash(c))
+	}
+	abs = filepath.Clean(abs)
+	for _, r := range roots {
+		rel, err := filepath.Rel(r, abs)
+		if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			continue
+		}
+		rel = filepath.ToSlash(rel)
+		if why, ok := protectedParents[strings.ToLower(rel)]; ok {
+			return why, true
+		}
+		if why, ok := ps.nestedParent(r, rel); ok {
+			return why, true
 		}
 	}
 	return "", false
+}
+
+// targetDirs son las carpetas de destino de un comando de copia (cp, install,
+// ln, mv) que van en -t o --target-directory: en la palabra que sigue (-t x, -rt
+// x, --target-directory x), que se devuelve como posición, o pegada a la
+// opción (-tx, -rtx, --target-directory=x), que se devuelve como valor. Con
+// ellas el destino no es el último argumento.
+func targetDirs(seg []string, at int) (words []int, values []string) {
+	for j := at + 1; j < len(seg); j++ {
+		w := seg[j]
+		switch {
+		case w == "--":
+			return words, values
+		case w == "--target-directory":
+			if j+1 < len(seg) {
+				words = append(words, j+1)
+			}
+		case strings.HasPrefix(w, "--target-directory="):
+			values = append(values, strings.TrimPrefix(w, "--target-directory="))
+		case strings.HasPrefix(w, "--") || !strings.HasPrefix(w, "-"):
+		default:
+			// Un grupo de opciones cortas: la t toma el resto de la palabra o la
+			// que sigue.
+			if i := strings.IndexByte(w, 't'); i > 0 {
+				if i == len(w)-1 {
+					if j+1 < len(seg) {
+						words = append(words, j+1)
+					}
+				} else {
+					values = append(values, w[i+1:])
+				}
+			}
+		}
+	}
+	return words, values
 }
 
 // fragmentRe son pedazos de rutas protegidas que un programa que ejecuta lo
@@ -551,6 +564,7 @@ func (ps Paths) parentTouch(segs [][]string, sps []segPaths) (string, bool) {
 			}
 		}
 	}
+	roots := ps.parentRoots()
 	for i, seg := range segs {
 		prog, at := mainProg(seg)
 		if at < 0 {
@@ -558,11 +572,23 @@ func (ps Paths) parentTouch(segs [][]string, sps []segPaths) (string, bool) {
 		}
 		parent := func(j int) string {
 			for _, c := range append([]string{seg[j]}, sps[i].cands[j]...) {
-				c = strings.TrimSuffix(strings.TrimPrefix(c, "./"), "/")
-				if why, ok := protectedParents[c]; ok {
+				if why, ok := ps.protectedParent(roots, c); ok {
 					return why
 				}
-				if why, ok := ps.nestedParent(c); ok {
+			}
+			return ""
+		}
+		// targetDirParent mira las carpetas de destino que van en -t.
+		targetDirParent := func() string {
+			words, values := targetDirs(seg, at)
+			for _, j := range words {
+				if why := parent(j); why != "" {
+					return why
+				}
+			}
+			for _, v := range values {
+				// Pegado a la opción, se lee contra la carpeta donde corre el comando.
+				if why, ok := ps.protectedParent(roots, path.Clean(joinPath(joinPath(sps[i].dir, segDir(seg)), v))); ok {
 					return why
 				}
 			}
@@ -578,6 +604,13 @@ func (ps Paths) parentTouch(segs [][]string, sps []segPaths) (string, bool) {
 			return out
 		}
 		ops := operandsAt()
+		switch prog {
+		case "mv", "cp", "install", "ln":
+			// Estos dan la carpeta de destino con -t. En rsync -t es --times.
+			if why := targetDirParent(); why != "" {
+				return why, true
+			}
+		}
 		switch prog {
 		case "mv", "rm", "rmdir", "shred", "chmod", "chown":
 			for _, j := range ops {
@@ -614,11 +647,7 @@ func (ps Paths) parentTouch(segs [][]string, sps []segPaths) (string, bool) {
 			if extract {
 				// Extrae donde corre: la carpeta de un cd anterior, cambiada por -C.
 				if d := joinPath(sps[i].dir, segDir(seg)); d != "" && d != "." {
-					d = strings.TrimSuffix(strings.TrimPrefix(path.Clean(d), "./"), "/")
-					if why, ok := protectedParents[d]; ok {
-						return why, true
-					}
-					if why, ok := ps.nestedParent(d); ok {
+					if why, ok := ps.protectedParent(roots, path.Clean(d)); ok {
 						return why, true
 					}
 				}

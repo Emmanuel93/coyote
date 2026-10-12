@@ -275,6 +275,21 @@ func (ps Paths) secretWord(cmd, cwd string) (string, bool) {
 			if skip[i] {
 				continue
 			}
+			// Una palabra sola se revisa entera: los comodines tienen signos
+			// que no son de una ruta ([!x], [[:alpha:]], [^x]) y partirla en
+			// tramos los esconde.
+			if !strings.ContainsAny(w.text, " \t\n\"'`$(){};&|<>") {
+				if what, ok := ps.secretToken(w.text, cwd); ok {
+					return what, true
+				}
+			}
+			// Y como patrón: un comodín mezclado con corchetes que el comando
+			// escribió entre comillas o escapados ("Proyectos"?"[cliente]").
+			if w.pat != w.text && strings.ContainsAny(w.pat, "*?[") {
+				if what, ok := ps.secretToken(w.pat, cwd); ok {
+					return what, true
+				}
+			}
 			// Una ruta puede venir dentro de un script (python -c 'open(".env")'):
 			// se revisa cada tramo con forma de ruta.
 			for _, f := range pathLike.FindAllString(w.text, -1) {
@@ -322,7 +337,7 @@ func (ps Paths) secretToken(tok, cwd string) (string, bool) {
 // patrón; si no, por los archivos que el shell le daría ahora.
 func (ps Paths) secretGlobWord(pattern, cwd string) (string, bool) {
 	if strings.Contains(pattern, "**") {
-		if s, ok := secrets.GlobMayMatch(pattern); ok {
+		if s, ok := secrets.GlobMayMatch(globUnquote(pattern)); ok {
 			return "un patrón que alcanza archivos de secretos (" + s + ")", true
 		}
 		return "", false
@@ -337,6 +352,15 @@ func (ps Paths) secretGlobWord(pattern, cwd string) (string, bool) {
 		}
 		if kind, rel, ok := ps.secretFile(m); ok {
 			return "un comodín que alcanza " + kind + " (" + rel + ")", true
+		}
+	}
+	// Si lo último del patrón es el nombre de un archivo de secretos, nombrarlo
+	// ya es leerlo, esté donde esté: una carpeta que el gate no supo expandir
+	// (un comodín de zsh, una clase que no conoce) no lo esconde.
+	last := pattern[strings.LastIndexByte(pattern, '/')+1:]
+	if last != "" && !globHasMeta(last) {
+		if kind, ok := (secrets.Rules{}).KindAt("", globUnquote(last)); ok {
+			return "un comodín que termina en " + kind + " (" + globUnquote(last) + ")", true
 		}
 	}
 	return "", false

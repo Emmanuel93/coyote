@@ -30,14 +30,20 @@ type lseg struct {
 func lenientSegs(cmd string) []lseg {
 	var segs []lseg
 	var cur []lword
-	var b strings.Builder
+	var b, pb strings.Builder
+	// b lleva el texto de la palabra sin comillas; pb, el mismo texto como
+	// patrón: lo que estaba entre comillas o escapado va con \ delante, para
+	// que un corchete escrito entre comillas siga siendo una letra.
+	lit := func(s string) { b.WriteString(s); pb.WriteString(quoteGlob(s)) }
+	raw := func(s string) { b.WriteString(s); pb.WriteString(s) }
 	in, quoted, subst := false, false, false
 	depth, tick, curSubst := 0, false, false
 	flush := func() {
 		if in {
-			cur = append(cur, lword{b.String(), quoted, subst})
+			cur = append(cur, lword{text: b.String(), pat: pb.String(), quoted: quoted, subst: subst})
 		}
 		b.Reset()
+		pb.Reset()
 		in, quoted, subst = false, false, false
 	}
 	push := func() {
@@ -56,12 +62,12 @@ func lenientSegs(cmd string) []lseg {
 			for j < len(r) && r[j] != '\'' {
 				j++
 			}
-			b.WriteString(string(r[i+1 : min(j, len(r))]))
+			lit(string(r[i+1 : min(j, len(r))]))
 			in, quoted, i = true, true, j
 		case c == '$' && i+1 < len(r) && r[i+1] == '\'':
 			// $'…': comillas de ANSI C, con escapes que el shell traduce.
 			j, text := ansiC(r, i+2)
-			b.WriteString(text)
+			lit(text)
 			in, quoted, i = true, true, j
 		case c == '$' && i+1 < len(r) && r[i+1] == '"':
 			// $"…" es "…" traducido: se lee igual.
@@ -74,13 +80,13 @@ func lenientSegs(cmd string) []lseg {
 				if r[j] == '`' || (r[j] == '$' && j+1 < len(r) && r[j+1] == '(') {
 					subst = true
 				}
-				b.WriteRune(r[j])
+				lit(string(r[j]))
 			}
 			in, quoted, i = true, true, j
 		case c == '\\':
 			if i+1 < len(r) {
 				i++
-				b.WriteRune(r[i])
+				lit(string(r[i]))
 				in = true
 			}
 		case c == ' ' || c == '\t':
@@ -101,7 +107,7 @@ func lenientSegs(cmd string) []lseg {
 			for j < len(r) && r[j] != '}' {
 				j++
 			}
-			b.WriteString(string(r[i:min(j+1, len(r))]))
+			raw(string(r[i:min(j+1, len(r))]))
 			in, i = true, j
 		case c == ')':
 			push()
@@ -118,21 +124,21 @@ func lenientSegs(cmd string) []lseg {
 			for r[j] != '}' {
 				j++
 			}
-			b.WriteString(string(r[i : j+1]))
+			raw(string(r[i : j+1]))
 			in, i = true, j
 		case (c == '&' || c == '|') && in && i > 0 && r[i-1] == '>':
 			// >& y >| son redirecciones, no separadores: el destino sigue.
-			b.WriteRune(c)
+			raw(string(c))
 		case (c == '>' || c == '<') && in && !fdPrefix(b.String()) && !strings.HasSuffix(b.String(), ">") && !strings.HasSuffix(b.String(), "<"):
 			// x>archivo: la redirección es una palabra aparte, aunque vaya
 			// pegada a la anterior (un dato de echo no la esconde).
 			flush()
-			b.WriteRune(c)
+			raw(string(c))
 			in = true
 		case strings.ContainsRune(";&|\n(){}", c):
 			push()
 		default:
-			b.WriteRune(c)
+			raw(string(c))
 			in = true
 		}
 	}

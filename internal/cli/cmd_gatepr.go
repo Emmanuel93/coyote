@@ -397,8 +397,9 @@ type baseRules struct {
 func (b *baseRules) For(f string) (secrets.Rules, string) {
 	// Los proyectos que contienen f, del más cercano al de afuera, como en
 	// secrets scan: un proyecto anidado no tapa los secretos que declara el
-	// de afuera, una dispensa vale solo si la dan todos y uno dentro de
-	// dependencias solo suma archivos de secretos (mergeRules).
+	// de afuera; su dispensa vale para lo suyo y no para lo que el de afuera
+	// declara sin dispensarlo; y uno dentro de dependencias solo suma
+	// archivos de secretos (mergeRules).
 	var layers []layer
 	for d := path.Dir(f); ; d = path.Dir(d) {
 		prefix := ""

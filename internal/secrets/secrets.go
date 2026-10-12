@@ -170,6 +170,9 @@ var samples = []string{".env", ".env.local", ".env.production", "prod.env", ".en
 // GlobMayMatch informa si un patrón de nombres (*.pem, **/.env*) puede
 // coincidir con un archivo de secretos, y con cuál.
 func GlobMayMatch(pattern string) (string, bool) {
+	// Los corchetes (.e[n]v, .e[[:alpha:]]v) se leen como un ? cada uno: el
+	// patrón alcanza de más, nunca de menos.
+	pattern = glob.BracketsAsAny(pattern)
 	pattern = strings.ReplaceAll(pattern, "\\", "/")
 	if !glob.HasMeta(pattern) {
 		return "", false
