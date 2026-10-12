@@ -32,7 +32,7 @@ line_patterns:
   - id: ai-noreply
     pattern: '(?i)\bnoreply@anthropic\.com\b'
   - id: ai-assisted-by-trailer
-    pattern: '(?i)^\s*(?:assisted|generated|written|drafted|authored|co-?developed|produced|coded)\s*-\s*by\s*:\s*\[?(?:claude(?:\s+(?:code|opus|sonnet|haiku|fable|mythos)\b|\s*[-:/0-9(<\[]|\s*$)|(?:chatgpt|(?:github\s+)?copilot|gemini|codex|cursor|windsurf|aider|codeium|tabnine|codewhisperer|amazon\s+q)\b|gpt-?[0-9])'
+    pattern: '(?i)^\s*(?:ai[- ])?(?:assisted|helped|generated|written|drafted|authored|co-?developed|produced|coded)(?:\s*-\s*|\s+)by\s*:\s*\[?(?:claude(?:\s+(?:code|opus|sonnet|haiku|fable|mythos)\b|-(?:code|opus|sonnet|haiku|fable|mythos|[0-9])|\s*\(\s*(?:claude|anthropic|ai\b|llm\b|opus|sonnet|haiku|fable|mythos|code\b|[0-9])|\s*[:/0-9\[]|\s*$)|cursor(?:\s*:|\s*agent\b|\s+bugbot\b|\s*$)|(?:chatgpt|(?:github\s+)?copilot|gemini|codex|windsurf|aider|codeium|tabnine|codewhisperer|amazon\s+q)\b|gpt-?[0-9])'
 
 phrase_patterns:
   - id: en-made-with-ai

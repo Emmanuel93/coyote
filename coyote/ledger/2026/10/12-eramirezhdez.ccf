@@ -1,3 +1,4 @@
 # ts|actor|project|repo|type|scope|what|refs|tokens in/cache/out|cost in+out|status
 2026-10-12T04:50Z|@eramirezhdez/coyote-dev|W-0008|coyote|fix|secrets|el gate y secrets list ven los proyectos anidados, un proyecto sin…|-|-|-|ok
 2026-10-12T05:17Z|@eramirezhdez/coyote-dev|W-0008|coyote|fix|ws|el motor autónomo solo se detiene ante el archivo que recibe un…|-|-|-|ok
+2026-10-12T05:39Z|@eramirezhdez/coyote-dev|W-0008|coyote|fix|audit|una fecha futura llega con el commit que le sigue y no…|-|-|-|ok

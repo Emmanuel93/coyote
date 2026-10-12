@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -489,6 +490,7 @@ func TestAuditCuartaRevision(t *testing.T) {
 		git(t, root, "config", k, prog)
 	}
 	git(t, root, "config", "gpg.ssh.allowedSignersFile", signers)
+	git(t, root, "config", "log.showSignature", "true")
 	for _, kind := range []string{"PGP SIGNATURE", "SSH SIGNATURE", "SIGNED MESSAGE"} {
 		tree := strings.TrimSpace(git(t, root, "rev-parse", "HEAD^{tree}"))
 		parent := strings.TrimSpace(git(t, root, "rev-parse", "HEAD"))
@@ -518,4 +520,243 @@ func TestAuditCuartaRevision(t *testing.T) {
 	if rep.Commits != 4 || rep.Signed != 3 {
 		t.Errorf("4 commits con 3 firmas: %+v\n%s", rep, r.stdout)
 	}
+}
+
+// auditAt corre git en root con la fecha de autor y de committer dadas.
+func auditAt(t *testing.T, root string, date time.Time, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
+	cmd.Env = append(os.Environ(), "GIT_COMMITTER_DATE="+date.Format(time.RFC3339), "GIT_AUTHOR_DATE="+date.Format(time.RFC3339))
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+}
+
+// auditNuevo deja un proyecto con dos eventos y un commit de adopción con la
+// fecha dada. Devuelve la raíz y la ruta de su archivo del ledger.
+func auditNuevo(t *testing.T, base, name string, when time.Time) (string, string) {
+	t.Helper()
+	must(t, run(t, base, "", "init", name, "--purpose", "API de pedidos de la tienda demo"), 0, "init "+name)
+	root := filepath.Join(base, name)
+	must(t, run(t, root, "", "record", "feat", "alta de pedidos"), 0, "record")
+	must(t, run(t, root, "", "record", "fix", "corrige totales"), 0, "record")
+	git(t, root, "add", "-A")
+	auditAt(t, root, when, "commit", "-qm", "chore: adopta coyote")
+	files, _ := filepath.Glob(filepath.Join(root, "coyote", "ledger", "*", "*", "*.ccf"))
+	if len(files) != 1 {
+		t.Fatalf("ledger: %v", files)
+	}
+	rel, _ := filepath.Rel(root, files[0])
+	return root, filepath.ToSlash(rel)
+}
+
+// auditRewrite cambia una línea del ledger sin agregar nada.
+func auditRewrite(t *testing.T, root, f string) {
+	t.Helper()
+	p := filepath.Join(root, f)
+	if err := os.WriteFile(p, []byte(strings.Replace(readFile(t, p), "corrige totales", "otra cosa", 1)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// auditCommits devuelve cuántos commits cuenta el reporte JSON del mes.
+func auditCommits(t *testing.T, root, month string) int {
+	t.Helper()
+	r := run(t, root, "", "audit", "--month", month, "--json")
+	var rep struct {
+		Commits int `json:"commits"`
+	}
+	if err := json.Unmarshal([]byte(r.stdout), &rep); err != nil {
+		t.Fatalf("--json: %v\n%s", err, r.stdout)
+	}
+	return rep.Commits
+}
+
+// TestAuditQuintaRevision: quinta pasada adversarial de v1.0. Una fecha
+// futura no saca del mes cerrado a los commits que le siguen.
+func TestAuditQuintaRevision(t *testing.T) {
+	base := setup(t)
+	now := time.Now().UTC()
+	closed := time.Date(now.Year(), now.Month()-2, 1, 12, 0, 0, 0, time.UTC)
+	month := closed.Format("2006-01")
+
+	// El reporte de un mes cerrado, que es como se escribe con --write, ve los
+	// commits que le siguen a uno con la fecha adelantada: el de fecha futura
+	// llega con su sucesor y el resto conserva su fecha.
+	root, f := auditNuevo(t, base, "cerrado", closed)
+	auditAt(t, root, time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC), "commit", "-q", "--allow-empty", "-m", "chore: reloj adelantado")
+	auditAt(t, root, time.Date(2098, 1, 1, 0, 0, 0, 0, time.UTC), "commit", "-q", "--allow-empty", "-m", "chore: otro reloj adelantado")
+	auditRewrite(t, root, f)
+	auditAt(t, root, closed.AddDate(0, 0, 4), "commit", "-qam", "chore: borra", "--no-verify")
+	auditAt(t, root, closed.AddDate(0, 0, 9), "commit", "-q", "--allow-empty", "--no-verify", "-m", "feat: algo", "-m", aiTrailer)
+	r := run(t, root, "", "audit", "--month", month)
+	must(t, r, 1, "mes cerrado con fechas futuras")
+	for _, want := range []string{"cambia, borra o esconde líneas de", "| commits del periodo sin atribución a IA (R15) | falla |", "fecha futura"} {
+		if !strings.Contains(r.stdout, want) {
+			t.Errorf("mes cerrado: falta %q\n%s", want, r.stdout)
+		}
+	}
+	if n := auditCommits(t, root, month); n != 5 {
+		t.Errorf("el mes cerrado cuenta 5 commits (adopción, dos con fecha adelantada, borrado y atribución), cuenta %d", n)
+	}
+	// El mes en curso no repite lo que ya llegó en el cerrado.
+	if n := auditCommits(t, root, now.Format("2006-01")); n != 0 {
+		t.Errorf("el mes en curso no tiene commits, cuenta %d", n)
+	}
+
+	// El textconv que declara la configuración del repo no corre: auditar no
+	// ejecuta nada ajeno. git blame lo corre por defecto.
+	root, _ = auditNuevo(t, base, "textconv", now)
+	ranConv := filepath.Join(root, ".git", "textconv-corrio")
+	conv := filepath.Join(root, ".git", "textconv.sh")
+	if err := os.WriteFile(conv, []byte("#!/bin/sh\ntouch '"+ranConv+"'\ncat \"$1\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".git", "info", "attributes"), []byte("* diff=drv\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, root, "config", "diff.drv.textconv", conv)
+	for _, args := range [][]string{{"audit"}, {"audit", "--json"}} {
+		must(t, run(t, root, "", args...), 0, "audit con textconv")
+		if _, err := os.Stat(ranConv); err == nil {
+			t.Fatalf("coyote %v corrió el textconv que declara el repo", args)
+		}
+	}
+
+	// diff.noprefix en la configuración no cambia lo que se lee de la historia
+	// anterior al periodo: sin los prefijos a/ y b/ el aviso salía sin nombre
+	// de archivo y una línea que un commit movió a otro archivo se compensaba.
+	root, f = auditNuevo(t, base, "noprefix", now.AddDate(0, 0, -70))
+	git(t, root, "config", "diff.noprefix", "true")
+	lines := strings.Split(strings.TrimRight(readFile(t, filepath.Join(root, f)), "\n"), "\n")
+	if err := os.WriteFile(filepath.Join(root, f), []byte(strings.Join(lines[:len(lines)-1], "\n")+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	otro := filepath.Join(root, "coyote", "ledger", "2020", "01", "01-ana.ccf")
+	if err := os.MkdirAll(filepath.Dir(otro), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(otro, []byte(lines[len(lines)-1]+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, root, "add", "-A")
+	auditAt(t, root, now.AddDate(0, 0, -69), "commit", "-qm", "chore: mueve una línea")
+	auditAt(t, root, now, "commit", "-q", "--allow-empty", "-m", "chore: hoy")
+	r = run(t, root, "", "audit")
+	for _, want := range []string{"| el ledger solo agrega líneas | aviso |", "cambia, borra o esconde líneas de " + f} {
+		if !strings.Contains(r.stdout, want) {
+			t.Errorf("diff.noprefix: falta %q\n%s", want, r.stdout)
+		}
+	}
+
+	// Un merge anterior al periodo que quita una línea de uno de sus padres se
+	// avisa contra ese padre. Lo lee el mismo git log que el resto de la
+	// historia anterior: un diff por padre.
+	root, f = auditNuevo(t, base, "merge-previo", now.AddDate(0, 0, -90))
+	// La configuración de la persona no cambia el formato que se lee: hashes
+	// abreviados, decoraciones y color forzado.
+	for k, v := range map[string]string{"log.abbrevCommit": "true", "log.decorate": "full", "color.ui": "always", "diff.mnemonicPrefix": "true"} {
+		git(t, root, "config", k, v)
+	}
+	git(t, root, "checkout", "-q", "-b", "lado")
+	lado := filepath.Join(root, "coyote", "ledger", "2020", "01", "02-ana.ccf")
+	if err := os.MkdirAll(filepath.Dir(lado), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(lado, []byte("# otro archivo\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, root, "add", "-A")
+	auditAt(t, root, now.AddDate(0, 0, -80), "commit", "-qm", "chore: lado")
+	git(t, root, "checkout", "-q", "main")
+	orig := readFile(t, filepath.Join(root, f))
+	if err := os.WriteFile(filepath.Join(root, f), []byte(orig+"extra\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	auditAt(t, root, now.AddDate(0, 0, -79), "commit", "-qam", "chore: main")
+	padre := strings.TrimSpace(git(t, root, "rev-parse", "--short=7", "HEAD"))
+	git(t, root, "merge", "-q", "--no-ff", "--no-commit", "lado")
+	if err := os.WriteFile(filepath.Join(root, f), []byte(orig), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	auditAt(t, root, now.AddDate(0, 0, -70), "commit", "-qam", "merge: lado")
+	auditAt(t, root, now, "commit", "-q", "--allow-empty", "-m", "chore: hoy")
+	r = run(t, root, "", "audit")
+	for _, want := range []string{"| el ledger solo agrega líneas | aviso |", "cambia, borra o esconde líneas de " + f + " frente a su padre " + padre} {
+		if !strings.Contains(r.stdout, want) {
+			t.Errorf("merge anterior al periodo: falta %q\n%s", want, r.stdout)
+		}
+	}
+
+	// Un mensaje en otra codificación (encoding IBM037) se lee como lo lee
+	// quien lo ve: git lo convierte a UTF-8. Los bytes crudos no muestran el
+	// trailer, y el hook commit-msg tampoco lo vio.
+	root, _ = auditNuevo(t, base, "ebcdic", now)
+	msg := ebcdic037("feat: algo\n\nCo-Authored-By: Claude <noreply@anthropic.com>\n")
+	sha := commitCrudo(t, root, "encoding IBM037\n", msg)
+	if out := git(t, root, "log", "-1", "--format=%B", "--encoding=UTF-8", sha); !strings.Contains(out, "Co-Authored-By") {
+		t.Skip("este git no convierte IBM037: la prueba no puede armar el caso")
+	}
+	r = run(t, root, "", "audit")
+	must(t, r, 1, "mensaje en IBM037")
+	if !strings.Contains(r.stdout, "| commits del periodo sin atribución a IA (R15) | falla |") {
+		t.Errorf("mensaje en IBM037: R15 no falla\n%s", r.stdout)
+	}
+
+	// Un mensaje con bytes nulos no se puede revisar: una verificación que no
+	// pudo correr no da ok.
+	root, _ = auditNuevo(t, base, "nulos", now)
+	commitCrudo(t, root, "", []byte("feat: algo\n\n\x00Co-Authored-By: Claude\n"))
+	r = run(t, root, "", "audit")
+	must(t, r, 1, "mensaje con bytes nulos")
+	if !strings.Contains(r.stdout, "| commits del periodo sin atribución a IA (R15) | falla |") || !strings.Contains(r.stdout, "bytes nulos") {
+		t.Errorf("mensaje con bytes nulos:\n%s", r.stdout)
+	}
+}
+
+// commitCrudo escribe un commit con el árbol de HEAD, a HEAD como padre y los
+// encabezados extra y el mensaje tal cual, y mueve main a él.
+func commitCrudo(t *testing.T, root, extra string, msg []byte) string {
+	t.Helper()
+	tree := strings.TrimSpace(git(t, root, "rev-parse", "HEAD^{tree}"))
+	parent := strings.TrimSpace(git(t, root, "rev-parse", "HEAD"))
+	stamp := strconv.FormatInt(time.Now().Unix(), 10) + " +0000"
+	obj := append([]byte("tree "+tree+"\nparent "+parent+"\nauthor Ana <ana@example.com> "+stamp+"\ncommitter Ana <ana@example.com> "+stamp+"\n"+extra+"\n"), msg...)
+	cmd := exec.Command("git", "-C", root, "hash-object", "-t", "commit", "-w", "--literally", "--stdin")
+	cmd.Stdin = bytes.NewReader(obj)
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("hash-object: %v", err)
+	}
+	sha := strings.TrimSpace(string(out))
+	git(t, root, "update-ref", "refs/heads/main", sha)
+	return sha
+}
+
+// ebcdic037 codifica en IBM037 (EBCDIC) el texto ASCII que usan las pruebas.
+func ebcdic037(s string) []byte {
+	out := make([]byte, 0, len(s))
+	for _, r := range s {
+		var b byte
+		switch {
+		case r >= 'a' && r <= 'i':
+			b = 0x81 + byte(r-'a')
+		case r >= 'j' && r <= 'r':
+			b = 0x91 + byte(r-'j')
+		case r >= 's' && r <= 'z':
+			b = 0xA2 + byte(r-'s')
+		case r >= 'A' && r <= 'I':
+			b = 0xC1 + byte(r-'A')
+		case r >= 'J' && r <= 'R':
+			b = 0xD1 + byte(r-'J')
+		case r >= 'S' && r <= 'Z':
+			b = 0xE2 + byte(r-'S')
+		case r >= '0' && r <= '9':
+			b = 0xF0 + byte(r-'0')
+		default:
+			b = map[rune]byte{' ': 0x40, '\n': 0x25, '-': 0x60, ':': 0x7A, '<': 0x4C, '>': 0x6E, '@': 0x7C, '.': 0x4B, '/': 0x61, '_': 0x6D}[r]
+		}
+		out = append(out, b)
+	}
+	return out
 }
