@@ -14,6 +14,7 @@ import (
 type segPaths struct {
 	line  string     // las palabras y sus rutas, para buscar textos protegidos
 	cands [][]string // por palabra: sus rutas limpias y resueltas
+	dir   string     // la carpeta en la que corre, tras los cd anteriores; vacía si no se sabe
 }
 
 // resolveSegs resuelve las rutas de cada segmento (v1.0, revisiones
@@ -119,6 +120,9 @@ func (ps Paths) resolveSegs(segs [][]string, cwd string) []segPaths {
 			}
 		}
 		out[i] = segPaths{line: segText(words), cands: cands}
+		if known {
+			out[i].dir = dir
+		}
 	}
 	return out
 }
@@ -497,6 +501,31 @@ func findExecs(args []string) bool {
 var protectedParents = map[string]string{"coyote": "coyote/, con el ledger, las aprobaciones y la configuración del proyecto",
 	".claude": ".claude/, con la configuración de Claude Code", ".git": ".git/, la carpeta de git", ".coyote": ".coyote/, el estado del gate"}
 
+// nestedParent dice si c, una ruta limpia de un comando, es la carpeta
+// coyote/ de un proyecto anidado: la que tiene adentro su project.yaml, su
+// inventario, su hub, sus aprobaciones o su ledger. Moverla o borrarla saca a
+// ese proyecto del gate y del escaneo de secretos, igual que la de la raíz
+// (protectedParents). Una carpeta que se llama coyote y no tiene esos archivos
+// (cmd/coyote), o que queda fuera del proyecto, es una carpeta cualquiera.
+func (ps Paths) nestedParent(c string) (string, bool) {
+	rel := c
+	if filepath.IsAbs(c) {
+		if rel = ps.Rel(filepath.Clean(c)); filepath.IsAbs(rel) {
+			return "", false
+		}
+	}
+	parts := strings.Split(rel, "/")
+	if len(parts) < 2 || parts[0] == ".." || !strings.EqualFold(parts[len(parts)-1], "coyote") {
+		return "", false
+	}
+	for _, name := range []string{"project.yaml", "infra.yaml", "hub.yaml", "approvals", "ledger"} {
+		if _, err := os.Lstat(filepath.Join(ps.Root, filepath.FromSlash(rel), name)); err == nil {
+			return rel + "/, con el project.yaml, el ledger y las aprobaciones de un proyecto anidado", true
+		}
+	}
+	return "", false
+}
+
 // fragmentRe son pedazos de rutas protegidas que un programa que ejecuta lo
 // que recibe (xargs, find -exec) puede completar al correr: {}/approvals/.
 var fragmentRe = regexp.MustCompile(`(?i)/(approvals|ledger)(/|$)|^(approvals|ledger)/|/settings(\.local)?\.json$|/project\.yaml$`)
@@ -505,7 +534,7 @@ var fragmentRe = regexp.MustCompile(`(?i)/(approvals|ledger)(/|$)|^(approvals|le
 // contiene lo protegido (mv coyote c, rm -rf .claude, tar -x -C coyote, find
 // coyote -exec …), o si un programa que ejecuta lo que recibe completa una
 // ruta protegida al correr.
-func parentTouch(segs [][]string, sps []segPaths) (string, bool) {
+func (ps Paths) parentTouch(segs [][]string, sps []segPaths) (string, bool) {
 	exec := false
 	for _, seg := range segs {
 		prog, at := mainProg(seg)
@@ -531,6 +560,9 @@ func parentTouch(segs [][]string, sps []segPaths) (string, bool) {
 			for _, c := range append([]string{seg[j]}, sps[i].cands[j]...) {
 				c = strings.TrimSuffix(strings.TrimPrefix(c, "./"), "/")
 				if why, ok := protectedParents[c]; ok {
+					return why
+				}
+				if why, ok := ps.nestedParent(c); ok {
 					return why
 				}
 			}
@@ -559,6 +591,17 @@ func parentTouch(segs [][]string, sps []segPaths) (string, bool) {
 					return why, true
 				}
 			}
+		case "git":
+			// git mv y git rm mueven o borran la carpeta igual que mv y rm.
+			if sub, off := gitSub(seg[at+1:]); off >= 0 && (sub == "mv" || sub == "rm") {
+				for _, j := range ops {
+					if j > at+1+off {
+						if why := parent(j); why != "" {
+							return why, true
+						}
+					}
+				}
+			}
 		case "tar", "unzip", "bsdtar":
 			extract := prog == "unzip"
 			for j := at + 1; j < len(seg); j++ {
@@ -569,9 +612,14 @@ func parentTouch(segs [][]string, sps []segPaths) (string, bool) {
 				}
 			}
 			if extract {
-				if d := segDir(seg); d != "" {
-					if _, ok := protectedParents[strings.TrimSuffix(strings.TrimPrefix(path.Clean(d), "./"), "/")]; ok {
-						return protectedParents[strings.TrimSuffix(strings.TrimPrefix(path.Clean(d), "./"), "/")], true
+				// Extrae donde corre: la carpeta de un cd anterior, cambiada por -C.
+				if d := joinPath(sps[i].dir, segDir(seg)); d != "" && d != "." {
+					d = strings.TrimSuffix(strings.TrimPrefix(path.Clean(d), "./"), "/")
+					if why, ok := protectedParents[d]; ok {
+						return why, true
+					}
+					if why, ok := ps.nestedParent(d); ok {
+						return why, true
 					}
 				}
 				for j := at + 1; j < len(seg); j++ {

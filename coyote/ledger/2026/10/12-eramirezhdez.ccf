@@ -9,3 +9,4 @@
 2026-10-12T07:55Z|@eramirezhdez/coyote-dev|W-0008|coyote|fix|audit|un merge no esconde su aviso con log.diffMerges, dos encabezados encoding o…|-|-|-|ok
 2026-10-12T07:55Z|@eramirezhdez/coyote-dev|W-0008|coyote|fix|atribucion|el trailer Assisted-by vuelve a ver Cursor AI, IDE, Tab, Composer, Cursor-Agent,…|-|-|-|ok
 2026-10-12T07:55Z|@eramirezhdez/coyote-devsecops|W-0008|coyote|fix|release|make dist lee DIST del entorno entre comillas y no lo pega…|-|-|-|ok
+2026-10-12T08:15Z|@eramirezhdez/coyote-security|W-0008|coyote|fix|gate|mover o borrar la carpeta coyote/ de un proyecto anidado se bloquea…|-|-|-|ok

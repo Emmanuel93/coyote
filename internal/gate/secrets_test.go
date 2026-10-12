@@ -285,3 +285,54 @@ func TestGobiernoDeProyectosAnidadosProtegido(t *testing.T) {
 		}
 	}
 }
+
+// TestCarpetaDeGobiernoDeUnProyectoAnidado: sexta revisión de v1.0. Mover,
+// borrar o reescribir la carpeta coyote/ de un proyecto anidado (mv svc/coyote
+// svc/x, rm -rf svc/coyote) sacaba al proyecto del escaneo de secretos y solo
+// pedía la aprobación normal; la de la raíz se bloquea siempre. Una carpeta
+// que se llama coyote y no tiene el gobierno de un proyecto (cmd/coyote)
+// sigue siendo una carpeta cualquiera.
+func TestCarpetaDeGobiernoDeUnProyectoAnidado(t *testing.T) {
+	ps, root, _ := testPaths(t)
+	for _, d := range []string{"coyote/ledger", "svc/coyote/ledger", "svc/coyote/approvals", "svc/docs/coyote", "cmd/coyote", "otro/coyote"} {
+		if err := os.MkdirAll(filepath.Join(root, filepath.FromSlash(d)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, f := range []string{"coyote/project.yaml", "svc/coyote/project.yaml", "svc/docs/coyote/notas.md", "cmd/coyote/main.go"} {
+		if err := os.WriteFile(filepath.Join(root, filepath.FromSlash(f)), []byte("x\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Un proyecto hermano, fuera de este: su gobierno no es de este gate.
+	hermano := filepath.Join(filepath.Dir(root), "hermano", "coyote")
+	if err := os.MkdirAll(hermano, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(hermano, "project.yaml"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	blocked := []string{
+		"mv svc/coyote svc/coyote.bak", "rm -rf svc/coyote", "git mv svc/coyote svc/old", "cd svc && mv coyote c",
+		"cd svc && rm -rf coyote", "mv ./svc/coyote/ /tmp/c", "tar -xf /tmp/e.tar -C svc/coyote", "cd svc/coyote && tar -xf /tmp/e.tar",
+		"find svc/coyote -name project.yaml -exec sed -i s/a/b/ {} +", "cp -r /tmp/x svc/coyote", "chmod -R a+w svc/coyote",
+		"rm -rf " + filepath.Join(root, "svc", "coyote"), "mv svc/coyote svc/c && cp /tmp/x svc/c/project.yaml",
+		// git mv y git rm son mv y rm: también en la raíz. Y extraer en la carpeta donde se está.
+		"git rm -r svc/coyote", "git -C svc mv coyote c", "git mv coyote c", "git rm -rf coyote", "cd coyote && tar -xf /tmp/e.tar",
+		"cd svc && cd coyote && unzip /tmp/e.zip", "tar --directory=svc/coyote -xf /tmp/e.tar", "cd svc && tar -x --directory=coyote -f /tmp/e.tar",
+	}
+	for _, c := range blocked {
+		if d := ps.Evaluate(claude(t, "Bash", map[string]any{"command": c}, root)); d.Verdict != Block {
+			t.Errorf("%q debería bloquearse siempre: %s (%s)", c, d.Verdict, d.Reason)
+		}
+	}
+	for _, c := range []string{"cp -r svc/coyote /tmp/respaldo", "tar -czf /tmp/r.tgz svc/coyote", "ls svc/coyote", "cat svc/coyote/project.yaml",
+		"rm -rf cmd/coyote", "mv svc/docs/coyote svc/docs/c", "mv otro/coyote otro/c", "rm -rf ../hermano/coyote", "git rm -r --cached cmd/coyote",
+		"git mv svc/docs/coyote svc/docs/c", "cd cmd/coyote && tar -xf /tmp/e.tar", "git status", "git rm README.md",
+		// Una ruta absoluta de afuera no es la del proyecto aunque el mismo nombre exista adentro.
+		"rm -rf /svc/coyote"} {
+		if d := ps.Evaluate(claude(t, "Bash", map[string]any{"command": c}, root)); d.Verdict == Block {
+			t.Errorf("%q no toca el gobierno de un proyecto: %s (%s)", c, d.Verdict, d.Reason)
+		}
+	}
+}

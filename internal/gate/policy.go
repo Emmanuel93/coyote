@@ -518,7 +518,7 @@ func (ps Paths) protectedIn(cmd string, readOnly bool, cwd string) (string, bool
 			if ledgerTouch(segs, sps) {
 				return "el ledger, que solo crece por coyote", true
 			}
-			if why, ok := parentTouch(segs, sps); ok {
+			if why, ok := ps.parentTouch(segs, sps); ok {
 				return why, true
 			}
 		}
