@@ -58,7 +58,7 @@ func (ps Paths) Normalize(a Action) Normalized {
 		if len(extra) > 0 {
 			canon += "\x00" + canonicalJSON(extra)
 		}
-		n.Object = "Bash: " + oneLine(Redact(strings.TrimSpace(a.Command)), 140)
+		n.Object = "Bash: " + describeShell(a.Command)
 		if relCwd != "." {
 			n.Object += " (en " + relCwd + ")"
 		}
@@ -181,6 +181,27 @@ func lines(s string) int {
 		return 0
 	}
 	return strings.Count(strings.TrimSuffix(s, "\n"), "\n") + 1
+}
+
+// maxObjectScan es cuánto de un comando se mira para describirlo: la descripción
+// muestra 140 caracteres y Redact cuesta lo que crece el texto (medio segundo por
+// megabyte), no puede pagarse sobre un comando de varios megas.
+const maxObjectScan = 16 << 10
+
+// describeShell es la descripción de un comando de shell, sin secretos y de una
+// línea. Un comando más largo que maxObjectScan se describe por su comienzo,
+// cortado en un blanco: ningún token queda partido, así que Redact lo ve como lo
+// vería en el comando entero.
+func describeShell(cmd string) string {
+	cmd = strings.TrimSpace(cmd)
+	if len(cmd) > maxObjectScan {
+		cut := ""
+		if i := strings.LastIndexAny(cmd[:maxObjectScan], " \t\r\n"); i >= 0 {
+			cut = cmd[:i]
+		}
+		cmd = cut + " …"
+	}
+	return oneLine(Redact(cmd), 140)
 }
 
 func oneLine(s string, max int) string {

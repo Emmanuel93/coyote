@@ -512,7 +512,7 @@ func shellText(cmd, cwd string) (string, [][2]string) {
 	if name != "" || email != "" {
 		idents = append(idents, [2]string{name, email})
 	}
-	return cmd + fileContents(cmd, cwd), idents
+	return cmd + fileContents(cmd, cwd, maxAttributionText+1-len(cmd)), idents
 }
 
 func splitAuthor(s string) (string, string) {
@@ -561,9 +561,26 @@ func joinContinuations(s string) string {
 	return strings.NewReplacer("\\\r\n", "", "\\\n", "").Replace(s)
 }
 
+// maxAttributionText es lo más que R15 revisa de lo que un hook publica: 2 MiB
+// entre el comando, el texto de la herramienta y los archivos de mensaje. El
+// filtro cuesta cerca de 1,4 s por MiB; sin tope, un cuerpo de 14 MiB pasaba del
+// plazo del IDE (30 s) y el IDE, al matar el hook, dejaba publicar sin revisar.
+// Más que eso se bloquea con un mensaje claro: nadie publica un mensaje de 2 MiB
+// (GitHub corta los cuerpos en 64 KiB), y un archivo de mensaje más grande que
+// el tope ya no se lee cortado en 1 MiB con lo demás sin mirar. Es una variable
+// para que las pruebas la bajen.
+var maxAttributionText = 2 << 20
+
 // fileContents agrega el contenido de los archivos de mensaje (-F, --body-file),
-// buscados en el cwd del hook y en los directorios de los cd del comando.
-func fileContents(cmd, cwd string) string {
+// buscados en el cwd del hook y en los directorios de los cd del comando. Lee a
+// lo sumo room bytes en total, y solo archivos regulares: un FIFO sin quien lo
+// escriba colgaba al hook en el open, y /dev/zero no se acaba. Si el texto pasa
+// del tope queda en room, de modo que quien lo recibe lo ve más largo que el
+// tope y lo bloquea.
+func fileContents(cmd, cwd string, room int) string {
+	if room <= 0 {
+		return ""
+	}
 	bases := []string{cwd}
 	for _, m := range cdRe.FindAllStringSubmatch(cmd, 8) {
 		d := unquote(m[1])
@@ -583,14 +600,20 @@ func fileContents(cmd, cwd string) string {
 			if !filepath.IsAbs(p) && base != "" {
 				full = filepath.Join(base, p)
 			}
+			if info, err := os.Stat(full); err != nil || !info.Mode().IsRegular() {
+				continue
+			}
 			f, err := os.Open(full)
 			if err != nil {
 				continue
 			}
-			data, _ := io.ReadAll(io.LimitReader(f, 1<<20))
+			data, _ := io.ReadAll(io.LimitReader(f, int64(room-b.Len())))
 			f.Close()
 			b.WriteString("\n")
 			b.Write(data)
+			if b.Len() >= room {
+				return b.String()
+			}
 		}
 	}
 	return b.String()

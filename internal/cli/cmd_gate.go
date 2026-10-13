@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Emmanuel93/coyote/internal/approval"
@@ -31,9 +32,12 @@ func cmdGate(a *app, args []string) error {
 	}
 	switch args[0] {
 	case "attribution":
-		data, err := io.ReadAll(io.LimitReader(a.stdin, 1<<20))
+		data, err := io.ReadAll(io.LimitReader(a.stdin, gate.MaxInput+1))
 		if err != nil {
 			return err
+		}
+		if len(data) > gate.MaxInput {
+			return fail(2, "coyote: bloqueado por R15: la entrada del hook es demasiado grande para revisarla")
 		}
 		if msg, err := attributionBlock(data); err != nil {
 			return err
@@ -65,6 +69,10 @@ func attributionBlock(data []byte) (string, error) {
 			return fmt.Sprintf("coyote: bloqueado por R15: la autoría del commit sería una herramienta de IA (%s). Usa la identidad de una persona.", f.Text), nil
 		}
 	}
+	if len(text) > maxAttributionText {
+		return fmt.Sprintf("coyote: bloqueado por R15: el texto que se publica pesa más de %d MiB y el gate no lo revisa entero. Publícalo en partes más cortas.",
+			maxAttributionText>>20), nil
+	}
 	if found := attr.Check(text, true); len(found) > 0 {
 		return fmt.Sprintf("coyote: bloqueado por R15: el mensaje lleva atribución a herramientas de IA (%s: %q). Quita esa línea y vuelve a intentar.",
 			found[0].PatternID, shortText(found[0].Text, 100)), nil
@@ -72,9 +80,52 @@ func attributionBlock(data []byte) (string, error) {
 	return "", nil
 }
 
+// hookReply entrega la respuesta del hook una sola vez. La dan por turno el
+// cuerpo del hook y su plazo total: la primera que llega gana y la otra se
+// descarta devolviendo el código de la primera. Así un plazo que vence justo
+// cuando el cuerpo termina no escribe dos respuestas (un paso y una negación), y
+// un cuerpo que sigue corriendo cuando el hook ya salió no escribe nada.
+type hookReply struct {
+	a    *app
+	mu   sync.Mutex
+	ide  string
+	sent bool
+	code int
+}
+
+// setIDE anota el IDE que se dedujo de la entrada, para el formato de la
+// respuesta si el plazo vence más tarde.
+func (h *hookReply) setIDE(ide string) {
+	if ide == "" {
+		return
+	}
+	h.mu.Lock()
+	h.ide = ide
+	h.mu.Unlock()
+}
+
+// send responde si nadie lo hizo (ide vacío es el último que se conoce) y
+// devuelve el código de la respuesta que quedó.
+func (h *hookReply) send(ide string, allow bool, msg string) int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.sent {
+		return h.code
+	}
+	if ide == "" {
+		ide = h.ide
+	}
+	h.sent = true
+	h.code = gate.Respond(ide, allow, msg, h.a.stdout, h.a.stderr)
+	return h.code
+}
+
 // gateCheck es el hook previo de los IDEs. Cualquier error bloquea: un gate
-// que se cae no puede dejar pasar acciones (falla cerrado).
-func gateCheck(a *app, args []string) (err error) {
+// que se cae no puede dejar pasar acciones (falla cerrado). Tampoco se cuelga:
+// el cuerpo corre aparte y, si no respondió a los gate.HookDeadline, el hook
+// niega por su cuenta (o sale con el paso que ya había dado) en vez de esperar
+// a que el IDE lo mate y, con eso, deje pasar la acción.
+func gateCheck(a *app, args []string) error {
 	fs := a.flags("gate check", "[--ide "+strings.Join(gate.IDEs, "|")+"] < hook.json")
 	ide := fs.String("ide", "", "IDE para el que se instaló el hook (por defecto se deduce de la entrada)")
 	if _, perr := parseArgs(fs, args); perr != nil {
@@ -85,22 +136,43 @@ func gateCheck(a *app, args []string) (err error) {
 		// entrada dice cuál es.
 		*ide = ""
 	}
+	reply := &hookReply{a: a, ide: *ide}
+	done := make(chan error, 1)
+	go func() { done <- gateCheckRun(a, reply, *ide) }()
+	timer := time.NewTimer(gate.HookDeadline)
+	defer timer.Stop()
+	select {
+	case err := <-done:
+		return err
+	case <-timer.C:
+		code := reply.send("", false, fmt.Sprintf("coyote: el gate no terminó de revisar la acción en %s; bloquea por seguridad", gate.HookDeadline))
+		if code == 0 {
+			return nil // ya había dejado pasar la acción; lo que tarda es anotarla
+		}
+		return &exitError{code: code}
+	}
+}
+
+// gateCheckRun es el cuerpo del hook: lee la entrada, revisa R15, decide y
+// responde por reply.
+func gateCheckRun(a *app, reply *hookReply, ide string) (err error) {
 	deny := func(ide, msg string) error {
-		return &exitError{code: gate.Respond(ide, false, msg, a.stdout, a.stderr)}
+		return &exitError{code: reply.send(ide, false, msg)}
 	}
 	defer func() {
 		if r := recover(); r != nil {
-			err = deny(*ide, fmt.Sprintf("coyote: el gate falló (%v); bloquea por seguridad", r))
+			err = deny(ide, fmt.Sprintf("coyote: el gate falló (%v); bloquea por seguridad", r))
 		}
 	}()
 	data, rerr := io.ReadAll(io.LimitReader(a.stdin, gate.MaxInput+1))
 	if rerr != nil || len(data) > gate.MaxInput {
-		return deny(*ide, "coyote: la entrada del hook es ilegible o demasiado grande; el gate bloquea por seguridad")
+		return deny(ide, "coyote: la entrada del hook es ilegible o demasiado grande; el gate bloquea por seguridad")
 	}
-	act, perr := gate.Parse(data, *ide)
+	act, perr := gate.Parse(data, ide)
 	if act.IDE == "" {
-		act.IDE = *ide
+		act.IDE = ide
 	}
+	reply.setIDE(act.IDE)
 	if perr != nil {
 		return deny(act.IDE, "coyote: "+perr.Error()+"; el gate bloquea por seguridad")
 	}
@@ -120,10 +192,10 @@ func gateCheck(a *app, args []string) (err error) {
 			if cwd == "" {
 				cwd, _ = a.workdir()
 			}
-			if d := gate.NewPaths(cwd, gate.Home(), state).Evaluate(act); d.Verdict != gate.Allow {
+			if d := gate.NewPaths(cwd, gate.Home(), state).EvaluateWithin(act, gate.EvalTimeout); d.Verdict != gate.Allow {
 				return deny(act.IDE, "coyote: bloqueado siempre: "+d.Reason)
 			}
-			gate.Respond(act.IDE, true, "", a.stdout, a.stderr)
+			reply.send(act.IDE, true, "")
 			return nil
 		}
 		return deny(act.IDE, "coyote: "+gerr.Error()+"; el gate bloquea las acciones con efectos")
@@ -138,7 +210,7 @@ func gateCheck(a *app, args []string) (err error) {
 	if msg, allow := g.decide(); !allow {
 		return deny(act.IDE, msg)
 	}
-	gate.Respond(act.IDE, true, "", a.stdout, a.stderr)
+	reply.send(act.IDE, true, "")
 	return nil
 }
 
@@ -344,7 +416,7 @@ func gateRoot(a *app, act gate.Action) string {
 // decide aplica la política y, si hace falta, busca la aprobación. Devuelve
 // el mensaje para el agente y si la acción pasa.
 func (g *gateRun) decide() (string, bool) {
-	d := g.paths.Evaluate(g.act)
+	d := g.paths.EvaluateWithin(g.act, gate.EvalTimeout)
 	switch d.Verdict {
 	case gate.Allow:
 		return "", true

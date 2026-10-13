@@ -25,11 +25,21 @@ func Canary(text string) (string, bool) {
 	return m[1], true
 }
 
+// maxCanaryCommand acota el comando que se mira como canario. El que pide coyote
+// doctor es "coyote doctor canary <código>", de unas decenas de bytes; uno más
+// largo que esto no es el canario. El latido corre después de decidir, y mirar
+// entero un comando de megas (octava revisión) tardaba más que el plazo del IDE:
+// al matar el hook, el IDE convertía una negación en un paso.
+const maxCanaryCommand = 4096
+
 // CanaryRun devuelve el código si el comando de una shell corre el canario
 // como programa (coyote doctor canary <código>, también dentro de bash -c). Un
 // echo, un patrón de búsqueda o un texto que solo lo nombran no cuentan: el
 // nivel se mide con lo que el IDE habría ejecutado.
 func CanaryRun(cmd string) (string, bool) {
+	if len(cmd) > maxCanaryCommand {
+		return "", false
+	}
 	for _, seg := range view(cmd, false) {
 		prog, at := mainProg(seg)
 		if prog != "coyote" {

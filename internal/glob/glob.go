@@ -115,55 +115,127 @@ func toRegexp(p string) string {
 // saber si un patrón de búsqueda (rg -g '.e[n]v') puede alcanzar un nombre
 // basta leerlos de más. Una barra invertida cita el caracter que sigue, y un
 // [ que no cierra queda como está.
+//
+// Lo que el shell lee de una manera propia no se imita: un tramo (lo que hay
+// entre dos barras) con una equivalencia ([[=x=]]), un símbolo de colación
+// ([[.x.]]) o una clase sin cierre ([[:alpha) se lee entero como *. Lo mismo uno
+// de más de maxBracketSeg bytes. Cada tramo se lee por separado, en tiempo y
+// memoria proporcionales a su largo: el análisis de un patrón largo con
+// corchetes sin cerrar costaba el cubo de su largo.
 func BracketsAsAny(p string) string {
 	if !strings.Contains(p, "[") {
 		return p
 	}
 	var b strings.Builder
-	for i := 0; i < len(p); {
-		switch {
-		case p[i] == '\\' && i+1 < len(p):
-			b.WriteString(p[i : i+2])
-			i += 2
-		case p[i] == '[':
-			if n := bracketLen(p[i:]); n > 0 {
-				b.WriteByte('?')
-				i += n
-				continue
-			}
-			b.WriteByte('[')
-			i++
-		default:
-			b.WriteByte(p[i])
-			i++
+	var x bracketScan
+	for start := 0; ; {
+		end := len(p)
+		if i := strings.IndexByte(p[start:], '/'); i >= 0 {
+			end = start + i
 		}
+		b.WriteString(x.segment(p[start:end]))
+		if end == len(p) {
+			break
+		}
+		b.WriteByte('/')
+		start = end + 1
 	}
 	return b.String()
 }
 
-// bracketLen es el largo de la expresión entre corchetes que empieza en s[0],
-// o 0 si no cierra. El primer ] (tras el [ o el [!) es un miembro más, y
-// [:clase:], [=c=] y [.c.] llevan su propio cierre.
-func bracketLen(s string) int {
-	i := 1
-	if i < len(s) && (s[i] == '!' || s[i] == '^') {
-		i++
+// maxBracketSeg acota el largo, en bytes, de un tramo cuyos corchetes se leen:
+// el análisis guarda unos enteros por cada byte, y ningún patrón de búsqueda real
+// pasa de unos cientos.
+const maxBracketSeg = 64 << 10
+
+// bracketScan guarda los arreglos del análisis de un tramo, para reusarlos.
+type bracketScan struct {
+	// res[k] dice cómo termina una expresión entre corchetes que se lee desde k: el
+	// índice (exclusivo) donde cierra, 0 si el tramo se acaba sin cerrar, o -1 si
+	// antes trae algo que no se imita ([=, [. o [: sin cierre).
+	res []int32
+	// colon[k] es el primer índice desde k donde hay :] o -1.
+	colon []int32
+}
+
+func (x *bracketScan) segment(s string) string {
+	if !strings.Contains(s, "[") {
+		return s
 	}
-	for first := true; i < len(s); first = false {
-		switch c := s[i]; {
-		case c == ']' && !first:
-			return i + 1
-		case c == '[' && i+1 < len(s) && (s[i+1] == ':' || s[i+1] == '=' || s[i+1] == '.'):
-			if j := strings.Index(s[i+2:], string(s[i+1])+"]"); j >= 0 {
-				i += 2 + j + 2
+	n := len(s)
+	if n > maxBracketSeg {
+		return "*"
+	}
+	if cap(x.res) < n+2 {
+		x.res, x.colon = make([]int32, n+2), make([]int32, n+2)
+	}
+	x.res, x.colon = x.res[:n+2], x.colon[:n+2]
+	x.colon[n], x.colon[n+1] = -1, -1
+	for i := n - 1; i >= 0; i-- {
+		if s[i] == ':' && i+1 < n && s[i+1] == ']' {
+			x.colon[i] = int32(i)
+		} else {
+			x.colon[i] = x.colon[i+1]
+		}
+	}
+	x.res[n], x.res[n+1] = 0, 0
+	for k := n - 1; k >= 0; k-- {
+		var r int32
+		switch c := s[k]; {
+		case c == ']':
+			r = int32(k + 1)
+		case c == '[' && k+1 < n && (s[k+1] == '=' || s[k+1] == '.'):
+			r = -1
+		case c == '-' && k+2 < n && s[k+1] == '[' && (s[k+2] == '=' || s[k+2] == '.' || s[k+2] == ':'):
+			// El final de un rango que empieza como una clase ([a-[:alpha:]]).
+			r = -1
+		case c == '[' && k+1 < n && s[k+1] == ':':
+			if j := x.colon[k+2]; j >= 0 {
+				r = x.res[j+2]
 			} else {
+				r = -1
+			}
+		case c == '\\' && k+1 < n:
+			r = x.res[k+2]
+		default:
+			r = x.res[k+1]
+		}
+		x.res[k] = r
+	}
+	var b strings.Builder
+	for i := 0; i < n; {
+		switch c := s[i]; {
+		case c == '\\' && i+1 < n:
+			b.WriteString(s[i : i+2])
+			i += 2
+		case c == '[':
+			// El primer ] tras el [ (o el [!) es un miembro más.
+			p0 := i + 1
+			if p0 < n && (s[p0] == '!' || s[p0] == '^') {
+				p0++
+			}
+			var r int32
+			switch {
+			case p0 >= n:
+			case s[p0] == ']':
+				r = x.res[p0+1]
+			default:
+				r = x.res[p0]
+			}
+			switch {
+			case r > 0:
+				b.WriteByte('?')
+				i = int(r)
+			case r < 0:
+				return "*"
+			default:
+				b.WriteByte('[')
 				i++
 			}
-		case c == '\\' && i+1 < len(s):
-			i += 2
 		default:
+			b.WriteByte(c)
 			i++
 		}
 	}
-	return 0
+	return b.String()
 }

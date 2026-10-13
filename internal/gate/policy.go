@@ -201,7 +201,7 @@ func (ps Paths) inGitDir(abs string) bool {
 		}
 	}
 	for _, g := range ps.GitDirs {
-		if within(abs, g) || within(abs, resolve(g, "/", ps.Home)) {
+		if within(abs, g) || within(abs, ps.fixed(g)) {
 			return true
 		}
 	}
@@ -249,9 +249,13 @@ func NewPaths(root, home, stateDir string) Paths {
 	return p
 }
 
-// resolve vuelve absoluta una ruta y sigue los symlinks de la parte que existe,
-// así un enlace dentro del proyecto no esconde un destino protegido.
-func resolve(p, cwd, home string) string {
+// maxPathBytes es el largo máximo de una ruta que el sistema acepta (PATH_MAX en
+// Linux; en macOS, 1024): una más larga no existe, y recorrerla componente por
+// componente cuesta lo que crece con su largo.
+const maxPathBytes = 4096
+
+// lexicalPath vuelve absoluta y limpia una ruta, sin tocar el disco.
+func lexicalPath(p, cwd, home string) string {
 	switch {
 	case p == "~":
 		p = home
@@ -260,7 +264,16 @@ func resolve(p, cwd, home string) string {
 	case !filepath.IsAbs(p):
 		p = filepath.Join(cwd, p)
 	}
-	p = filepath.Clean(p)
+	return filepath.Clean(p)
+}
+
+// resolve vuelve absoluta una ruta y sigue los symlinks de la parte que existe,
+// así un enlace dentro del proyecto no esconde un destino protegido.
+func resolve(p, cwd, home string) string {
+	p = lexicalPath(p, cwd, home)
+	if len(p) > maxPathBytes {
+		return p
+	}
 	rest := ""
 	cur := p
 	for i := 0; i < 64; i++ {
@@ -275,6 +288,83 @@ func resolve(p, cwd, home string) string {
 		cur = parent
 	}
 	return p
+}
+
+// maxResolves acota cuántas rutas distintas de un comando se resuelven contra el
+// disco en una evaluación (cada una recorre sus componentes). Pasado el tope las
+// demás se leen como texto, sin consultar el disco: un secreto nombrado sigue
+// bloqueándose por su nombre, y la evaluación queda cortada, de modo que no
+// puede terminar en Allow. Es una variable para que las pruebas la bajen.
+var maxResolves = 3000
+
+// whyResolves es por qué pide aprobación una evaluación que pasó del tope de
+// rutas distintas.
+const whyResolves = "nombra demasiadas rutas distintas"
+
+// resolve es resolve con la cuenta de la evaluación en curso: una ruta ya
+// resuelta no vuelve al disco, y las distintas tienen tope (maxResolves). Es para
+// las rutas que escribe el comando; las de la configuración van por fixed.
+func (ps Paths) resolve(p, cwd string) string {
+	w := ps.glob
+	if w == nil {
+		return resolve(p, cwd, ps.Home)
+	}
+	k := [2]string{p, cwd}
+	if r, ok := w.res[k]; ok {
+		return r
+	}
+	if lex := lexicalPath(p, cwd, ps.Home); len(lex) > maxPathBytes {
+		// Más de lo que el sistema abre. Si la palabra sola ya pasa del tope no lee
+		// nada; si pasa junto a su carpeta (una carpeta hondísima), el gate no la
+		// sigue y la evaluación pide aprobación.
+		if len(p) <= maxPathBytes {
+			w.stop(whyLongPath)
+		}
+		return lex
+	}
+	if w.resolves >= maxResolves {
+		w.stop(whyResolves)
+		return lexicalPath(p, cwd, ps.Home)
+	}
+	w.resolves++
+	r := resolve(p, cwd, ps.Home)
+	if w.res == nil {
+		w.res = map[[2]string]string{}
+	}
+	w.res[k] = r
+	return r
+}
+
+// whyLongPath es por qué pide aprobación una evaluación que vio una ruta más
+// larga de lo que el sistema abre.
+const whyLongPath = "nombra una ruta demasiado larga para que el gate la siga"
+
+// cut anota que la evaluación en curso dejó algo sin leer: no puede terminar en
+// Allow. Fuera de una evaluación no hace nada.
+func (ps Paths) cut(why string) {
+	if ps.glob != nil {
+		ps.glob.stop(why)
+	}
+}
+
+// fixed resuelve una ruta de la configuración (la raíz del proyecto, las
+// carpetas con credenciales, las de git): son pocas, no cuentan para el tope y
+// se resuelven una sola vez por evaluación.
+func (ps Paths) fixed(p string) string {
+	w := ps.glob
+	if w == nil {
+		return resolve(p, "/", ps.Home)
+	}
+	k := [2]string{p, "\x00fixed"}
+	if r, ok := w.res[k]; ok {
+		return r
+	}
+	r := resolve(p, "/", ps.Home)
+	if w.res == nil {
+		w.res = map[[2]string]string{}
+	}
+	w.res[k] = r
+	return r
 }
 
 // within informa si p es base o está dentro de base, sin distinguir
@@ -293,7 +383,7 @@ func within(p, base string) bool {
 // sensitive devuelve la credencial que toca p, si toca alguna.
 func (ps Paths) sensitive(abs string) (string, bool) {
 	for _, s := range ps.Sensitive {
-		if within(abs, s) || within(abs, resolve(s, "/", ps.Home)) {
+		if within(abs, s) || within(abs, ps.fixed(s)) {
 			return s, true
 		}
 	}
@@ -302,7 +392,7 @@ func (ps Paths) sensitive(abs string) (string, bool) {
 
 // protected dice si escribir en abs desarmaría el gate.
 func (ps Paths) protected(abs string) (string, bool) {
-	root := resolve(ps.Root, "/", ps.Home)
+	root := ps.fixed(ps.Root)
 	// Lo del proyecto y, si el IDE se abrió en uno anidado, lo de los de afuera.
 	roots := append([]string{ps.Root, root}, ps.Outer...)
 	for n, r := range roots {
@@ -334,12 +424,12 @@ func (ps Paths) protected(abs string) (string, bool) {
 		}
 	}
 	for _, g := range ps.Global {
-		if within(abs, g) || within(abs, resolve(g, "/", ps.Home)) {
+		if within(abs, g) || within(abs, ps.fixed(g)) {
 			return g, true
 		}
 	}
 	for _, g := range ps.GitDirs {
-		if within(abs, g) || within(abs, resolve(g, "/", ps.Home)) {
+		if within(abs, g) || within(abs, ps.fixed(g)) {
 			return "la carpeta de git " + g, true
 		}
 	}
@@ -428,12 +518,12 @@ func (ps Paths) nestedCoyote(base, rel string) (string, bool) {
 }
 
 // Real devuelve p sin enlaces simbólicos, hasta donde existe.
-func (ps Paths) Real(p string) string { return resolve(p, "/", ps.Home) }
+func (ps Paths) Real(p string) string { return ps.fixed(p) }
 
 // Rel devuelve abs relativa a la raíz del proyecto, con barras; si queda
 // fuera, la ruta absoluta.
 func (ps Paths) Rel(abs string) string {
-	for _, r := range []string{ps.Root, resolve(ps.Root, "/", ps.Home)} {
+	for _, r := range []string{ps.Root, ps.fixed(ps.Root)} {
 		if rel, err := filepath.Rel(r, abs); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 			return filepath.ToSlash(rel)
 		}
@@ -598,7 +688,7 @@ func (ps Paths) touchesHub(cmd string) bool {
 		return false
 	}
 	var res []*regexp.Regexp
-	for _, m := range []string{ps.HubPath, ps.HubDir, resolve(ps.HubDir, "/", ps.Home)} {
+	for _, m := range []string{ps.HubPath, ps.HubDir, ps.fixed(ps.HubDir)} {
 		m = strings.TrimRight(filepath.ToSlash(filepath.Clean(m)), "/")
 		if m == "" || !strings.Contains(m, "/") || m == "." || m == ".." || m == "/" {
 			continue
@@ -809,7 +899,7 @@ func (ps Paths) readShell(a Action) (ok bool, why string, cred bool) {
 			if sub, off := gitSub(args); sub == "grep" {
 				for i := 0; i+1 < off; i++ {
 					if args[i] == "-C" {
-						segCwd = resolve(args[i+1], segCwd, ps.Home)
+						segCwd = ps.resolve(args[i+1], segCwd)
 					}
 				}
 				rest := s.args[off+1:]
@@ -836,7 +926,7 @@ func (ps Paths) readShell(a Action) (ok bool, why string, cred bool) {
 			if len(s.args) > 0 {
 				target = s.args[0].s
 			}
-			abs := resolve(target, cwd, ps.Home)
+			abs := ps.resolve(target, cwd)
 			if c, ok := ps.sensitive(abs); ok {
 				return false, "entra a una carpeta con credenciales (" + c + ")", true
 			}
@@ -881,7 +971,7 @@ func (ps Paths) readShell(a Action) (ok bool, why string, cred bool) {
 		// programas que solo ven nombres pueden mirarla.
 		if !names && s.prog != "git" && s.prog != "cd" {
 			for _, t := range targets {
-				if ps.inGitDir(resolve(t, segCwd, ps.Home)) {
+				if ps.inGitDir(ps.resolve(t, segCwd)) {
 					return false, "lee dentro de una carpeta de git, cuya configuración puede llevar credenciales; usa comandos de git", true
 				}
 			}
@@ -891,7 +981,7 @@ func (ps Paths) readShell(a Action) (ok bool, why string, cred bool) {
 				targets = []string{"."}
 			}
 			for _, t := range targets {
-				d := resolve(t, segCwd, ps.Home)
+				d := ps.resolve(t, segCwd)
 				contentDirs = append(contentDirs, d)
 				if !excludesGit(args) && ps.hasGitDir(d) {
 					gitDirs = append(gitDirs, d)
@@ -964,7 +1054,7 @@ func (ps Paths) secretArg(w word, cwd string) (string, bool) {
 		}
 		return ps.secretGlobWord(pat, cwd)
 	}
-	if kind, rel, ok := ps.secretFile(resolve(w.s, cwd, ps.Home)); ok {
+	if kind, rel, ok := ps.secretFile(ps.resolve(w.s, cwd)); ok {
 		return secretReason("lee", kind, rel), true
 	}
 	return "", false
@@ -988,7 +1078,7 @@ func (ps Paths) readArg(w word, cwd string, recursive bool) (string, bool) {
 				p = path.Dir(p[:i] + "x")
 			}
 		}
-		abs := resolve(p, cwd, ps.Home)
+		abs := ps.resolve(p, cwd)
 		if cred, ok := ps.sensitive(abs); ok {
 			return "lee credenciales (" + cred + ")", true
 		}
@@ -1039,7 +1129,7 @@ func (ps Paths) readTool(a Action) *Hard {
 			// nombre literal de un archivo: "[x].env", o el proyecto en "Mi app
 			// [v2]". Se juzga tal cual y, si además puede ser un patrón, por
 			// los archivos que alcanza.
-			if kind, rel, ok := ps.secretFile(resolve(t, base, ps.Home)); ok {
+			if kind, rel, ok := ps.secretFile(ps.resolve(t, base)); ok {
 				return hard("%s", secretReason("lee", kind, rel))
 			}
 			if strings.ContainsAny(t, "*?[") {
@@ -1059,7 +1149,7 @@ func (ps Paths) readTool(a Action) *Hard {
 		roots := []string{cwd}
 		for _, k := range []string{"path", "directory", "dir", "target_directory", "relative_workspace_path", "dir_path", "dirPath"} {
 			if s, ok := a.Input[k].(string); ok && s != "" {
-				roots = append(roots, resolve(s, cwd, ps.Home))
+				roots = append(roots, ps.resolve(s, cwd))
 			}
 		}
 		for _, r := range roots {
@@ -1089,7 +1179,7 @@ func (ps Paths) readTool(a Action) *Hard {
 			cands = append(cands, path.Dir(t[:i]+"x"))
 		}
 		for _, p := range cands {
-			abs := resolve(p, cwd, ps.Home)
+			abs := ps.resolve(p, cwd)
 			if cred, ok := ps.sensitive(abs); ok {
 				return hard("lee credenciales (%s)", cred)
 			}
@@ -1142,7 +1232,7 @@ func (ps Paths) hardFile(a Action) *Hard {
 		}
 	}
 	for _, t := range targets {
-		abs := resolve(t, cwd, ps.Home)
+		abs := ps.resolve(t, cwd)
 		if what, ok := ps.protected(abs); ok {
 			return hard("escribir en %s desarmaría el gate o tocaría credenciales", what)
 		}
@@ -1352,7 +1442,7 @@ func (ps Paths) keyUnderHeader(a Action, cwd string) bool {
 	if len(pairs) == 0 {
 		return false
 	}
-	data, err := fsx.ReadCapped(resolve(targets[0], cwd, ps.Home), 4<<20)
+	data, err := fsx.ReadCapped(ps.resolve(targets[0], cwd), 4<<20)
 	if err != nil {
 		return false
 	}
@@ -1392,7 +1482,7 @@ func (ps Paths) patchUnderHeader(a Action, cwd string) bool {
 			if !body || sec.path == "" {
 				continue
 			}
-			data, err := fsx.ReadCapped(resolve(sec.path, cwd, ps.Home), 4<<20)
+			data, err := fsx.ReadCapped(ps.resolve(sec.path, cwd), 4<<20)
 			if err != nil {
 				continue
 			}

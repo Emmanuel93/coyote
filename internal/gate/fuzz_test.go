@@ -2,7 +2,9 @@ package gate
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 )
 
 // FuzzShell: el lector de shell del gate recibe lo que escribe un agente. Con
@@ -13,15 +15,28 @@ func FuzzShell(f *testing.F) {
 		"git -c core.pager=less log", "coyote approve --all", "find . -exec rm {} \\;", "echo \u202e"} {
 		f.Add(s)
 	}
+	// Las familias de la octava revisión: equivalencias y símbolos de colación (bash
+	// 5.2 expande .e[[=x=]][n]v a .env), llaves que se multiplican, tramos largos sin
+	// cerrar que colgaban el análisis de comodines, y mayúsculas con nocaseglob.
+	for _, s := range []string{"cat .e[[=x=]][n]v", "cat .e[[.n.]]v", "cat .e[[:alpha:]v", "cat {a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}",
+		"cat .{env,x}", "cat {.e,e}{n,m}v", "cat se??al.txt", "shopt -s nocaseglob; cat .ENV", "cat " + strings.Repeat("[[:", 400),
+		"cat " + strings.Repeat("[[=", 400), "cat " + strings.Repeat("*a", 300) + "*b", "cat " + strings.Repeat("{a,b}", 200),
+		"cat " + strings.Repeat("a/", 3000) + ".env", "cat " + strings.Repeat("a ", 3000)} {
+		f.Add(s)
+	}
 	root := filepath.Join(f.TempDir(), "p")
 	paths := NewPaths(root, filepath.Join(f.TempDir(), "home"), filepath.Join(f.TempDir(), "state"))
 	f.Fuzz(func(t *testing.T, cmd string) {
 		_, _ = splitShell(cmd)
 		_, _ = analyzeShell(cmd)
 		act := Action{Tool: "Bash", Command: cmd, Cwd: root}
+		start := time.Now()
 		a, b := paths.Evaluate(act), paths.Evaluate(act)
 		if a.Verdict != b.Verdict || a.Hash != b.Hash {
 			t.Fatalf("decisión no determinista para %q: %v / %v", cmd, a, b)
+		}
+		if el := time.Since(start); el > holgura(5*time.Second) {
+			t.Fatalf("decidir sobre un comando de %d bytes tardó %v (el IDE corta el hook a los 30 s)", len(cmd), el)
 		}
 	})
 }

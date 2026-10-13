@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestShellMatch(t *testing.T) {
@@ -57,10 +58,16 @@ func TestShellMatch(t *testing.T) {
 		{"[[:xdigit:]]", "f", true},
 		{"[[:xdigit:]]", "g", false},
 		{"[[=n=]]", "n", true},
-		{"[[=n=]]", "m", false},
-		{"[[=n=]]", "ñ", true}, // de más: las equivalencias alcanzan las letras con acento
+		{"[[=n=]]", "m", true}, // un tramo con una equivalencia alcanza cualquier nombre (octava revisión, F1)
+		{"[[=n=]]", "ñ", true}, // de más: también las letras con acento
 		{"[[.n.]]", "n", true},
-		{"[[.n.]]", "m", false},
+		{"[[.n.]]", "m", true}, // y uno con un símbolo de colación
+		{".e[[=x=]][n]v", "zzzzz", true},
+		// Sin el ] final, el primer [ es un carácter y [:alpha:] un conjunto (bash 5.2).
+		{"[[:alpha:]", "[a", true},
+		{"[[:alpha:]", "[:", true},
+		{"[[:alpha:]", "[[:alpha:]", false},
+		{"[[:alpha", "[[:alpha", true}, // sin cierre ni ]: el gate lo lee como cualquier nombre
 		{"[[.a.]-c]", "b", true},
 		{"[[.hyphen.]]", "z", true}, // un nombre de colación que no se conoce alcanza cualquiera
 		{"[[:foo:]]", "z", true},    // y también una clase que no se conoce
@@ -180,11 +187,26 @@ func FuzzShellGlob(f *testing.F) {
 		f.Add(s, "abc")
 		f.Add(s, s)
 	}
+	// Los tramos largos que colgaban al gate (octava revisión, F2): con el análisis
+	// cúbico, 6000 caracteres tardaban segundos.
+	for _, u := range []string{"[[:", "[[=", "[[.", "[", "[a", `[\]`, "[[:alpha:]", "*a", "?[", "[!"} {
+		f.Add(strings.Repeat(u, 2000), "abc")
+	}
 	f.Fuzz(func(t *testing.T, pat, name string) {
+		start := time.Now()
+		defer func() {
+			if el := time.Since(start); el > holgura(2*time.Second) {
+				t.Fatalf("el lector tardó %v con un patrón de %d bytes y un nombre de %d", el, len(pat), len(name))
+			}
+		}()
 		_ = shellMatch(pat, name)
 		_ = globHasMeta(pat)
 		_ = globUnquote(pat)
-		_ = compileGlob(pat)
+		_, _ = compileGlob(pat, false)
+		_, _ = compileGlob(pat, true)
+		gp := newGlobPat(pat)
+		_ = gp.match(name)
+		_ = gp.match("é" + name)
 		q := quoteGlob(name)
 		if globHasMeta(q) {
 			t.Fatalf("quoteGlob(%q) = %q todavía tiene comodines sin citar", name, q)

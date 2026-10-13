@@ -275,26 +275,42 @@ func (ps Paths) secretWord(cmd, cwd string) (string, bool) {
 			if skip[i] {
 				continue
 			}
+			// Las llaves se expanden antes que nada: `cat .{env,x}` lee .env. La
+			// palabra como está se revisa también (sus tramos, sin las llaves).
+			texts := []string{w.text}
+			if strings.Contains(w.text, "{") {
+				texts = append(texts, expandBraces(w.text)...)
+			}
 			// Una palabra sola se revisa entera: los comodines tienen signos
 			// que no son de una ruta ([!x], [[:alpha:]], [^x]) y partirla en
 			// tramos los esconde.
-			if !strings.ContainsAny(w.text, " \t\n\"'`$(){};&|<>") {
-				if what, ok := ps.secretToken(w.text, cwd); ok {
-					return what, true
+			for _, text := range texts {
+				if !strings.ContainsAny(text, " \t\n\"'`$(){};&|<>") {
+					if what, ok := ps.secretToken(text, cwd); ok {
+						return what, true
+					}
 				}
 			}
 			// Y como patrón: un comodín mezclado con corchetes que el comando
 			// escribió entre comillas o escapados ("Proyectos"?"[cliente]").
 			if w.pat != w.text && strings.ContainsAny(w.pat, "*?[") {
-				if what, ok := ps.secretToken(w.pat, cwd); ok {
-					return what, true
+				pats := []string{w.pat}
+				if strings.Contains(w.pat, "{") {
+					pats = append(pats, expandBraces(w.pat)...)
+				}
+				for _, pat := range pats {
+					if what, ok := ps.secretToken(pat, cwd); ok {
+						return what, true
+					}
 				}
 			}
 			// Una ruta puede venir dentro de un script (python -c 'open(".env")'):
 			// se revisa cada tramo con forma de ruta.
-			for _, f := range pathLike.FindAllString(w.text, -1) {
-				if what, ok := ps.secretToken(f, cwd); ok {
-					return what, true
+			for _, text := range texts {
+				for _, f := range pathLike.FindAllString(text, -1) {
+					if what, ok := ps.secretToken(f, cwd); ok {
+						return what, true
+					}
 				}
 			}
 		}
@@ -326,7 +342,7 @@ func (ps Paths) secretToken(tok, cwd string) (string, bool) {
 			}
 			continue
 		}
-		if kind, rel, ok := ps.secretFile(resolve(c, cwd, ps.Home)); ok {
+		if kind, rel, ok := ps.secretFile(ps.resolve(c, cwd)); ok {
 			return kind + " (" + rel + ")", true
 		}
 	}
@@ -346,7 +362,7 @@ func (ps Paths) secretGlobWord(pattern, cwd string) (string, bool) {
 	// nada queda literal en el shell, y cat [x].env lee ese archivo si no hay un
 	// x.env. Si un tope la corta (demasiadas carpetas), lo que no se alcanzó no
 	// se juzga: Evaluate no deja pasar un comando así, lo pide a la persona.
-	matches, _ := ps.expand(resolve(pattern, cwd, ps.Home))
+	matches, _ := ps.expand(ps.resolve(pattern, cwd))
 	for _, m := range matches {
 		if kind, rel, ok := ps.secretFile(m); ok {
 			return "un comodín que alcanza " + kind + " (" + rel + ")", true
@@ -394,6 +410,15 @@ func secretCommandReason(who, what string) string {
 // reglas del proyecto (secrets.files) y salvo sus dispensas.
 func (ps Paths) secretFile(abs string) (kind, rel string, ok bool) {
 	rel = ps.Rel(abs)
+	if len(abs) > maxPathBytes {
+		// El sistema no abre una ruta de más de PATH_MAX bytes, y buscar los
+		// proyectos que contienen cada carpeta de una ruta así cuesta el cuadrado
+		// de su largo (decenas de segundos con 100 KB): se juzga por su nombre, que
+		// sigue bloqueando un .env al final. Que la ruta sea larga por la carpeta
+		// desde donde se escribe lo anota ps.resolve.
+		kind, ok = secrets.Rules{}.KindAt("", rel)
+		return kind, rel, ok
+	}
 	if filepath.IsAbs(filepath.FromSlash(rel)) {
 		// Fuera del proyecto cuentan el nombre y, si hace falta, el contenido;
 		// y, si la ruta es del mismo repo, las reglas de los proyectos que la

@@ -8,6 +8,9 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
+
+	"github.com/Emmanuel93/coyote/internal/gate"
 )
 
 // gateProject crea un proyecto coyote y deja el entorno como el de una
@@ -379,5 +382,57 @@ func TestGateProyectoIlegibleYEscapes(t *testing.T) {
 	}
 	if strings.ContainsAny(ledgerText(t, root), "\x1b\r") {
 		t.Error("el ledger no debe guardar caracteres de control")
+	}
+}
+
+// TestGatePlazoDelHook: octava revisión. Un IDE corta el hook a los 30 s y, salvo
+// Cursor, deja pasar la acción. El gate se da un plazo propio y, pasado, pide la
+// aprobación de una persona con el hash de la acción exacta, en lugar de colgarse.
+func TestGatePlazoDelHook(t *testing.T) {
+	_, root := gateProject(t)
+	old := gate.EvalTimeout
+	gate.EvalTimeout = time.Nanosecond
+	t.Cleanup(func() { gate.EvalTimeout = old })
+	cmd := "cat " + strings.Repeat("src/w1.go ", 5000)
+	r := run(t, root, hook(t, root, "Bash", map[string]any{"command": cmd}, nil), "gate", "check")
+	must(t, r, 2, "pasado el plazo")
+	id := propRe.FindString(r.stderr)
+	if id == "" || !strings.Contains(r.stderr, "coyote approve "+id) {
+		t.Fatalf("pasado el plazo la acción queda en la cola: %s", r.stderr)
+	}
+	rv := run(t, root, "", "review", id)
+	must(t, rv, 0, "review")
+	if !strings.Contains(rv.stdout, "no alcanzó") {
+		t.Errorf("review dice por qué pide aprobación:\n%s", rv.stdout)
+	}
+	// Con el plazo de siempre, la misma lectura pasa.
+	gate.EvalTimeout = old
+	must(t, run(t, root, hook(t, root, "Bash", map[string]any{"command": cmd}, nil), "gate", "check"), 0, "con el plazo normal")
+}
+
+// TestGateRutaEnormeNoSePasaDelPlazo: octava revisión. Buscar los proyectos que
+// contienen cada carpeta de una ruta de 120 KB (60 000 niveles) costaba el
+// cuadrado de su largo: más de 10 s con el binario real, sin que lo viera la
+// prueba del paquete del gate, que no trae la cadena de proyectos.
+func TestGateRutaEnormeNoSePasaDelPlazo(t *testing.T) {
+	_, root := gateProject(t)
+	long, half := strings.Repeat("a/", escala(60000)), strings.Repeat("a/", escala(30000))
+	for _, c := range []struct {
+		cmd  string
+		want int
+	}{
+		{"cat " + long + "x", 0}, // el sistema no abre una ruta así: no lee nada
+		{"cat " + long + ".env", 2},
+		{"cat " + half + "x " + half + "y", 0},
+	} {
+		start := time.Now()
+		r := run(t, root, hook(t, root, "Bash", map[string]any{"command": c.cmd}, nil), "gate", "check")
+		if el := time.Since(start); el > holgura(4*time.Second) {
+			t.Errorf("%.12q…(%d bytes): tardó %v", c.cmd, len(c.cmd), el)
+		}
+		must(t, r, c.want, "ruta enorme")
+		if c.want == 2 && !strings.Contains(r.stderr, "bloqueado siempre") {
+			t.Errorf("un .env al final de una ruta enorme se bloquea siempre: %s", r.stderr)
+		}
 	}
 }

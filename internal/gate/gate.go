@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/Emmanuel93/coyote/internal/infra"
 )
@@ -29,6 +30,86 @@ type Decision struct {
 	Normalized
 }
 
+// maxShellBytes es el largo máximo de un comando de shell que el gate lee. Pasado
+// el tope no lo analiza: lo pide a la persona, que lo ve entero con coyote review.
+// Por debajo se lee todo, con los bloqueos duros. Es una variable para que las
+// pruebas la bajen.
+var maxShellBytes = 128 << 10
+
+// whyShellTooLong es por qué pide aprobación un comando que pasa de maxShellBytes.
+const whyShellTooLong = "comando demasiado largo para que el gate lo lea entero; lo decide la persona, que lo ve con coyote review"
+
+// EvalTimeout es el plazo que el hook se da para decidir una acción. Los IDE
+// cortan un hook a los 30 s y, salvo Cursor, dejan pasar la acción: pasado este
+// plazo el gate no espera más y la acción pide aprobación.
+var EvalTimeout = 10 * time.Second
+
+// HookDeadline es el plazo total del hook de un IDE, de que arranca a que
+// responde: leer la entrada, revisar R15, decidir y anotar. Los IDE matan el
+// hook a los 30 s y, salvo Cursor con failClosed, dejan pasar lo que no
+// respondió; a los 20 s el hook niega por su cuenta (o mantiene el paso que ya
+// había dado) y sale, sea lo que sea que lo tenga detenido.
+var HookDeadline = 20 * time.Second
+
+// minIdentifyWait es lo menos que se espera para identificar una acción que ya
+// pasó el plazo (su hash), aunque el plazo sea más corto.
+const minIdentifyWait = time.Second
+
+// EvaluateWithin es Evaluate con un plazo. Si no termina a tiempo, la acción pide
+// la aprobación de una persona (con su hash exacto, así puede encolarse): lo que
+// el gate no alcanzó a leer no lo da por permitido. El trabajo ya está acotado
+// por topes contados; el plazo es la última red, por si algo se escapa (un disco
+// lento, un sistema de archivos remoto). Si ni describir la acción cabe en un
+// segundo plazo, se bloquea sin hash: nada se encola y nada pasa. Un pánico del
+// gate llega a quien lo llamó, que bloquea por seguridad.
+func (ps Paths) EvaluateWithin(a Action, limit time.Duration) Decision {
+	return withinDeadline(a, limit, ps.Evaluate, ps.Normalize)
+}
+
+// withinDeadline es EvaluateWithin con las dos tareas a la vista, para probarlo.
+func withinDeadline(a Action, limit time.Duration, eval func(Action) Decision, norm func(Action) Normalized) Decision {
+	type result struct {
+		d        Decision
+		n        Normalized
+		panicked bool
+		v        any
+	}
+	run := func(f func() result) <-chan result {
+		ch := make(chan result, 1)
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					ch <- result{panicked: true, v: r}
+				}
+			}()
+			ch <- f()
+		}()
+		return ch
+	}
+	timer := time.NewTimer(limit)
+	defer timer.Stop()
+	select {
+	case r := <-run(func() result { return result{d: eval(a)} }):
+		if r.panicked {
+			panic(r.v)
+		}
+		return r.d
+	case <-timer.C:
+	}
+	// Pasó el plazo. La propuesta lleva el hash de la acción exacta.
+	timer.Reset(max(limit, minIdentifyWait))
+	select {
+	case r := <-run(func() result { return result{n: norm(a)} }):
+		if !r.panicked {
+			return Decision{Kind: Classify(a), Verdict: NeedsApproval, Normalized: r.n,
+				Reason: fmt.Sprintf("el gate no alcanzó a leerla en %s; lo decide la persona, que ve la acción", limit.Round(time.Millisecond))}
+		}
+	case <-timer.C:
+	}
+	return Decision{Kind: Classify(a), Verdict: Block,
+		Reason: fmt.Sprintf("el gate no alcanzó a leerla ni a identificarla en %s; bloquea por seguridad y la persona decide en su terminal", limit.Round(time.Millisecond))}
+}
+
 // Evaluate aplica la política: primero lo que se bloquea siempre, después lo
 // que solo lee y, para el resto, el hash de la acción exacta.
 func (ps Paths) Evaluate(a Action) Decision {
@@ -52,6 +133,13 @@ func (ps Paths) Evaluate(a Action) Decision {
 			return d // Allow
 		}
 	case KindShell:
+		if len(a.Command) > maxShellBytes {
+			// Un comando así no se lee: ni los bloqueos duros alcanzarían a verlo
+			// entero en el plazo del hook. Lo ve la persona.
+			d.Normalized = ps.Normalize(a)
+			d.Verdict, d.Reason = NeedsApproval, whyShellTooLong
+			return d
+		}
 		if h = ps.hardShell(a); h == nil {
 			ok, why, cred := ps.readShell(a)
 			switch {
@@ -85,10 +173,49 @@ func (ps Paths) Evaluate(a Action) Decision {
 	return d
 }
 
-// globCutReason es por qué pide aprobación lo que se leería con un comodín que
-// el gate no alcanzó a expandir entero: lo que no vio no lo da por permitido.
+// maxCutShown es cuánto del comodín que cortó la lectura cabe en el motivo.
+const maxCutShown = 60
+
+// globCutReason es por qué pide aprobación lo que se leería con un comodín (o
+// con tantas rutas) que el gate no alcanzó a expandir entero: lo que no vio no
+// lo da por permitido.
 func (ps Paths) globCutReason() string {
-	return fmt.Sprintf("un comodín (%q) alcanza demasiadas carpetas o archivos para que el gate lo expanda entero; lo decide la persona, que ve el comando", ps.glob.cutAt)
+	w := ps.glob
+	why := w.cutWhy
+	if why == "" {
+		why = whyTooMany
+	}
+	if w.cutAt == "" {
+		// Lo que se cortó no fue un comodín sino las rutas que se resuelven.
+		return fmt.Sprintf("el comando %s; lo decide la persona, que lo ve", why)
+	}
+	return fmt.Sprintf("un comodín (%q) %s; lo decide la persona, que ve el comando", shortGlob(w.cutAt), why)
+}
+
+// shortGlob acorta un patrón para mostrarlo: el motivo no lleva un comodín de
+// miles de caracteres, sino el trozo donde aparece el primer comodín.
+func shortGlob(p string) string {
+	r := []rune(p)
+	if len(r) <= maxCutShown {
+		return p
+	}
+	at := 0
+	for i, c := range r {
+		if c == '*' || c == '?' || c == '[' {
+			at = i
+			break
+		}
+	}
+	from := max(0, at-maxCutShown/2)
+	to := min(len(r), from+maxCutShown)
+	out := string(r[from:to])
+	if from > 0 {
+		out = "…" + out
+	}
+	if to < len(r) {
+		out += "…"
+	}
+	return out
 }
 
 // InfraEffect dice si un comando cambia infraestructura: su aprobación vale

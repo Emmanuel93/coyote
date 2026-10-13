@@ -38,6 +38,8 @@ func lenientSegs(cmd string) []lseg {
 	raw := func(s string) { b.WriteString(s); pb.WriteString(s) }
 	in, quoted, subst := false, false, false
 	depth, tick, curSubst := 0, false, false
+	// braceUntil es dónde cierra la expansión de llaves en curso, o -1.
+	braceUntil := -1
 	flush := func() {
 		if in {
 			cur = append(cur, lword{text: b.String(), pat: pb.String(), quoted: quoted, subst: subst})
@@ -119,13 +121,15 @@ func lenientSegs(cmd string) []lseg {
 			push()
 			tick = !tick
 			curSubst = depth > 0 || tick
-		case c == '{' && braceWord(r, i):
-			j := i + 1
-			for r[j] != '}' {
-				j++
-			}
-			raw(string(r[i : j+1]))
-			in, i = true, j
+		case (c == '{' || c == '}') && i <= braceUntil:
+			// Dentro de una expansión de llaves ({a,{b,c}}, {a,"b"}): las llaves son
+			// parte de la palabra y lo demás se lee como siempre (comillas, \, $).
+			raw(string(c))
+			in = true
+		case c == '{' && braceWordEnd(r, i) >= 0:
+			braceUntil = max(braceUntil, braceWordEnd(r, i))
+			raw("{")
+			in = true
 		case (c == '&' || c == '|') && in && i > 0 && r[i-1] == '>':
 			// >& y >| son redirecciones, no separadores: el destino sigue.
 			raw(string(c))
@@ -160,28 +164,61 @@ func fdPrefix(s string) bool {
 	return true
 }
 
-// braceWord dice si la llave en i abre una expansión ({a,b} o {1..3}) y no
-// un grupo de comandos ({ cmd; }).
-func braceWord(r []rune, i int) bool {
+// maxBraceSpan acota cuántos caracteres se miran para saber dónde cierra una
+// expansión de llaves: una palabra más larga no es una expansión que alguien
+// escriba, y sin tope cada { sin cerrar recorrería el resto del comando.
+const maxBraceSpan = 1024
+
+// maxBraceScanDepth acota cuántas llaves abiertas a la vez se siguen al buscar
+// ese cierre: el expansor lee hasta maxBraceDepth (16) grupos de hondo y lo demás
+// como *, y nadie escribe 64. Sin este tope, cien mil { seguidas costaban
+// maxBraceSpan pasos cada una (un segundo por comando); con él, unos 64.
+const maxBraceScanDepth = 64
+
+// braceWordEnd dice si la llave en i abre una expansión de llaves ({a,b},
+// {1..3}, {a,{b,c}}, {a,"b"}) y, si la abre, dónde cierra. Un grupo de comandos
+// ({ cmd; }) lleva espacios, y el {} de find no tiene coma ni rango: ninguno es
+// una expansión.
+func braceWordEnd(r []rune, i int) int {
 	if i+1 >= len(r) || r[i+1] == ' ' || r[i+1] == '\t' || r[i+1] == '\n' {
-		return false
+		return -1
 	}
-	comma := false
-	for j := i + 1; j < len(r); j++ {
+	depth, comma := 0, false
+	for j := i; j < len(r) && j-i < maxBraceSpan; j++ {
 		switch r[j] {
+		case '\\':
+			j++
+		case '\'':
+			for j++; j < len(r) && r[j] != '\''; j++ {
+			}
+		case '"':
+			for j++; j < len(r) && r[j] != '"'; j++ {
+				if r[j] == '\\' {
+					j++
+				}
+			}
+		case '{':
+			if depth++; depth > maxBraceScanDepth {
+				return -1
+			}
 		case '}':
-			return comma
+			if depth--; depth == 0 {
+				if comma {
+					return j
+				}
+				return -1
+			}
 		case ',':
 			comma = true
 		case '.':
 			if j+1 < len(r) && r[j+1] == '.' {
 				comma = true
 			}
-		case ' ', '\t', '\n', ';', '|', '&', '(', ')', '{', '\'', '"', '`', '$':
-			return false
+		case ' ', '\t', '\n', ';', '|', '&', '(', ')', '`':
+			return -1
 		}
 	}
-	return false
+	return -1
 }
 
 // ansiC lee el texto de $'…' desde start y devuelve dónde cierra y el texto
@@ -249,32 +286,6 @@ func ansiC(r []rune, start int) (int, string) {
 		}
 	}
 	return i, b.String()
-}
-
-// expandBraces expande la primera llave de una palabra ({apply,destroy}); los
-// rangos ({1..3}) y lo demás quedan como están. A lo sumo 64 resultados.
-func expandBraces(w string) []string {
-	i := strings.IndexByte(w, '{')
-	if i < 0 {
-		return []string{w}
-	}
-	j := strings.IndexByte(w[i:], '}')
-	if j < 0 || !strings.Contains(w[i:i+j], ",") {
-		return []string{w}
-	}
-	j += i
-	var out []string
-	for _, alt := range strings.Split(w[i+1:j], ",") {
-		for _, rest := range expandBraces(w[j+1:]) {
-			if len(out) == 64 {
-				return out
-			}
-			if s := w[:i] + alt + rest; s != "" {
-				out = append(out, s)
-			}
-		}
-	}
-	return out
 }
 
 // executors ejecutan lo que reciben por la entrada, en un script o en sus
