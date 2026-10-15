@@ -10,3 +10,6 @@
 .dist-b/
 .gocache-a/
 .gocache-b/
+
+# macOS
+.DS_Store
