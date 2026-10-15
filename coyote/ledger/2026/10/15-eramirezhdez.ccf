@@ -1,3 +1,4 @@
 # ts|actor|project|repo|type|scope|what|refs|tokens in/cache/out|cost in+out|status
 2026-10-15T04:44Z|@eramirezhdez/coyote-scribe|W-0008|coyote|doc|release|el rc.5 con las correcciones de la octava pasada, el piloto con…|-|-|-|ok
 2026-10-15T05:10Z|@eramirezhdez/coyote-scribe|W-0008|coyote|doc|release|el build del rc.5 en el reporte y el plan: la fila…|-|-|-|ok
+2026-10-15T05:13Z|@eramirezhdez/coyote-scribe|W-0008|coyote|doc|release|la fila del build del rc.5 dice dónde se ejecutó cada binario:…|-|-|-|ok
