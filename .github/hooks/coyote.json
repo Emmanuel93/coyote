@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "hooks": {
+    "preToolUse": [
+      {
+        "type": "command",
+        "bash": "sh -c 'd=\"$PWD\"; case \"$d\" in /*) ;; *) d=\"$PWD/$d\";; esac; while :; do if [ -e \"$d/.github/hooks/coyote-gate.sh\" ] || [ -e \"$d/.github/hooks/coyote.json\" ] || [ -e \"$d/.git\" ]; then break; fi; p=$(dirname \"$d\"); [ \"$p\" = \"$d\" ] && break; d=$p; done; h=\"$d/.github/hooks/coyote-gate.sh\"; if [ -f \"$h\" ] && grep -qF \"gate check --ide\" \"$h\"; then sh \"$h\"; [ $? -eq 0 ] && exit 0; exit 2; fi; echo \"coyote: no encuentro .github/hooks/coyote-gate.sh o no es el hook de coyote; el gate bloquea por seguridad\" >&2; exit 2'",
+        "powershell": "Write-Error 'coyote: el gate humano no corre en Windows; la acción se bloquea'; exit 2",
+        "timeoutSec": 30
+      }
+    ]
+  }
+}

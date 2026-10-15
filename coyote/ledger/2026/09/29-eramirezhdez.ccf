@@ -84,3 +84,5 @@
 2026-09-29T18:33Z|@eramirezhdez/coyote-qa|W-0008|coyote|feat|eval|golden de 30 preguntas, coyote eval en la CI y paquete con…|-|-|-|ok
 2026-09-29T18:33Z|@eramirezhdez/coyote-qa|W-0008|coyote|note|eval|dec: coyote eval mide el contexto con un golden sin modelos; la…|doc:CONTEXT.coyote.md|-|-|ok
 2026-09-29T18:34Z|@eramirezhdez/coyote-qa|W-0008|coyote|doc|contexto|nota de coyote eval; se archivan tres entradas que el golden no…|-|-|-|ok
+2026-09-29T06:51Z|@eramirezhdez|-|coyote|chore|gate|coyote install para claude-code: gate, agentes y skills|-|-|-|ok
+2026-09-29T06:55Z|@eramirezhdez|-|coyote|chore|gate|coyote install para copilot: gate, agentes y skills|-|-|-|ok

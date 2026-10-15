@@ -7,14 +7,18 @@
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Bash|mcp__.*",
+        "matcher": "",
         "hooks": [
           {
             "type": "command",
-            "command": "for c in \"$(command -v coyote)\" \"$HOME/go/bin/coyote\" /opt/homebrew/bin/coyote /usr/local/bin/coyote; do if [ -x \"$c\" ]; then exec \"$c\" gate attribution; fi; done"
+            "command": "sh -c 'd=\"${CLAUDE_PROJECT_DIR:-${DEVIN_PROJECT_DIR:-$PWD}}\"; case \"$d\" in /*) ;; *) d=\"$PWD/$d\";; esac; while :; do if [ -e \"$d/.claude/hooks/coyote-gate.sh\" ] || [ -e \"$d/.claude/settings.json\" ] || [ -e \"$d/.git\" ]; then break; fi; p=$(dirname \"$d\"); [ \"$p\" = \"$d\" ] && break; d=$p; done; h=\"$d/.claude/hooks/coyote-gate.sh\"; if [ -f \"$h\" ] && grep -qF \"gate check --ide\" \"$h\"; then sh \"$h\"; [ $? -eq 0 ] && exit 0; exit 2; fi; echo \"coyote: no encuentro .claude/hooks/coyote-gate.sh o no es el hook de coyote; el gate bloquea por seguridad\" >&2; exit 2'",
+            "timeout": 30
           }
         ]
       }
     ]
+  },
+  "env": {
+    "COYOTE_IDE": "claude-code"
   }
 }
